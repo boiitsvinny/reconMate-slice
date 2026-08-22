@@ -1,2 +1,2 @@
-# reconMate-slice
-ReconMate is a closed-loop AI revenue recovery system for B2B receivables.
+ReconMate is a closed-loop AI revenue recovery system that manages B2B receivables as a living stateful process. 
+It detects overdue exposure across a portfolio, extracts payment commitments from unstructured communication, tracks whether those commitments are honoured, applies deterministic recovery guardrails, recommends or initiates bounded recovery actions, verifies outcomes, and measures recovery across the entire batch.
