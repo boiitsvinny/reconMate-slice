@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiUrl } from "@/lib/api";
 import type { PriorityCase } from "./dashboard";
 
-const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
 type Workspace = {
   customer: { name: string; strategic: boolean };
@@ -22,7 +22,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const reload = () => fetch(`${apiBaseUrl}/recovery/cases/${item.id}/workspace`).then(async (response) => {
+  const reload = () => fetch(apiUrl(`/recovery/cases/${item.id}/workspace`)).then(async (response) => {
     if (!response.ok) throw new Error((await response.json()).detail ?? "Unable to load the case workspace.");
     return response.json() as Promise<Workspace>;
   }).then(setWorkspace).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to load workspace."));
@@ -32,7 +32,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
   async function request(url: string, body: Record<string, unknown>) {
     setBusy(true); setError(null);
     try {
-      const response = await fetch(`${apiBaseUrl}${url}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const response = await fetch(apiUrl(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!response.ok) throw new Error((await response.json()).detail ?? "Workflow action was not accepted.");
       reload();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Workflow action failed."); }

@@ -10,8 +10,8 @@ import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
 import { PriorityQueue } from "./priority-queue";
 import { SimulationControl } from "./simulation-control";
+import { apiUrl } from "@/lib/api";
 
-const api = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 type Portfolio = { simulation_date: string | null; total_outstanding_amount: string; total_invoices: number; total_customers: number };
 type Recovery = { overdue_exposure: string; broken_promise_exposure: string; cases_eligible_for_recovery: number; cases_requiring_attention?: number; cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number };
 type Customer = { id: string; name: string; account_reference: string; outstanding_amount: string };
@@ -32,7 +32,7 @@ export function Dashboard() {
   const [changedCases, setChangedCases] = useState<Set<string>>(new Set());
   const tickInFlight = useRef(false);
   const refresh = useCallback(async () => {
-    const responses = await Promise.all(["/portfolio/summary", "/recovery/portfolio/summary", "/customers", "/invoices", "/recovery/cases", "/simulation/state", "/simulation/events"].map((path) => fetch(`${api}${path}`)));
+    const responses = await Promise.all(["/portfolio/summary", "/recovery/portfolio/summary", "/customers", "/invoices", "/recovery/cases", "/simulation/state", "/simulation/events"].map((path) => fetch(apiUrl(path))));
     if (responses.some((response) => !response.ok)) throw new Error("One or more portfolio services are unavailable.");
     const [portfolio, recovery, customers, invoices, cases, simulation, events] = await Promise.all(responses.map((response) => response.json()));
     setData({ portfolio, recovery, customers, invoices, cases, simulation, events }); setError(null);
@@ -42,7 +42,7 @@ export function Dashboard() {
     if (tickInFlight.current) return;
     tickInFlight.current = true; setTicking(true);
     try {
-      const response = await fetch(`${api}/simulation/tick`, { method: "POST" });
+      const response = await fetch(apiUrl("/simulation/tick"), { method: "POST" });
       if (!response.ok) throw new Error("Simulation tick failed.");
       const result = await response.json() as { cycle: number; event_count: number; events: SimulationEvent[] };
       setChangedCases(new Set(result.events.map((event) => event.case_id).filter((id): id is string => Boolean(id))));
