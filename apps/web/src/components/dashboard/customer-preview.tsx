@@ -24,6 +24,7 @@ export function CustomerPreview({ item }: { item: PriorityCase }) {
         </div>
       </div>
       <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-400">
+        <li className="font-medium text-sky-200">Next: {item.recommendedAction.replaceAll("_", " ")}</li>
         <li>{item.daysOverdue > 0 ? `${item.daysOverdue} days overdue` : "Current invoice exposure"}</li>
         <li>{item.promiseSignal}</li>
         <li className={item.allowed ? "text-emerald-300" : "text-amber-200"}>{item.reason}</li>

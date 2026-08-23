@@ -8,7 +8,7 @@ import { buttonStyles, cx, StatusPill } from "./ui";
 type Workspace = {
   customer: { name: string; strategic: boolean };
   invoice: { number: string; status: string; outstanding_amount: string; due_date: string } | null;
-  recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; communication_signals: { intent: string; confidence: string | null }[] };
+  recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; operator_explanation: string; communication_signals: { intent: string; confidence: string | null }[] };
   promises: { status: string; promised_amount: string; promised_date: string }[];
   communications: { id: string; direction: string; content: string; occurred_at: string; analyses: { intent?: string }[] }[];
   actions: { id: string; status: string; recommended_action: string | null; human_approval_required: boolean; decision_reason: string | null; executed_at: string | null }[];
@@ -80,12 +80,16 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
               <Card label="Promise" value={workspace.promises[0] ? label(workspace.promises[0].status) : "None"} />
             </section>
             <section className="border border-sky-300/18 bg-sky-400/[.055] p-5">
-              <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">System recommendation / advisory</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">Recommended next step / advisory</p>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
                 <h3 className="text-lg font-semibold text-white">{label(workspace.recommendation.recommended_action)}</h3>
                 <StatusPill tone="sky">{workspace.recommendation.priority}</StatusPill>
               </div>
-              <ul className="mt-3 space-y-1 text-sm text-slate-300">{workspace.recommendation.factual_reasons.map((reason) => <li key={reason}>- {reason}</li>)}</ul>
+              <p className="mt-3 text-sm leading-6 text-slate-300">{workspace.recommendation.operator_explanation}</p>
+              <div className="mt-4 border-t border-sky-200/10 pt-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-slate-500">Why this is recommended</p>
+                <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{workspace.recommendation.factual_reasons.map((reason) => <li key={reason}>- {reason}</li>)}</ul>
+              </div>
               {workspace.recommendation.blockers.length > 0 && <p className="mt-3 text-xs text-amber-200">Blockers: {workspace.recommendation.blockers.map(label).join(" / ")}</p>}
               <p className="mt-3 text-xs text-slate-400">Human approval {workspace.recommendation.human_approval_required ? "required" : "not required"}. Interpretation signals are supporting evidence only.</p>
             </section>

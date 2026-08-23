@@ -7,19 +7,22 @@ import { CaseWorkspace } from "./case-workspace";
 import { IntelligenceBoundary } from "./intelligence-boundary";
 import { InvoiceRegister } from "./invoice-register";
 import { LiveEventFeed, SimulationEvent } from "./live-event-feed";
+import { NextAction } from "./next-action";
+import { PortfolioHealth } from "./portfolio-health";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
 import { PriorityQueue } from "./priority-queue";
 import { SimulationControl } from "./simulation-control";
 
 type Portfolio = { simulation_date: string | null; total_outstanding_amount: string; total_invoices: number; total_customers: number };
-type Recovery = { overdue_exposure: string; broken_promise_exposure: string; cases_eligible_for_recovery: number; cases_requiring_attention?: number; cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number };
+type Recovery = { overdue_exposure: string; broken_promise_exposure: string; cases_eligible_for_recovery: number; cases_requiring_attention?: number; cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number; total_cases: number };
 type Customer = { id: string; name: string; account_reference: string; outstanding_amount: string };
-type CaseApi = { case_id: string; customer_id: string; customer_name: string; evaluation: { derived_state: string; invoice: { outstanding_amount: string; days_overdue: number } | null; promises: { state: string }[]; eligibility: { allowed: boolean; blocking_reasons: string[] } } };
+type CaseApi = { case_id: string; customer_id: string; customer_name: string; evaluation: { derived_state: string; invoice: { outstanding_amount: string; days_overdue: number } | null; promises: { state: string }[]; active_dispute: boolean; eligibility: { allowed: boolean; blocking_reasons: string[] }; next_factual_condition: string } };
+type Recommendation = { case_id: string; recommended_action: string; priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; human_approval_required: boolean; factual_reasons: string[]; blockers: string[]; relevant_exposure: string; relevant_days_overdue: number; operator_explanation: string };
 type SimState = { cycle: number; simulation_date: string; tick_interval_seconds: number };
 type Invoice = { id: string; invoice_number: string; customer_id: string; due_date: string; outstanding_amount: string; status: string };
-type DashboardData = { portfolio: Portfolio; recovery: Recovery; customers: Customer[]; invoices: Invoice[]; cases: CaseApi[]; simulation: SimState; events: SimulationEvent[] };
-export type PriorityCase = { id: string; customerId: string; customerName: string; customerReference: string; amount: string; state: string; daysOverdue: number; promiseSignal: string; allowed: boolean; reason: string };
+type DashboardData = { portfolio: Portfolio; recovery: Recovery; customers: Customer[]; invoices: Invoice[]; cases: CaseApi[]; recommendations: Recommendation[]; simulation: SimState; events: SimulationEvent[] };
+export type PriorityCase = { id: string; customerId: string; customerName: string; customerReference: string; amount: string; exposure: number; state: string; daysOverdue: number; promiseSignal: string; allowed: boolean; reason: string; recommendedAction: string; recommendationPriority: Recommendation["priority"]; recommendationReason: string; humanApprovalRequired: boolean };
 
 const money = (value: string | number) => {
   const amount = Number(value);
@@ -40,11 +43,11 @@ export function Dashboard() {
   const tickInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
-    const paths = ["/portfolio/summary", "/recovery/portfolio/summary", "/customers", "/invoices", "/recovery/cases", "/simulation/state", "/simulation/events"];
+    const paths = ["/portfolio/summary", "/recovery/portfolio/summary", "/customers", "/invoices", "/recovery/cases", "/recovery/recommendations", "/simulation/state", "/simulation/events"];
     const responses = await Promise.all(paths.map((path) => fetch(apiUrl(path))));
     if (responses.some((response) => !response.ok)) throw new Error("One or more portfolio services are unavailable.");
-    const [portfolio, recovery, customers, invoices, cases, simulation, events] = await Promise.all(responses.map((response) => response.json()));
-    setData({ portfolio, recovery, customers, invoices, cases, simulation, events });
+    const [portfolio, recovery, customers, invoices, cases, recommendations, simulation, events] = await Promise.all(responses.map((response) => response.json()));
+    setData({ portfolio, recovery, customers, invoices, cases, recommendations, simulation, events });
     setError(null);
   }, []);
 
@@ -90,21 +93,30 @@ export function Dashboard() {
   const queue = useMemo<PriorityCase[]>(() => {
     if (!data) return [];
     const customers = new Map(data.customers.map((customer) => [customer.id, customer]));
-    return data.cases.map((item) => {
+    const cases = new Map(data.cases.map((item) => [item.case_id, item]));
+    return data.recommendations.flatMap((recommendation) => {
+      const item = cases.get(recommendation.case_id);
+      if (!item) return [];
       const customer = customers.get(item.customer_id);
       const invoice = item.evaluation.invoice;
       const promises = item.evaluation.promises;
+      const exposure = Number(invoice?.outstanding_amount ?? customer?.outstanding_amount ?? "0");
       return {
         id: item.case_id,
         customerId: item.customer_id,
         customerName: item.customer_name,
         customerReference: customer?.account_reference ?? "Recovery account",
-        amount: money(invoice?.outstanding_amount ?? customer?.outstanding_amount ?? "0"),
+        amount: money(exposure),
+        exposure,
         state: item.evaluation.derived_state,
         daysOverdue: invoice?.days_overdue ?? 0,
         promiseSignal: promises.some((promise) => promise.state === "ACTIVE") ? "Active promise" : promises.some((promise) => promise.state === "BROKEN") ? "Promise broken" : "No active promise",
         allowed: item.evaluation.eligibility.allowed,
         reason: item.evaluation.eligibility.allowed ? "Recovery eligible" : item.evaluation.eligibility.blocking_reasons.join(" / ").replaceAll("_", " "),
+        recommendedAction: recommendation.recommended_action,
+        recommendationPriority: recommendation.priority,
+        recommendationReason: recommendation.operator_explanation,
+        humanApprovalRequired: recommendation.human_approval_required,
       };
     });
   }, [data]);
@@ -116,8 +128,16 @@ export function Dashboard() {
     <main className="min-h-screen overflow-x-hidden">
       <AppHeader simulationDate={data?.simulation.simulation_date ?? data?.portfolio.simulation_date} connected={Boolean(data)} />
       <div className="mx-auto max-w-[1580px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
-        {!data && !error && <div className="h-[540px] animate-pulse border border-white/[.06] bg-white/[.025]" />}
-        {error && <p className="border border-rose-300/20 bg-rose-300/[.06] p-5 text-sm text-rose-100">{error}</p>}
+        {!data && !error && <DashboardLoading />}
+        {error && (
+          <div className="mb-6 flex flex-col justify-between gap-4 border border-rose-300/20 bg-rose-300/[.06] p-5 sm:flex-row sm:items-center">
+            <div>
+              <p className="text-sm font-semibold text-rose-100">Portfolio data could not be refreshed</p>
+              <p className="mt-1 text-xs leading-5 text-rose-100/65">{error}{data ? " The last synchronized view remains available below." : ""}</p>
+            </div>
+            <button type="button" onClick={() => void refresh().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to connect to ReconMate."))} className="border border-rose-200/25 px-3.5 py-2 text-xs font-bold text-rose-50 transition hover:border-rose-200/50">Try again</button>
+          </div>
+        )}
         {data && (
           <>
             <section className="flex flex-col justify-between gap-7 pb-8 lg:flex-row lg:items-end">
@@ -133,18 +153,29 @@ export function Dashboard() {
               </div>
             </section>
 
-            <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-              <PortfolioMetricCard label="Total outstanding" value={money(data.portfolio.total_outstanding_amount)} detail="Across open receivables" impact={latestPayment ? `Down ${money(latestPayment)} recovered in latest cycle` : undefined} tone="blue" />
-              <PortfolioMetricCard label="Overdue exposure" value={money(data.recovery.overdue_exposure)} detail="Past-due factual exposure" tone="red" />
-              <PortfolioMetricCard label="Recovered this cycle" value={latestPayment ? money(latestPayment) : "-"} detail="Latest persisted payment event" tone="green" />
-              <PortfolioMetricCard label="Promise risk" value={money(data.recovery.broken_promise_exposure)} detail="Exposure behind missed commitments" tone="amber" />
-              <PortfolioMetricCard label="Attention required" value={String(data.recovery.cases_requiring_attention ?? data.recovery.cases_eligible_for_recovery)} detail="Cases requiring factual review" tone="red" />
+            <section aria-label="Portfolio health and next action" className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,.8fr)]">
+              <PortfolioHealth
+                totalOutstanding={data.portfolio.total_outstanding_amount}
+                overdueExposure={data.recovery.overdue_exposure}
+                totalCustomers={data.portfolio.total_customers}
+                totalInvoices={data.portfolio.total_invoices}
+                attentionCases={data.recovery.cases_requiring_attention ?? data.recovery.cases_eligible_for_recovery}
+                formatMoney={money}
+              />
+              <NextAction item={queue[0]} onSelect={setSelected} />
             </section>
 
-            <section className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,2.05fr)_minmax(340px,.95fr)]">
+            <section aria-label="Important portfolio metrics" className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <PortfolioMetricCard label="Broken-promise exposure" value={money(data.recovery.broken_promise_exposure)} detail="Money at risk behind missed commitments" tone="amber" />
+              <PortfolioMetricCard label="Recovery ready" value={String(data.recovery.cases_eligible_for_recovery)} detail="Cases currently eligible for operator action" tone="blue" />
+              <PortfolioMetricCard label="Recovered this cycle" value={latestPayment ? money(latestPayment) : "-"} detail="Latest persisted payment event" impact={latestPayment ? "Confirmed factual recovery" : undefined} tone="green" />
+              <PortfolioMetricCard label="Attention required" value={String(data.recovery.cases_requiring_attention ?? data.recovery.cases_eligible_for_recovery)} detail="Cases with a current factual condition" tone="red" />
+            </section>
+
+            <section aria-label="Recovery work queue" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,2.05fr)_minmax(340px,.95fr)]">
               <PriorityQueue items={queue} onSelect={setSelected} changedCaseIds={changedCases} />
               <aside className="space-y-5">
-                <PortfolioSignals signals={data.recovery} />
+                <PortfolioSignals signals={data.recovery} totalCases={data.recovery.total_cases} />
                 <LiveEventFeed events={data.events} customers={names} />
                 <IntelligenceBoundary />
               </aside>
@@ -155,5 +186,20 @@ export function Dashboard() {
       </div>
       {selected && <CaseWorkspace item={selected} onClose={() => setSelected(null)} liveVersion={data?.simulation.cycle ?? 0} affected={changedCases.has(selected.id)} />}
     </main>
+  );
+}
+
+function DashboardLoading() {
+  return (
+    <div aria-label="Loading portfolio dashboard" role="status" className="animate-pulse space-y-7">
+      <span className="sr-only">Loading live portfolio data</span>
+      <div className="flex items-end justify-between gap-8">
+        <div className="space-y-3"><div className="h-3 w-40 bg-white/[.06]" /><div className="h-10 w-72 bg-white/[.06]" /><div className="h-4 w-96 max-w-full bg-white/[.04]" /></div>
+        <div className="hidden h-32 w-96 bg-white/[.04] lg:block" />
+      </div>
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,.8fr)]"><div className="h-64 bg-white/[.04]" /><div className="h-64 bg-white/[.04]" /></div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 bg-white/[.035]" />)}</div>
+      <div className="h-96 bg-white/[.035]" />
+    </div>
   );
 }

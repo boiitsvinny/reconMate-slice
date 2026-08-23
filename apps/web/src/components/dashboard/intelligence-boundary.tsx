@@ -3,15 +3,15 @@ import { Panel, SectionHeader, StatusPill } from "./ui";
 export function IntelligenceBoundary() {
   return (
     <Panel>
-      <SectionHeader eyebrow="Communication intelligence" title="Bounded by factual control" />
+      <SectionHeader eyebrow="Decision guardrails" title="How recommendations are used" />
       <div className="p-5 pt-0">
         <p className="text-xs leading-5 text-slate-400">
-          AI interprets customer communications. Payments, disputes, recovery state and workflow execution remain deterministic and operator controlled.
+          Recommendations combine factual recovery conditions with interpreted communication signals. They never change payments, disputes, case state, or execute workflows automatically.
         </p>
         <div className="mt-4 grid grid-cols-3 gap-2 text-center">
-          <StatusPill tone="slate">Signals</StatusPill>
+          <StatusPill tone="slate">Interpret</StatusPill>
           <StatusPill tone="sky">Recommend</StatusPill>
-          <StatusPill tone="slate">Approve</StatusPill>
+          <StatusPill tone="emerald">Operator acts</StatusPill>
         </div>
       </div>
     </Panel>
