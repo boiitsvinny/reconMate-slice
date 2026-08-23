@@ -1,4 +1,4 @@
-import type { PriorityCase } from "./dashboard";
+import type { PriorityCase } from "./data";
 import { buttonStyles, cx, Panel, StatusPill } from "./ui";
 
 const label = (value: string) => value.replaceAll("_", " ");

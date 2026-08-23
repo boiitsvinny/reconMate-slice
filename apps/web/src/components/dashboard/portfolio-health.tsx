@@ -31,8 +31,8 @@ export function PortfolioHealth({ totalOutstanding, overdueExposure, totalCustom
           <p className="text-[10px] font-bold uppercase tracking-[.16em] text-rose-300">Exposure currently at risk</p>
           <p className="mt-3 text-3xl font-semibold tracking-[-.035em] text-white">{formatMoney(overdueExposure)}</p>
           <p className="mt-2 text-xs text-slate-500">Past due and requiring active recovery oversight</p>
-          <div className="mt-6 h-2 overflow-hidden bg-white/[.06]" aria-label={`${overdueShare.toFixed(0)} percent of outstanding exposure is overdue`}>
-            <div className="h-full bg-gradient-to-r from-amber-300 to-rose-400" style={{ width: `${overdueShare}%` }} />
+          <div className="mt-6 h-2 overflow-hidden rounded-full bg-white/[.06]" aria-label={`${overdueShare.toFixed(0)} percent of outstanding exposure is overdue`}>
+            <div className="h-full rounded-full bg-gradient-to-r from-amber-300 to-rose-400" style={{ width: `${overdueShare}%` }} />
           </div>
           <div className="mt-3 flex items-center justify-between gap-4 text-[11px] text-slate-500">
             <span>{overdueShare.toFixed(1)}% of outstanding</span>

@@ -3,51 +3,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/layout/app-header";
 import { apiUrl } from "@/lib/api";
-import { CaseWorkspace } from "./case-workspace";
+import { Customer, fetchJson, formatMoney as money, Portfolio, Recovery, SimState } from "./data";
 import { IntelligenceBoundary } from "./intelligence-boundary";
-import { InvoiceRegister } from "./invoice-register";
 import { LiveEventFeed, SimulationEvent } from "./live-event-feed";
-import { NextAction } from "./next-action";
 import { PortfolioHealth } from "./portfolio-health";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
-import { PriorityQueue } from "./priority-queue";
 import { SimulationControl } from "./simulation-control";
 
-type Portfolio = { simulation_date: string | null; total_outstanding_amount: string; total_invoices: number; total_customers: number };
-type Recovery = { overdue_exposure: string; broken_promise_exposure: string; cases_eligible_for_recovery: number; cases_requiring_attention?: number; cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number; total_cases: number };
-type Customer = { id: string; name: string; account_reference: string; outstanding_amount: string };
-type CaseApi = { case_id: string; customer_id: string; customer_name: string; evaluation: { derived_state: string; invoice: { outstanding_amount: string; days_overdue: number } | null; promises: { state: string }[]; active_dispute: boolean; eligibility: { allowed: boolean; blocking_reasons: string[] }; next_factual_condition: string } };
-type Recommendation = { case_id: string; recommended_action: string; priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; human_approval_required: boolean; factual_reasons: string[]; blockers: string[]; relevant_exposure: string; relevant_days_overdue: number; operator_explanation: string };
-type SimState = { cycle: number; simulation_date: string; tick_interval_seconds: number };
-type Invoice = { id: string; invoice_number: string; customer_id: string; due_date: string; outstanding_amount: string; status: string };
-type DashboardData = { portfolio: Portfolio; recovery: Recovery; customers: Customer[]; invoices: Invoice[]; cases: CaseApi[]; recommendations: Recommendation[]; simulation: SimState; events: SimulationEvent[] };
-export type PriorityCase = { id: string; customerId: string; customerName: string; customerReference: string; amount: string; exposure: number; state: string; daysOverdue: number; promiseSignal: string; allowed: boolean; reason: string; recommendedAction: string; recommendationPriority: Recommendation["priority"]; recommendationReason: string; humanApprovalRequired: boolean };
-
-const money = (value: string | number) => {
-  const amount = Number(value);
-  if (!Number.isFinite(amount)) return "-";
-  return amount >= 100000
-    ? `INR ${(amount / 100000).toFixed(1)}L`
-    : new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(amount);
-};
+type DashboardData = { portfolio: Portfolio; recovery: Recovery; customers: Customer[]; simulation: SimState; events: SimulationEvent[] };
 
 export function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<PriorityCase | null>(null);
   const [auto, setAuto] = useState(false);
   const [ticking, setTicking] = useState(false);
   const [lastResult, setLastResult] = useState("");
-  const [changedCases, setChangedCases] = useState<Set<string>>(new Set());
   const tickInFlight = useRef(false);
 
   const refresh = useCallback(async () => {
-    const paths = ["/portfolio/summary", "/recovery/portfolio/summary", "/customers", "/invoices", "/recovery/cases", "/recovery/recommendations", "/simulation/state", "/simulation/events"];
-    const responses = await Promise.all(paths.map((path) => fetch(apiUrl(path))));
-    if (responses.some((response) => !response.ok)) throw new Error("One or more portfolio services are unavailable.");
-    const [portfolio, recovery, customers, invoices, cases, recommendations, simulation, events] = await Promise.all(responses.map((response) => response.json()));
-    setData({ portfolio, recovery, customers, invoices, cases, recommendations, simulation, events });
+    const [portfolio, recovery, customers, simulation, events] = await Promise.all([
+      fetchJson<Portfolio>("/portfolio/summary"), fetchJson<Recovery>("/recovery/portfolio/summary"), fetchJson<Customer[]>("/customers"),
+      fetchJson<SimState>("/simulation/state"), fetchJson<SimulationEvent[]>("/simulation/events"),
+    ]);
+    setData({ portfolio, recovery, customers, simulation, events });
     setError(null);
   }, []);
 
@@ -63,10 +42,8 @@ export function Dashboard() {
       const response = await fetch(apiUrl("/simulation/tick"), { method: "POST" });
       if (!response.ok) throw new Error("Simulation tick failed.");
       const result = await response.json() as { cycle: number; event_count: number; events: SimulationEvent[] };
-      setChangedCases(new Set(result.events.map((event) => event.case_id).filter((id): id is string => Boolean(id))));
       setLastResult(`Cycle ${result.cycle}: ${result.event_count} persisted event${result.event_count === 1 ? "" : "s"}.`);
       await refresh();
-      window.setTimeout(() => setChangedCases(new Set()), 5000);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Simulation tick failed.");
     } finally {
@@ -90,52 +67,21 @@ export function Dashboard() {
     return () => window.clearInterval(timer);
   }, [refresh]);
 
-  const queue = useMemo<PriorityCase[]>(() => {
-    if (!data) return [];
-    const customers = new Map(data.customers.map((customer) => [customer.id, customer]));
-    const cases = new Map(data.cases.map((item) => [item.case_id, item]));
-    return data.recommendations.flatMap((recommendation) => {
-      const item = cases.get(recommendation.case_id);
-      if (!item) return [];
-      const customer = customers.get(item.customer_id);
-      const invoice = item.evaluation.invoice;
-      const promises = item.evaluation.promises;
-      const exposure = Number(invoice?.outstanding_amount ?? customer?.outstanding_amount ?? "0");
-      return {
-        id: item.case_id,
-        customerId: item.customer_id,
-        customerName: item.customer_name,
-        customerReference: customer?.account_reference ?? "Recovery account",
-        amount: money(exposure),
-        exposure,
-        state: item.evaluation.derived_state,
-        daysOverdue: invoice?.days_overdue ?? 0,
-        promiseSignal: promises.some((promise) => promise.state === "ACTIVE") ? "Active promise" : promises.some((promise) => promise.state === "BROKEN") ? "Promise broken" : "No active promise",
-        allowed: item.evaluation.eligibility.allowed,
-        reason: item.evaluation.eligibility.allowed ? "Recovery eligible" : item.evaluation.eligibility.blocking_reasons.join(" / ").replaceAll("_", " "),
-        recommendedAction: recommendation.recommended_action,
-        recommendationPriority: recommendation.priority,
-        recommendationReason: recommendation.operator_explanation,
-        humanApprovalRequired: recommendation.human_approval_required,
-      };
-    });
-  }, [data]);
-
   const names = useMemo(() => new Map(data?.customers.map((customer) => [customer.id, customer.name]) ?? []), [data?.customers]);
   const latestPayment = data?.events[0]?.metadata.payment_amount;
 
   return (
     <main className="min-h-screen overflow-x-hidden">
-      <AppHeader simulationDate={data?.simulation.simulation_date ?? data?.portfolio.simulation_date} connected={Boolean(data)} />
+      <AppHeader connected={Boolean(data)} />
       <div className="mx-auto max-w-[1580px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
         {!data && !error && <DashboardLoading />}
         {error && (
-          <div className="mb-6 flex flex-col justify-between gap-4 border border-rose-300/20 bg-rose-300/[.06] p-5 sm:flex-row sm:items-center">
+          <div className="mb-6 flex flex-col justify-between gap-4 rounded-2xl border border-rose-300/20 bg-rose-300/[.06] p-5 sm:flex-row sm:items-center">
             <div>
               <p className="text-sm font-semibold text-rose-100">Portfolio data could not be refreshed</p>
               <p className="mt-1 text-xs leading-5 text-rose-100/65">{error}{data ? " The last synchronized view remains available below." : ""}</p>
             </div>
-            <button type="button" onClick={() => void refresh().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to connect to ReconMate."))} className="border border-rose-200/25 px-3.5 py-2 text-xs font-bold text-rose-50 transition hover:border-rose-200/50">Try again</button>
+            <button type="button" onClick={() => void refresh().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to connect to ReconMate."))} className="rounded-lg border border-rose-200/25 px-3.5 py-2 text-xs font-bold text-rose-50 transition hover:border-rose-200/50">Try again</button>
           </div>
         )}
         {data && (
@@ -148,12 +94,9 @@ export function Dashboard() {
                   {data.portfolio.total_customers} active B2B accounts / {data.portfolio.total_invoices} receivables / factual recovery position driven by the virtual operating date.
                 </p>
               </div>
-              <div className="w-full max-w-md">
-                <SimulationControl cycle={data.simulation.cycle} interval={data.simulation.tick_interval_seconds} busy={ticking} auto={auto} lastResult={lastResult} onAutoChange={setAuto} onTick={() => void runTick()} />
-              </div>
             </section>
 
-            <section aria-label="Portfolio health and next action" className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,.8fr)]">
+            <section aria-label="Portfolio health">
               <PortfolioHealth
                 totalOutstanding={data.portfolio.total_outstanding_amount}
                 overdueExposure={data.recovery.overdue_exposure}
@@ -162,7 +105,6 @@ export function Dashboard() {
                 attentionCases={data.recovery.cases_requiring_attention ?? data.recovery.cases_eligible_for_recovery}
                 formatMoney={money}
               />
-              <NextAction item={queue[0]} onSelect={setSelected} />
             </section>
 
             <section aria-label="Important portfolio metrics" className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -172,19 +114,17 @@ export function Dashboard() {
               <PortfolioMetricCard label="Attention required" value={String(data.recovery.cases_requiring_attention ?? data.recovery.cases_eligible_for_recovery)} detail="Cases with a current factual condition" tone="red" />
             </section>
 
-            <section aria-label="Recovery work queue" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,2.05fr)_minmax(340px,.95fr)]">
-              <PriorityQueue items={queue} onSelect={setSelected} changedCaseIds={changedCases} />
+            <section aria-label="Portfolio operations" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
+              <LiveEventFeed events={data.events} customers={names} />
               <aside className="space-y-5">
                 <PortfolioSignals signals={data.recovery} totalCases={data.recovery.total_cases} />
-                <LiveEventFeed events={data.events} customers={names} />
                 <IntelligenceBoundary />
+                <SimulationControl cycle={data.simulation.cycle} interval={data.simulation.tick_interval_seconds} busy={ticking} auto={auto} lastResult={lastResult} onAutoChange={setAuto} onTick={() => void runTick()} />
               </aside>
             </section>
-            <InvoiceRegister invoices={data.invoices} customerNames={names} />
           </>
         )}
       </div>
-      {selected && <CaseWorkspace item={selected} onClose={() => setSelected(null)} liveVersion={data?.simulation.cycle ?? 0} affected={changedCases.has(selected.id)} />}
     </main>
   );
 }
@@ -195,11 +135,11 @@ function DashboardLoading() {
       <span className="sr-only">Loading live portfolio data</span>
       <div className="flex items-end justify-between gap-8">
         <div className="space-y-3"><div className="h-3 w-40 bg-white/[.06]" /><div className="h-10 w-72 bg-white/[.06]" /><div className="h-4 w-96 max-w-full bg-white/[.04]" /></div>
-        <div className="hidden h-32 w-96 bg-white/[.04] lg:block" />
+        <div className="hidden h-32 w-96 rounded-2xl bg-white/[.04] lg:block" />
       </div>
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,.8fr)]"><div className="h-64 bg-white/[.04]" /><div className="h-64 bg-white/[.04]" /></div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 bg-white/[.035]" />)}</div>
-      <div className="h-96 bg-white/[.035]" />
+      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.55fr)_minmax(360px,.8fr)]"><div className="h-64 rounded-2xl bg-white/[.04]" /><div className="h-64 rounded-2xl bg-white/[.04]" /></div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-36 rounded-2xl bg-white/[.035]" />)}</div>
+      <div className="h-96 rounded-2xl bg-white/[.035]" />
     </div>
   );
 }

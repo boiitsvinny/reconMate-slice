@@ -19,7 +19,7 @@ export function PortfolioSignals({ signals, totalCases }: { signals: Signals; to
               <div className="flex items-center gap-2"><span className={`h-1.5 w-1.5 ${dot}`} /><p className="text-xs font-medium text-slate-200">{label}</p></div>
               <p className="text-base font-semibold tabular-nums text-white">{value}</p>
             </div>
-            <div className="mt-2 h-1 bg-white/[.055]"><div className={`h-full ${dot}`} style={{ width: `${totalCases > 0 ? Math.min(100, (value / totalCases) * 100) : 0}%` }} /></div>
+            <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/[.055]"><div className={`h-full rounded-full ${dot}`} style={{ width: `${totalCases > 0 ? Math.min(100, (value / totalCases) * 100) : 0}%` }} /></div>
             <div className="mt-1.5 flex justify-between gap-3 text-[10px] text-slate-500"><span>{detail}</span><span>{totalCases > 0 ? `${Math.round((value / totalCases) * 100)}%` : "0%"}</span></div>
           </div>
         ))}

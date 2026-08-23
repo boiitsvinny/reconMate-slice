@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
-import type { PriorityCase } from "./dashboard";
+import type { PriorityCase } from "./data";
 import { buttonStyles, cx, StatusPill } from "./ui";
 
 type Workspace = {
@@ -59,14 +59,14 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-[#050814]/65 p-2 backdrop-blur-sm" onClick={onClose} role="presentation">
-      <section className="h-full w-full max-w-2xl overflow-y-auto border border-white/[0.12] bg-[#0d1628] p-5 shadow-2xl shadow-black/70 sm:p-7" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${item.customerName} recovery workspace`}>
+      <section className="h-full w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/[0.12] bg-[#0d1628] p-5 shadow-2xl shadow-black/70 sm:p-7" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${item.customerName} recovery workspace`}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-sky-300">Operator case workspace</p>
             <h2 className="mt-2 text-2xl font-semibold tracking-[-.03em] text-white">{workspace?.customer.name ?? item.customerName}</h2>
             <p className="mt-1 text-xs text-slate-500">{workspace?.customer.strategic ? "Strategic account / " : ""}{item.customerReference}</p>
           </div>
-          <button onClick={onClose} className="border border-white/10 px-2.5 py-1 text-slate-400 transition hover:border-white/20 hover:text-white">Close</button>
+          <button onClick={onClose} className="rounded-lg border border-white/10 px-2.5 py-1 text-slate-400 transition hover:border-white/20 hover:text-white">Close</button>
         </div>
         {error && <p className="mt-5 border border-rose-300/15 bg-rose-300/[.06] p-3 text-sm text-rose-100">{error}</p>}
         {affected && <p className="live-enter mt-5 border border-sky-300/15 bg-sky-400/[.05] p-3 text-xs text-sky-200">Portfolio update detected. Factual case data and recommendation refreshed.</p>}
@@ -79,7 +79,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
               <Card label="Invoice" value={workspace.invoice?.status ?? "-"} />
               <Card label="Promise" value={workspace.promises[0] ? label(workspace.promises[0].status) : "None"} />
             </section>
-            <section className="border border-sky-300/18 bg-sky-400/[.055] p-5">
+            <section className="rounded-2xl border border-sky-300/18 bg-sky-400/[.055] p-5">
               <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">Recommended next step / advisory</p>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
                 <h3 className="text-lg font-semibold text-white">{label(workspace.recommendation.recommended_action)}</h3>
@@ -93,7 +93,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
               {workspace.recommendation.blockers.length > 0 && <p className="mt-3 text-xs text-amber-200">Blockers: {workspace.recommendation.blockers.map(label).join(" / ")}</p>}
               <p className="mt-3 text-xs text-slate-400">Human approval {workspace.recommendation.human_approval_required ? "required" : "not required"}. Interpretation signals are supporting evidence only.</p>
             </section>
-            <section className="border border-white/[.09] bg-white/[.025] p-5">
+            <section className="rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
               <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-slate-500">Operator decision</p>
               {!latest ? (
                 <button disabled={busy || workspace.recommendation.recommended_action === "NO_ACTION_REQUIRED"} onClick={create} className={cx("mt-4", buttonStyles.primary)}>Create action from recommendation</button>
@@ -122,7 +122,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
 
 function Card({ label, value }: { label: string; value: string }) {
   return (
-    <div className="border border-white/[.08] bg-white/[.025] p-3">
+    <div className="rounded-xl border border-white/[.08] bg-white/[.025] p-3">
       <p className="text-[10px] uppercase tracking-[.12em] text-slate-500">{label}</p>
       <p className="mt-1 text-sm font-semibold text-white">{value}</p>
     </div>
@@ -131,7 +131,7 @@ function Card({ label, value }: { label: string; value: string }) {
 
 function Timeline({ title, entries }: { title: string; entries: string[] }) {
   return (
-    <section className="border border-white/[.08] p-4">
+    <section className="rounded-xl border border-white/[.08] p-4">
       <p className="text-xs font-semibold text-slate-200">{title}</p>
       <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-400">{entries.length ? entries.map((entry, index) => <li key={`${entry}-${index}`} className="border-l border-sky-300/25 pl-3">{entry}</li>) : <li>No recorded items.</li>}</ul>
     </section>

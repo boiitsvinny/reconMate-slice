@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel, SectionHeader, StatusPill, cx } from "./ui";
 
 type Invoice = { id: string; invoice_number: string; customer_id: string; due_date: string; outstanding_amount: string; status: string };
+type CustomerSummary = { name: string; account_reference: string; outstanding_amount: string };
+type Preview = { invoice: Invoice; x: number; y: number };
 
 const money = (value: string) => {
   const amount = Number(value);
@@ -13,13 +15,36 @@ const money = (value: string) => {
 };
 const statusTone = (status: string) => status === "PAID" ? "emerald" : status === "DISPUTED" ? "amber" : status === "OVERDUE" ? "rose" : "sky";
 
-export function InvoiceRegister({ invoices, customerNames }: { invoices: Invoice[]; customerNames: Map<string, string> }) {
+export function InvoiceRegister({ invoices, customers }: { invoices: Invoice[]; customers: Map<string, CustomerSummary> }) {
   const pageSize = 30;
   const [page, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(invoices.length / pageSize));
   const rows = useMemo(() => invoices.slice(page * pageSize, (page + 1) * pageSize), [invoices, page]);
   const first = invoices.length ? page * pageSize + 1 : 0;
   const last = Math.min((page + 1) * pageSize, invoices.length);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const closeTimer = useRef<number | null>(null);
+
+  const cancelClose = () => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
+    closeTimer.current = null;
+  };
+  const closePreview = (delay = 500) => {
+    cancelClose();
+    closeTimer.current = window.setTimeout(() => {
+      setPreviewVisible(false);
+      closeTimer.current = window.setTimeout(() => setPreview(null), 180);
+    }, delay);
+  };
+  const openPreview = (invoice: Invoice, clientX: number, clientY: number) => {
+    cancelClose();
+    setPreview({ invoice, x: Math.min(clientX + 14, window.innerWidth - 340), y: Math.min(clientY + 14, window.innerHeight - 280) });
+    setPreviewVisible(true);
+    closePreview(1100);
+  };
+
+  useEffect(() => () => cancelClose(), []);
 
   return (
     <Panel className="mt-7">
@@ -30,8 +55,8 @@ export function InvoiceRegister({ invoices, customerNames }: { invoices: Invoice
         action={
           <div className="flex items-center gap-3 text-xs text-slate-400">
             <span>{first}-{last} of {invoices.length}</span>
-            <button aria-label="Previous invoice page" disabled={page === 0} onClick={() => setPage((value) => value - 1)} className="border border-white/[.08] px-2 py-1 text-sm hover:text-white disabled:opacity-30">Prev</button>
-            <button aria-label="Next invoice page" disabled={page >= pages - 1} onClick={() => setPage((value) => value + 1)} className="border border-white/[.08] px-2 py-1 text-sm hover:text-white disabled:opacity-30">Next</button>
+            <button aria-label="Previous invoice page" disabled={page === 0} onClick={() => setPage((value) => value - 1)} className="rounded-lg border border-white/[.08] px-2 py-1 text-sm hover:text-white disabled:opacity-30">Prev</button>
+            <button aria-label="Next invoice page" disabled={page >= pages - 1} onClick={() => setPage((value) => value + 1)} className="rounded-lg border border-white/[.08] px-2 py-1 text-sm hover:text-white disabled:opacity-30">Next</button>
           </div>
         }
       />
@@ -45,20 +70,45 @@ export function InvoiceRegister({ invoices, customerNames }: { invoices: Invoice
             <span>Status</span>
           </div>
           {rows.map((invoice) => (
-            <div key={invoice.id} className="grid grid-cols-[1.25fr_1fr_.75fr_.8fr_.8fr] gap-4 border-b border-white/[.045] px-5 py-3 text-sm transition last:border-b-0 hover:bg-sky-400/[.03]">
+            <button type="button" key={invoice.id} onClick={(event) => openPreview(invoice, event.clientX, event.clientY)} className="grid w-full grid-cols-[1.25fr_1fr_.75fr_.8fr_.8fr] gap-4 border-b border-white/[.045] px-5 py-3 text-left text-sm transition last:border-b-0 hover:bg-sky-400/[.06] focus:bg-sky-400/[.06] focus:outline-none">
               <div>
                 <p className="font-medium text-slate-200">{invoice.invoice_number}</p>
                 <p className="mt-0.5 text-[10px] text-slate-600">{invoice.id.slice(0, 8)}</p>
               </div>
-              <p className="truncate text-slate-400">{customerNames.get(invoice.customer_id) ?? "Portfolio account"}</p>
+              <p className="truncate text-slate-400">{customers.get(invoice.customer_id)?.name ?? "Portfolio account"}</p>
               <p className="text-slate-400">{invoice.due_date}</p>
               <p className="font-semibold tabular-nums text-white">{money(invoice.outstanding_amount)}</p>
               <StatusPill tone={statusTone(invoice.status)}>{invoice.status}</StatusPill>
-            </div>
+            </button>
           ))}
           {!rows.length && <p className={cx("px-5 py-10 text-center text-sm text-slate-500")}>No invoices returned by the API.</p>}
         </div>
       </div>
+      {preview && (
+        <aside
+          role="dialog"
+          aria-label={`${preview.invoice.invoice_number} invoice profile`}
+          onMouseEnter={cancelClose}
+          onMouseLeave={() => closePreview(300)}
+          className={cx("fixed z-50 w-[320px] rounded-2xl border border-sky-200/20 bg-[#0b1728]/95 p-5 shadow-2xl shadow-black/60 backdrop-blur-xl transition duration-200", previewVisible ? "translate-y-0 opacity-100" : "translate-y-1 opacity-0")}
+          style={{ left: Math.max(12, preview.x), top: Math.max(12, preview.y) }}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-sky-300">Invoice profile</p><h3 className="mt-1 text-base font-semibold text-white">{preview.invoice.invoice_number}</h3></div>
+            <StatusPill tone={statusTone(preview.invoice.status)}>{preview.invoice.status}</StatusPill>
+          </div>
+          <div className="mt-4 rounded-xl border border-white/[.07] bg-white/[.03] p-4">
+            <p className="text-xs font-semibold text-slate-200">{customers.get(preview.invoice.customer_id)?.name ?? "Portfolio account"}</p>
+            <p className="mt-1 text-[10px] uppercase tracking-[.12em] text-slate-500">{customers.get(preview.invoice.customer_id)?.account_reference ?? "Account reference unavailable"}</p>
+          </div>
+          <dl className="mt-4 grid grid-cols-2 gap-4 text-xs">
+            <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Invoice exposure</dt><dd className="mt-1 font-semibold text-white">{money(preview.invoice.outstanding_amount)}</dd></div>
+            <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Due date</dt><dd className="mt-1 font-semibold text-white">{preview.invoice.due_date}</dd></div>
+            <div className="col-span-2"><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Account outstanding</dt><dd className="mt-1 font-semibold text-white">{money(customers.get(preview.invoice.customer_id)?.outstanding_amount ?? "0")}</dd></div>
+          </dl>
+          <p className="mt-4 text-[10px] leading-4 text-slate-500">Move onto this card to keep it open. Move away and it will fade automatically.</p>
+        </aside>
+      )}
     </Panel>
   );
 }

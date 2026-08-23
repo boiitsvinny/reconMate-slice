@@ -11,7 +11,7 @@ export function PortfolioMetricCard({ label, value, detail, impact, tone = "blue
   };
 
   return (
-    <article className={cx("group relative min-h-[156px] overflow-hidden border p-5 transition duration-300 hover:-translate-y-0.5", tones[tone])}>
+    <article className={cx("group relative min-h-[156px] overflow-hidden rounded-2xl border p-5 transition duration-300 hover:-translate-y-0.5", tones[tone])}>
       <div className="absolute inset-x-0 top-0 h-px bg-current opacity-30" />
       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
       <p className="mt-4 text-2xl font-semibold tracking-[-0.035em] text-white sm:text-3xl">{value}</p>

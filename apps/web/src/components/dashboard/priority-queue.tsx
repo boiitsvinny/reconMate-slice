@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CustomerPreview } from "./customer-preview";
-import type { PriorityCase } from "./dashboard";
+import type { PriorityCase } from "./data";
 import { cx, Panel, SectionHeader, StatusPill } from "./ui";
 
 const stateTone = (state: string) => state === "ESCALATED" ? "rose" : state === "AWAITING_CUSTOMER" ? "amber" : state === "RESOLVED" ? "emerald" : "sky";
@@ -20,7 +20,7 @@ export function PriorityQueue({ items, onSelect, changedCaseIds }: { items: Prio
         title="Prioritized recovery work"
         detail="Ordered by the API recommendation priority, overdue age and exposure."
         action={
-          <div className="flex border border-white/[.08] p-0.5 text-[10px] font-semibold uppercase tracking-[.08em]">
+          <div className="flex rounded-xl border border-white/[.08] p-0.5 text-[10px] font-semibold uppercase tracking-[.08em]">
             <button type="button" onClick={() => setShowAll(false)} className={cx("px-2.5 py-1.5 transition", !showAll ? "bg-sky-300 text-slate-950" : "text-slate-500 hover:text-white")}>Focus {focusItems.length}</button>
             <button type="button" onClick={() => setShowAll(true)} className={cx("px-2.5 py-1.5 transition", showAll ? "bg-sky-300 text-slate-950" : "text-slate-500 hover:text-white")}>All {items.length}</button>
           </div>
@@ -41,7 +41,7 @@ export function PriorityQueue({ items, onSelect, changedCaseIds }: { items: Prio
             onMouseLeave={() => setHovered(null)}
             onClick={() => onSelect(item)}
             className={cx(
-              "group relative grid w-full grid-cols-1 gap-2 border px-3 py-3 text-left transition hover:border-sky-300/20 hover:bg-sky-400/[0.045] md:grid-cols-[minmax(180px,1.6fr)_0.8fr_0.7fr_0.9fr] md:items-center md:gap-4",
+              "group relative grid w-full grid-cols-1 gap-2 rounded-xl border px-3 py-3 text-left transition hover:border-sky-300/20 hover:bg-sky-400/[0.045] md:grid-cols-[minmax(180px,1.6fr)_0.8fr_0.7fr_0.9fr] md:items-center md:gap-4",
               changedCaseIds.has(item.id) ? "live-enter border-sky-300/35 bg-sky-400/[.055]" : "border-transparent",
             )}
           >

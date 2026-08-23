@@ -19,8 +19,8 @@ export function SimulationControl({ cycle, interval, busy, auto, lastResult, onA
   }, [auto, busy, interval]);
 
   return (
-    <section className="relative overflow-hidden border border-sky-300/20 bg-slate-950/45 p-4 shadow-[0_18px_45px_rgba(0,0,0,.18)]">
-      <div className="absolute inset-y-0 left-0 w-1 bg-sky-400" />
+    <section className="relative overflow-hidden rounded-2xl border border-sky-300/20 bg-slate-950/45 p-4 shadow-[0_18px_45px_rgba(0,0,0,.18)]">
+      <div className="absolute inset-y-0 left-0 w-1 rounded-l-2xl bg-sky-400" />
       <div className="flex flex-wrap items-center justify-between gap-4 pl-2">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[.18em] text-sky-300">

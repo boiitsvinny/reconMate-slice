@@ -1,11 +1,11 @@
-import type { PriorityCase } from "./dashboard";
+import type { PriorityCase } from "./data";
 import { StatusPill } from "./ui";
 
 const toneForState = (state: string) => state === "ESCALATED" ? "rose" : state === "AWAITING_CUSTOMER" ? "amber" : "sky";
 
 export function CustomerPreview({ item }: { item: PriorityCase }) {
   return (
-    <div className="pointer-events-none absolute right-4 top-[calc(100%-6px)] z-30 hidden w-[290px] border border-white/[0.12] bg-[#111a2d]/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl lg:block">
+    <div className="pointer-events-none absolute right-4 top-[calc(100%-6px)] z-30 hidden w-[290px] rounded-2xl border border-white/[0.12] bg-[#111a2d]/95 p-4 shadow-2xl shadow-black/60 backdrop-blur-2xl lg:block">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-white">{item.customerName}</p>
