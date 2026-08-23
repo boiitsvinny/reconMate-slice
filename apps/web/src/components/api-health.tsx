@@ -31,9 +31,11 @@ export function ApiHealth() {
     unavailable: { label: "API unavailable", color: "bg-rose-400" },
   }[state];
 
-  return <div className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-slate-300">
-    <span className={`h-2.5 w-2.5 rounded-full ${status.color}`} aria-hidden="true" />
-    <span>{status.label}</span>
-    <span className="ml-auto text-xs text-slate-500">{apiBaseUrl ? `${apiBaseUrl}/health` : "API URL not configured"}</span>
-  </div>;
+  return (
+    <div className="flex items-center gap-3 border border-white/[.08] bg-slate-950/45 px-4 py-3 text-sm text-slate-300">
+      <span className={`h-2.5 w-2.5 ${status.color}`} aria-hidden="true" />
+      <span>{status.label}</span>
+      <span className="ml-auto truncate text-xs text-slate-500">{apiBaseUrl ? `${apiBaseUrl}/health` : "API URL not configured"}</span>
+    </div>
+  );
 }

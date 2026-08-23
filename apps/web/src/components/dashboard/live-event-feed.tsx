@@ -1,7 +1,34 @@
 "use client";
+
+import { Panel, SectionHeader, cx } from "./ui";
+
 export type SimulationEvent = { id: string; cycle: number; type: string; customer_id: string | null; invoice_id: string | null; case_id: string | null; metadata: Record<string, string>; occurred_at: string };
+
 const tone = (type: string) => type.includes("PAYMENT") ? "border-emerald-400 text-emerald-200" : type.includes("PROMISE") ? "border-rose-400 text-rose-200" : type.includes("DISPUTE") ? "border-amber-300 text-amber-200" : "border-sky-400 text-sky-200";
 const label = (type: string) => type.replaceAll("_", " ");
+
 export function LiveEventFeed({ events, customers }: { events: SimulationEvent[]; customers: Map<string, string> }) {
-  return <section className="border border-white/[.09] bg-[#0d1627] p-5 shadow-[0_18px_45px_rgba(0,0,0,.16)]"><div className="flex items-end justify-between border-b border-white/[.07] pb-4"><div><p className="text-[10px] font-bold uppercase tracking-[.18em] text-sky-300">Live recovery stream</p><p className="mt-1 text-sm font-semibold text-white">Operational events</p></div><span className="text-[10px] font-semibold uppercase tracking-[.13em] text-slate-500">{events.length} latest</span></div><div className="mt-3 max-h-[410px] space-y-1 overflow-y-auto pr-1">{events.length ? events.map((event) => <article key={event.id} className={`live-enter border-l-2 px-3 py-3 ${tone(event.type)}`}><div className="flex justify-between gap-3"><p className="text-xs font-bold">{label(event.type)}</p><span className="text-[10px] opacity-60">#{event.cycle}</span></div><p className="mt-1 text-[11px] text-slate-300">{customers.get(event.customer_id ?? "") ?? "Portfolio account"} · {event.metadata.payment_amount ? `₹${event.metadata.payment_amount} received` : event.metadata.promise_amount ? `₹${event.metadata.promise_amount} commitment` : event.metadata.resulting_status ?? "Factual portfolio update"}</p><p className="mt-1 text-[10px] text-slate-500">{new Date(event.occurred_at).toLocaleString()}</p></article>) : <p className="py-8 text-center text-xs text-slate-500">No simulation events yet.</p>}</div></section>;
+  return (
+    <Panel>
+      <SectionHeader
+        eyebrow="Live recovery stream"
+        title="Operational events"
+        action={<span className="text-[10px] font-semibold uppercase tracking-[.13em] text-slate-500">{events.length} latest</span>}
+      />
+      <div className="max-h-[410px] space-y-1 overflow-y-auto p-3 pr-2">
+        {events.length ? events.map((event) => (
+          <article key={event.id} className={cx("live-enter border-l-2 px-3 py-3", tone(event.type))}>
+            <div className="flex justify-between gap-3">
+              <p className="text-xs font-bold">{label(event.type)}</p>
+              <span className="text-[10px] opacity-60">#{event.cycle}</span>
+            </div>
+            <p className="mt-1 text-[11px] text-slate-300">
+              {customers.get(event.customer_id ?? "") ?? "Portfolio account"} / {event.metadata.payment_amount ? `INR ${event.metadata.payment_amount} received` : event.metadata.promise_amount ? `INR ${event.metadata.promise_amount} commitment` : event.metadata.resulting_status ?? "Factual portfolio update"}
+            </p>
+            <p className="mt-1 text-[10px] text-slate-500">{new Date(event.occurred_at).toLocaleString()}</p>
+          </article>
+        )) : <p className="py-8 text-center text-xs text-slate-500">No simulation events yet.</p>}
+      </div>
+    </Panel>
+  );
 }
