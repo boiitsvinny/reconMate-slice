@@ -161,6 +161,44 @@ def _communication(session: Session, customer: Customer, label: str, when: date,
     return message
 
 
+def _invoice_for_promise(invoices: list[Invoice], preferred_index: int) -> Invoice | None:
+    """Use the preferred invoice when unpaid, otherwise the newest unpaid invoice."""
+    preferred = invoices[preferred_index]
+    if preferred.outstanding_amount > 0:
+        return preferred
+    return next((invoice for invoice in reversed(invoices) if invoice.outstanding_amount > 0), None)
+
+
+def _add_promise(
+    session: Session,
+    *,
+    label: str,
+    customer: Customer,
+    invoice: Invoice,
+    promised_amount: Decimal,
+    promised_date: date,
+    status: PromiseStatus,
+    source_communication: Communication,
+    confidence: Decimal,
+) -> PromiseToPay | None:
+    """Add a promise only when its amount satisfies the database invariant."""
+    amount = promised_amount.quantize(Decimal("0.01"))
+    if amount <= 0:
+        return None
+    promise = PromiseToPay(
+        id=_id(f"promise/{customer.id}/{label}"),
+        customer=customer,
+        invoice=invoice,
+        promised_amount=amount,
+        promised_date=promised_date,
+        status=status,
+        source_communication=source_communication,
+        confidence=confidence,
+    )
+    session.add(promise)
+    return promise
+
+
 def _add_case(session: Session, customer: Customer, invoice: Invoice, state: RecoveryState, priority: RecoveryPriority, reason: str, aggressive: bool = True) -> RecoveryCase:
     case = RecoveryCase(
         id=_id(f"case/{customer.id}/{invoice.id}"), customer=customer, invoice=invoice,
@@ -231,9 +269,9 @@ def seed_database(session: Session, *, reset: bool = False) -> dict[str, int | D
         if blueprint.archetype == "HEALTHY_RELIABLE":
             source = _communication(session, customer, "confirmation", invoices[3].due_date - timedelta(days=6), CommunicationDirection.INBOUND,
                                     "Payment has been scheduled in the normal weekly run; please allow a couple of business days.")
-            session.add(PromiseToPay(id=_id(f"promise/{customer.id}/fulfilled"), customer=customer, invoice=invoices[3],
-                                     promised_amount=invoices[3].original_amount, promised_date=invoices[3].due_date - timedelta(days=3),
-                                     status=PromiseStatus.FULFILLED, source_communication=source, confidence=Decimal("0.9400")))
+            _add_promise(session, label="fulfilled", customer=customer, invoice=invoices[3],
+                         promised_amount=invoices[3].original_amount, promised_date=invoices[3].due_date - timedelta(days=3),
+                         status=PromiseStatus.FULFILLED, source_communication=source, confidence=Decimal("0.9400"))
         elif blueprint.archetype == "RELIABLE_LATE":
             _communication(session, customer, "late-pattern", SIMULATION_DATE - timedelta(days=10), CommunicationDirection.INBOUND,
                            "We settle after our month-end reconciliation. This has been processed and should reflect shortly.")
@@ -243,22 +281,24 @@ def seed_database(session: Session, *, reset: bool = False) -> dict[str, int | D
         elif blueprint.archetype == "PARTIAL_PAYER":
             source = _communication(session, customer, "partial-payment", SIMULATION_DATE - timedelta(days=6), CommunicationDirection.INBOUND,
                                     "We have processed part of the amount. The balance will be cleared next week.")
-            session.add(PromiseToPay(id=_id(f"promise/{customer.id}/active"), customer=customer, invoice=invoices[-1],
-                                     promised_amount=invoices[-1].outstanding_amount, promised_date=SIMULATION_DATE + timedelta(days=6),
-                                     status=PromiseStatus.ACTIVE, source_communication=source, confidence=Decimal("0.7200")))
+            _add_promise(session, label="active", customer=customer, invoice=invoices[-1],
+                         promised_amount=invoices[-1].outstanding_amount, promised_date=SIMULATION_DATE + timedelta(days=6),
+                         status=PromiseStatus.ACTIVE, source_communication=source, confidence=Decimal("0.7200"))
             _add_case(session, customer, invoices[-1], RecoveryState.PROMISE_MONITORING, RecoveryPriority.NORMAL, "Monitoring active partial-payment commitment.")
         elif blueprint.archetype == "PROMISE_BREAKER":
             old_source = _communication(session, customer, "broken-commitment", SIMULATION_DATE - timedelta(days=45), CommunicationDirection.INBOUND,
                                         "We will clear ₹2 lakh by Friday.")
-            session.add(PromiseToPay(id=_id(f"promise/{customer.id}/broken"), customer=customer, invoice=invoices[-2],
-                                     promised_amount=invoices[-2].outstanding_amount, promised_date=SIMULATION_DATE - timedelta(days=35),
-                                     status=PromiseStatus.BROKEN, source_communication=old_source, confidence=Decimal("0.6800")))
+            broken_invoice = _invoice_for_promise(invoices, -2)
+            if broken_invoice is not None:
+                _add_promise(session, label="broken", customer=customer, invoice=broken_invoice,
+                             promised_amount=broken_invoice.outstanding_amount, promised_date=SIMULATION_DATE - timedelta(days=35),
+                             status=PromiseStatus.BROKEN, source_communication=old_source, confidence=Decimal("0.6800"))
             active_source = _communication(session, customer, "new-commitment", SIMULATION_DATE - timedelta(days=3), CommunicationDirection.INBOUND,
                                            "The earlier release did not happen. We can make a partial transfer next Tuesday.")
-            session.add(PromiseToPay(id=_id(f"promise/{customer.id}/active"), customer=customer, invoice=invoices[-1],
-                                     promised_amount=(invoices[-1].outstanding_amount * Decimal("0.50")).quantize(Decimal("0.01")),
-                                     promised_date=SIMULATION_DATE + timedelta(days=4), status=PromiseStatus.ACTIVE,
-                                     source_communication=active_source, confidence=Decimal("0.4500")))
+            _add_promise(session, label="active", customer=customer, invoice=invoices[-1],
+                         promised_amount=invoices[-1].outstanding_amount * Decimal("0.50"),
+                         promised_date=SIMULATION_DATE + timedelta(days=4), status=PromiseStatus.ACTIVE,
+                         source_communication=active_source, confidence=Decimal("0.4500"))
             _add_case(session, customer, invoices[-1], RecoveryState.IN_PROGRESS, RecoveryPriority.HIGH, "Prior payment commitment was missed.")
         elif blueprint.archetype == "DISPUTED_ACCOUNT":
             source = _communication(session, customer, "dispute", SIMULATION_DATE - timedelta(days=15), CommunicationDirection.INBOUND,
@@ -267,17 +307,17 @@ def seed_database(session: Session, *, reset: bool = False) -> dict[str, int | D
         elif blueprint.archetype == "STRATEGIC_HIGH_VALUE":
             source = _communication(session, customer, "strategic-commitment", SIMULATION_DATE - timedelta(days=4), CommunicationDirection.INBOUND,
                                     "We are aligning the release with the project milestone. Please give us until the middle of next week.")
-            session.add(PromiseToPay(id=_id(f"promise/{customer.id}/active"), customer=customer, invoice=invoices[-1],
-                                     promised_amount=(invoices[-1].outstanding_amount * Decimal("0.60")).quantize(Decimal("0.01")),
-                                     promised_date=SIMULATION_DATE + timedelta(days=10), status=PromiseStatus.ACTIVE,
-                                     source_communication=source, confidence=Decimal("0.6100")))
+            _add_promise(session, label="active", customer=customer, invoice=invoices[-1],
+                         promised_amount=invoices[-1].outstanding_amount * Decimal("0.60"),
+                         promised_date=SIMULATION_DATE + timedelta(days=10), status=PromiseStatus.ACTIVE,
+                         source_communication=source, confidence=Decimal("0.6100"))
             _add_case(session, customer, invoices[-1], RecoveryState.PROMISE_MONITORING, RecoveryPriority.HIGH, "Strategic-account commitment awaiting approval-led follow-up.")
         elif blueprint.archetype == "SEVERELY_OVERDUE":
             source = _communication(session, customer, "broken-commitment", SIMULATION_DATE - timedelta(days=50), CommunicationDirection.INBOUND,
                                     "We cannot clear everything immediately. We expected funding last week but it has not arrived.")
-            session.add(PromiseToPay(id=_id(f"promise/{customer.id}/broken"), customer=customer, invoice=invoices[-2],
-                                     promised_amount=invoices[-2].outstanding_amount, promised_date=SIMULATION_DATE - timedelta(days=30),
-                                     status=PromiseStatus.BROKEN, source_communication=source, confidence=Decimal("0.3500")))
+            _add_promise(session, label="broken", customer=customer, invoice=invoices[-2],
+                         promised_amount=invoices[-2].outstanding_amount, promised_date=SIMULATION_DATE - timedelta(days=30),
+                         status=PromiseStatus.BROKEN, source_communication=source, confidence=Decimal("0.3500"))
             _add_case(session, customer, invoices[-1], RecoveryState.ESCALATED, RecoveryPriority.CRITICAL, "Multiple large invoices are severely overdue and commitment was broken.")
 
     session.add(SimulationState(id=_id("simulation/default"), name="default", simulation_date=SIMULATION_DATE))
@@ -306,6 +346,7 @@ def validate_portfolio(session: Session) -> None:
         assert paid == invoice.original_amount - invoice.outstanding_amount, f"balance mismatch for {invoice.invoice_number}"
         assert not (invoice.status is InvoiceStatus.PAID and invoice.outstanding_amount > 0)
     for promise in session.scalars(select(PromiseToPay)):
+        assert promise.promised_amount > 0, "payment promises must have a positive amount"
         if promise.status is PromiseStatus.ACTIVE:
             assert promise.promised_date >= SIMULATION_DATE
         if promise.status is PromiseStatus.BROKEN:

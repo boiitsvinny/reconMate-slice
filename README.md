@@ -113,7 +113,7 @@ docker compose exec api alembic upgrade head
 
 ## Synthetic development portfolio
 
-The deterministic seed module creates 24 named B2B customers and 168 invoices as of the virtual date **2026-08-01**. It covers healthy, predictably late, deteriorating, promise-breaking, partial-paying, disputed, strategic high-value, and severely overdue behaviours. Payments, promises, communications, recovery cases/actions, and audit events are generated as a coherent persisted history.
+The deterministic seed module creates 56 B2B customers and 296 invoices as of the virtual date **2026-08-01**. It covers healthy, predictably late, deteriorating, promise-breaking, partial-paying, disputed, strategic high-value, and severely overdue behaviours. Payments, promises, communications, recovery cases/actions, simulation state/events, and audit events are generated as a coherent persisted history.
 
 Seed a fresh development database:
 
@@ -143,21 +143,81 @@ It blocks automated recovery for active disputes, active payment promises, close
 
 ## Production deployment
 
-The Next.js application can be deployed to Vercel with `apps/web` as its Root Directory. Set the Vercel Production environment variable below **before** deploying, using the HTTPS URL of the separately deployed API (no trailing slash):
+Production uses three independently hosted components:
 
 ```text
-NEXT_PUBLIC_API_URL=https://your-api-host.example.com
+Browser -> Vercel (Next.js) -> Render (FastAPI) -> Supabase (PostgreSQL)
 ```
 
-The FastAPI service is not suitable for Vercel serverless deployment because it requires a persistent PostgreSQL database and runs migrations. A Render Blueprint is provided in `render.yaml` to deploy the API Docker image and a managed PostgreSQL 16 database. During Blueprint setup, provide the Vercel production domain for `API_CORS_ORIGINS`, for example:
+### 1. Create the Supabase database
+
+Create a Supabase project and copy its **Session pooler** connection string from the project's **Connect** dialog. Use the session pooler on port `5432` because Render connects to external databases over IPv4. Keep the database password URL-encoded if it contains reserved URL characters. The resulting value has this shape:
 
 ```text
-https://your-project.vercel.app
+postgresql://postgres.your-project-ref:your-url-encoded-password@aws-0-your-region.pooler.supabase.com:5432/postgres
 ```
 
-Render supplies the PostgreSQL connection string as `DATABASE_URL`; the API accepts its standard `postgresql://` form and configures SQLAlchemy to use psycopg. The Blueprint applies `alembic upgrade head` before each deploy. After the first deploy, seed production data only if this is intentional:
+Do not add this value to a tracked file. From a local PowerShell terminal, install the backend and apply all existing Alembic migrations to Supabase:
 
-Run `python -m app.seed` from the ReconMate API service's Shell in the Render Dashboard.
+```powershell
+Set-Location apps/api
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install .
+$env:DATABASE_URL = "<SUPABASE_SESSION_POOLER_DATABASE_URL>"
+alembic upgrade head
+alembic current
+```
+
+Seed the deterministic ReconMate portfolio after the migration succeeds:
+
+```powershell
+python -m app.seed
+```
+
+The seed command intentionally refuses to overwrite an existing portfolio. Use `python -m app.seed --reset` only when you explicitly want to replace all existing ReconMate domain data. Remove the credential from the current terminal when finished:
+
+```powershell
+Remove-Item Env:DATABASE_URL
+```
+
+### 2. Deploy the native Python API to Render
+
+The root `render.yaml` defines a free native Python Web Service. It does not use the backend Dockerfile and does not provision a Render database. The equivalent manual Render settings are:
+
+```text
+Root Directory: apps/api
+Language: Python 3
+Build Command: pip install --upgrade pip && pip install .
+Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+Health Check Path: /health/ready
+Instance Type: Free
+```
+
+Set these Render environment variables:
+
+```text
+APP_ENV=production
+DATABASE_URL=<SUPABASE_SESSION_POOLER_DATABASE_URL>
+API_CORS_ORIGINS=https://your-project.vercel.app
+AI_PROVIDER=mock
+SIMULATION_TICK_INTERVAL_SECONDS=15
+```
+
+`DATABASE_URL` is server-only and must never be exposed through a `NEXT_PUBLIC_` variable. Render supplies `PORT`; do not set it manually. Multiple allowed browser origins can be supplied as a comma-separated list in `API_CORS_ORIGINS`. Do not use `*` in production.
+
+The free Render service does not provide Shell access or pre-deploy commands, so migrations and seeding are deliberately run from a local terminal against Supabase before the API is deployed. Verify the deployed service at `https://your-render-service.onrender.com/health/ready`.
+
+### 3. Connect the Vercel frontend
+
+Deploy the Next.js application to Vercel with `apps/web` as its Root Directory. Set the Vercel Production environment variable below **before** deploying, using the Render service's HTTPS URL with no trailing slash:
+
+```text
+NEXT_PUBLIC_API_URL=https://your-render-service.onrender.com
+```
+
+Redeploy the Vercel project after adding or changing this build-time public variable. The frontend never receives the Supabase connection string and continues to access data only through the FastAPI contracts.
 
 ## Manual configuration
 
