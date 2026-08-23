@@ -1,0 +1,16 @@
+node_modules/
+.next/
+dist/
+coverage/
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.env
+.env.local
+apps/*/.env
+apps/*/.env.local
+postgres-data/
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,39 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
+type HealthState = "checking" | "healthy" | "unavailable";
+const apiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+export function ApiHealth() {
+  const [state, setState] = useState<HealthState>("checking");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    async function checkApiHealth() {
+      try {
+        const response = await fetch(`${apiBaseUrl}/health`, { signal: controller.signal });
+        const payload: unknown = await response.json();
+        const isHealthy = response.ok && typeof payload === "object" && payload !== null &&
+          "status" in payload && payload.status === "ok";
+        setState(isHealthy ? "healthy" : "unavailable");
+      } catch {
+        if (!controller.signal.aborted) setState("unavailable");
+      }
+    }
+    checkApiHealth();
+    return () => controller.abort();
+  }, []);
+
+  const status = {
+    checking: { label: "Checking API connection", color: "bg-amber-400" },
+    healthy: { label: "API connected", color: "bg-emerald-400" },
+    unavailable: { label: "API unavailable", color: "bg-rose-400" },
+  }[state];
+
+  return <div className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-slate-300">
+    <span className={`h-2.5 w-2.5 rounded-full ${status.color}`} aria-hidden="true" />
+    <span>{status.label}</span>
+    <span className="ml-auto text-xs text-slate-500">{apiBaseUrl}/health</span>
+  </div>;
+}
