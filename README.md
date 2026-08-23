@@ -37,7 +37,7 @@ Copy-Item apps/api/.env.example apps/api/.env
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The page calls `http://localhost:8000/health` and displays its status. Stop the stack with `docker compose down`. Use `docker compose down -v` only if you intentionally want to remove PostgreSQL data.
+Open [http://localhost:3000](http://localhost:3000). The browser calls the API origin configured by `NEXT_PUBLIC_API_URL` (which defaults to `http://localhost:8000` in the supplied local configuration). Stop the stack with `docker compose down`. Use `docker compose down -v` only if you intentionally want to remove PostgreSQL data.
 
 ## Run applications locally
 
@@ -141,6 +141,24 @@ docker compose exec api python -m app.recovery
 
 It blocks automated recovery for active disputes, active payment promises, closed/paid cases, and a short action cooldown. Read-only engine endpoints are `GET /recovery/cases`, `GET /recovery/cases/{case_id}`, `GET /recovery/cases/{case_id}/evaluation`, `GET /customers/{customer_id}/recovery-status`, and `GET /recovery/portfolio/summary`.
 
+## Production deployment
+
+The Next.js application can be deployed to Vercel with `apps/web` as its Root Directory. Set the Vercel Production environment variable below **before** deploying, using the HTTPS URL of the separately deployed API (no trailing slash):
+
+```text
+NEXT_PUBLIC_API_URL=https://your-api-host.example.com
+```
+
+The FastAPI service is not suitable for Vercel serverless deployment because it requires a persistent PostgreSQL database and runs migrations. A Render Blueprint is provided in `render.yaml` to deploy the API Docker image and a managed PostgreSQL 16 database. During Blueprint setup, provide the Vercel production domain for `API_CORS_ORIGINS`, for example:
+
+```text
+https://your-project.vercel.app
+```
+
+Render supplies the PostgreSQL connection string as `DATABASE_URL`; the API accepts its standard `postgresql://` form and configures SQLAlchemy to use psycopg. The Blueprint applies `alembic upgrade head` before each deploy. After the first deploy, seed production data only if this is intentional:
+
+Run `python -m app.seed` from the ReconMate API service's Shell in the Render Dashboard.
+
 ## Manual configuration
 
-The checked-in values are development defaults. Before using a shared or production environment, set a strong `POSTGRES_PASSWORD`, set the suitable `DATABASE_URL`, and configure `NEXT_PUBLIC_API_BASE_URL` to the reachable API origin. Do not commit `.env` or `.env.local` files.
+The checked-in values are development defaults. Before using a shared or production environment, set a suitable `DATABASE_URL`, configure the API's `API_CORS_ORIGINS` with explicit browser origins, and set Vercel's `NEXT_PUBLIC_API_URL` to the reachable API origin. Do not commit `.env` or `.env.local` files.
