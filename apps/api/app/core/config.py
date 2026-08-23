@@ -9,6 +9,7 @@ class Settings(BaseSettings):
 
     app_env: str = "development"
     api_cors_origins: str = "http://localhost:3000"
+    api_cors_origin_regex: str | None = None
     database_url: str = "postgresql+psycopg://reconmate:change-me-for-local-development@localhost:5432/reconmate"
     ai_provider: str = "mock"
     ai_model: str | None = None

@@ -11,7 +11,9 @@ services:
       - key: APP_ENV
         value: production
       - key: API_CORS_ORIGINS
-        sync: false
+        value: https://recon-mate-slice.vercel.app
+      - key: API_CORS_ORIGIN_REGEX
+        value: '^https://recon-mate-slice-[a-z0-9]+-boiitsvinnys-projects\.vercel\.app$'
       - key: DATABASE_URL
         sync: false
       - key: AI_PROVIDER
