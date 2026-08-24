@@ -3,19 +3,21 @@
 import { useMemo } from "react";
 import { AppHeader } from "@/components/layout/app-header";
 import { InvoiceRegister } from "./invoice-register";
-import { useCustomers, useInvoices } from "./queries";
+import { useCustomers, useInvoices, usePortfolioIntelligence } from "./queries";
 
 export function HistoryPage() {
   const customers = useCustomers();
   const invoices = useInvoices();
+  const intelligence = usePortfolioIntelligence();
   const ready = Boolean(customers.data && invoices.data);
   const error = customers.error ?? invoices.error;
   const errorMessage = error instanceof Error ? error.message : error ? "Unable to load invoice history." : null;
   const customerMap = useMemo(() => new Map(customers.data?.map((customer) => [customer.id, customer]) ?? []), [customers.data]);
+  const riskByCustomer = useMemo(() => new Map(intelligence.data?.customers.map((item) => [item.entity_id, { level: item.level, score: item.score }]) ?? []), [intelligence.data]);
 
   return (
     <main className="min-h-screen overflow-x-hidden">
-      <AppHeader connected={ready} updating={ready && (customers.isFetching || invoices.isFetching)} />
+      <AppHeader connected={ready} updating={ready && (customers.isFetching || invoices.isFetching || intelligence.isFetching)} />
       <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
         <header className="max-w-3xl">
           <p className="text-[11px] font-bold uppercase tracking-[.22em] text-sky-200">Receivables history</p>
@@ -25,7 +27,7 @@ export function HistoryPage() {
         {!ready && errorMessage && <PageError message={errorMessage} onRetry={async () => { await Promise.all([customers.refetch(), invoices.refetch()]); }} />}
         {!ready && !errorMessage && <PageSkeleton />}
         {ready && errorMessage && <p className="mt-5 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 text-xs text-amber-100">Live refresh is delayed. Showing cached invoice data.</p>}
-        {invoices.data && <InvoiceRegister invoices={invoices.data} customers={customerMap} />}
+        {invoices.data && <InvoiceRegister invoices={invoices.data} customers={customerMap} riskByCustomer={riskByCustomer} riskAvailable={Boolean(intelligence.data)} />}
       </div>
     </main>
   );

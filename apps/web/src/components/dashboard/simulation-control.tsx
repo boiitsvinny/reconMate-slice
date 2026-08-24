@@ -46,20 +46,30 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
   return (
     <section className="relative overflow-hidden rounded-2xl border border-sky-300/20 bg-[#08111f]/95 p-4 shadow-[0_18px_45px_rgba(0,0,0,.22)]">
       <div className="absolute inset-y-0 left-0 w-1 rounded-l-2xl bg-sky-400" />
-      <div className="flex flex-wrap items-center justify-between gap-4 pl-2">
+      <div className="pl-2">
+        <p className="text-[10px] font-bold uppercase tracking-[.16em] text-sky-300">Demo simulation</p>
+        <h2 className="mt-2 text-xl font-semibold tracking-[-.025em] text-white sm:text-2xl">Advance the operating cycle</h2>
+        <p className="mt-1 text-[11px] leading-4 text-slate-500">Run a cycle to persist operational changes, re-evaluate the portfolio, and refresh recommendations.</p>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-y border-white/[.07] py-3 pl-2">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[.18em] text-sky-300">
             <span className={cx("mr-2 inline-block h-1.5 w-1.5", auto ? "animate-pulse bg-emerald-400" : "bg-slate-500")} />
             Simulation {auto ? "live" : "paused"}
           </p>
           <p className="mt-1 text-xs text-slate-400">
-            Cycle <span className="font-semibold text-white">{cycle}</span> / operating date <span className="font-semibold text-slate-200">{simulationDate}</span>
+            Cycle <span className="font-semibold text-white">{cycle}</span> / virtual operating date <span className="font-semibold text-slate-200">{simulationDate}</span>
           </p>
         </div>
         <div className="border-l border-white/[.08] pl-4 text-right">
           <p className="text-xl font-semibold tabular-nums text-white">{auto ? `${remaining}s` : "-"}</p>
           <p className="text-[10px] uppercase tracking-[.12em] text-slate-500">next cycle</p>
         </div>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-1 pl-2 text-center text-[9px] font-semibold uppercase tracking-[.08em] text-slate-500" aria-label="Simulation cause and effect">
+        <span className="rounded-md bg-white/[.03] px-2 py-1.5">Events occur</span>
+        <span className="rounded-md bg-white/[.03] px-2 py-1.5">Facts evaluated</span>
+        <span className="rounded-md bg-white/[.03] px-2 py-1.5">Focus refreshes</span>
       </div>
       <div className="mt-4 flex flex-wrap gap-2 pl-2">
         <button disabled={busy} onClick={() => onAutoChange(!auto)} className={cx(buttonStyles.secondary, "max-sm:flex-1")}>{auto ? "Pause" : "Start / Resume"}</button>

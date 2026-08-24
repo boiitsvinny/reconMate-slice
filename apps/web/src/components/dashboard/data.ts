@@ -15,7 +15,7 @@ export type SimulationTickResult = {
   events: SimulationTickEvent[];
   recovery_synchronization: { cases_evaluated: number; cases_changed: number };
 };
-export type Invoice = { id: string; invoice_number: string; customer_id: string; due_date: string; outstanding_amount: string; status: string };
+export type Invoice = { id: string; invoice_number: string; customer_id: string; issue_date: string; due_date: string; original_amount: string; outstanding_amount: string; status: string };
 export type PriorityCase = { id: string; customerId: string; customerName: string; customerReference: string; amount: string; exposure: number; state: string; daysOverdue: number; promiseSignal: string; allowed: boolean; reason: string; recommendedAction: string; recommendationPriority: Recommendation["priority"]; recommendationReason: string; humanApprovalRequired: boolean };
 export type Workspace = {
   customer: { name: string; strategic: boolean };

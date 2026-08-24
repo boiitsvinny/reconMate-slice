@@ -11,7 +11,7 @@ export function PortfolioSignals({ signals, totalCases }: { signals: Signals; to
 
   return (
     <Panel>
-      <SectionHeader eyebrow="Risk and opportunity" title="Operational load" detail={`Share of ${totalCases} recovery cases`} />
+      <SectionHeader eyebrow="Portfolio conditions" title="Risk and opportunity" detail={`Share of ${totalCases} recovery cases`} prominent />
       <div className="space-y-5 p-5">
         {items.map(([label, value, detail, dot]) => (
           <div key={label}>

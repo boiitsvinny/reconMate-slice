@@ -26,17 +26,19 @@ export function SectionHeader({
   title,
   detail,
   action,
+  prominent = false,
 }: {
   eyebrow: string;
   title: string;
   detail?: string;
   action?: ReactNode;
+  prominent?: boolean;
 }) {
   return (
     <div className="flex flex-col items-start justify-between gap-4 border-b border-white/[.07] p-4 sm:flex-row sm:items-end sm:p-5">
       <div className="min-w-0">
         <SectionEyebrow>{eyebrow}</SectionEyebrow>
-        <h2 className="mt-2 text-base font-semibold tracking-[-.015em] text-white">{title}</h2>
+        <h2 className={cx("mt-2 font-semibold tracking-[-.025em] text-white", prominent ? "text-xl sm:text-2xl" : "text-base")}>{title}</h2>
         {detail && <p className="mt-1.5 text-xs leading-5 text-slate-500">{detail}</p>}
       </div>
       {action}

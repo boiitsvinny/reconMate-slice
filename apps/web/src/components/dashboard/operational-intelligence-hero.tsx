@@ -57,7 +57,9 @@ export function OperationalIntelligenceHero({ intelligence, loading, error, over
             <SectionEyebrow>Live portfolio intelligence</SectionEyebrow>
             <StatusPill tone={statusTone}>{critical ? "Critical attention" : high ? "Elevated attention" : "Stable"}</StatusPill>
           </div>
-          <h2 className="mt-4 max-w-2xl text-2xl font-semibold tracking-[-.035em] text-white sm:text-3xl">{headline}</h2>
+          <h2 className="mt-3 text-xl font-semibold tracking-[-.025em] text-white sm:text-2xl">Portfolio intelligence</h2>
+          <p className="mt-5 text-[10px] font-bold uppercase tracking-[.16em] text-slate-500">Most important current finding</p>
+          <h3 className="mt-2 max-w-2xl text-2xl font-semibold tracking-[-.035em] text-white sm:text-3xl">{headline}</h3>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
             {formatMoney(overdueExposure)} overdue from {formatMoney(totalOutstanding)} outstanding. ReconMate evaluated {intelligence.customer_count} accounts using current recovery facts.
           </p>
@@ -67,23 +69,24 @@ export function OperationalIntelligenceHero({ intelligence, loading, error, over
           {error && <p className="mt-2 text-[11px] text-amber-200/75">Live refresh is delayed; showing the last successful intelligence evaluation.</p>}
         </div>
         <div aria-label="Attention breakdown" className="grid grid-cols-2 overflow-hidden rounded-2xl border border-white/[.07] bg-black/10 sm:grid-cols-3 xl:grid-cols-6">
-          <AttentionMetric label="Critical" value={critical} tone="text-rose-200" />
-          <AttentionMetric label="High risk" value={high} tone="text-amber-100" />
-          <AttentionMetric label="Needs attention" value={needsAttention} tone="text-sky-200" />
-          <AttentionMetric label="Broken promises" value={brokenPromises} tone="text-rose-200" />
-          <AttentionMetric label="Active disputes" value={activeDisputes} tone="text-amber-100" />
-          <AttentionMetric label="Active recovery" value={activeRecovery} tone="text-emerald-200" />
+          <AttentionMetric label="Critical" detail="Immediate oversight" value={critical} tone="text-rose-200" />
+          <AttentionMetric label="High risk" detail="Elevated exposure" value={high} tone="text-amber-100" />
+          <AttentionMetric label="Needs attention" detail="Critical + high" value={needsAttention} tone="text-sky-200" />
+          <AttentionMetric label="Broken promises" detail="Missed commitments" value={brokenPromises} tone="text-rose-200" />
+          <AttentionMetric label="Active disputes" detail="Recovery blocked" value={activeDisputes} tone="text-amber-100" />
+          <AttentionMetric label="Active recovery" detail="Open case work" value={activeRecovery} tone="text-emerald-200" />
         </div>
       </div>
     </Panel>
   );
 }
 
-function AttentionMetric({ label, value, tone }: { label: string; value: number; tone: string }) {
+function AttentionMetric({ label, detail, value, tone }: { label: string; detail: string; value: number; tone: string }) {
   return (
     <div className="min-w-0 border-b border-r border-white/[.055] p-3.5 last:border-r-0 sm:p-4">
-      <p className="min-h-7 text-[9px] font-semibold uppercase leading-3.5 tracking-[.1em] text-slate-500">{label}</p>
+      <p className="text-[9px] font-semibold uppercase leading-3.5 tracking-[.1em] text-slate-400">{label}</p>
       <p className={`mt-2 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
+      <p className="mt-1 text-[9px] leading-3 text-slate-600">{detail}</p>
     </div>
   );
 }

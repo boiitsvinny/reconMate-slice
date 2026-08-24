@@ -8,11 +8,11 @@ import { apiUrl } from "@/lib/api";
 import { getPortfolioIntelligence, type PortfolioIntelligence } from "@/lib/intelligence-api";
 import { formatMoney as money, PriorityCase, SimState, SimulationTickResult } from "./data";
 import { CaseWorkspace } from "./case-workspace";
-import { IntelligenceBoundary } from "./intelligence-boundary";
 import { LiveEventFeed } from "./live-event-feed";
 import { OperationalIntelligenceHero } from "./operational-intelligence-hero";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
+import { RecommendationSafety } from "./recommendation-safety";
 import { queryKeys, useCustomers, useInvalidateOperationalData, usePortfolio, usePortfolioIntelligence, useRecovery, useRecoveryQueue, useSimulationEvents, useSimulationState } from "./queries";
 import { CycleFeedback, ResetFeedback, SimulationControl } from "./simulation-control";
 import { TodaysOperationalFocus } from "./todays-operational-focus";
@@ -179,7 +179,7 @@ export function Dashboard() {
 
   return (
     <main className="min-h-screen overflow-x-hidden">
-      <AppHeader connected={connectionsHealthy} updating={isUpdating} operatingDate={simulation.data?.simulation_date} />
+      <AppHeader connected={connectionsHealthy} updating={isUpdating} />
       <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
         {!dataReady && !errorMessage && <DashboardLoading />}
         {!dataReady && errorMessage && (
@@ -232,21 +232,27 @@ export function Dashboard() {
               onRetry={() => void intelligence.refetch()}
             />
 
-            <section aria-label="Important portfolio metrics" className="hide-scrollbar mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0 xl:grid-cols-4">
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Broken-promise exposure" value={money(recovery.data.broken_promise_exposure)} detail="Money at risk behind missed commitments" tone="amber" />
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovery ready" value={String(recovery.data.cases_eligible_for_recovery)} detail="Cases currently eligible for operator action" tone="blue" />
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovered this cycle" value={latestPayment ? money(latestPayment) : "-"} detail={latestPayment ? "Payment persisted in the current cycle" : "No payment event in the current cycle"} impact={latestPayment ? "Confirmed factual recovery" : undefined} tone="green" />
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Attention required" value={String(recovery.data.cases_requiring_attention ?? recovery.data.cases_eligible_for_recovery)} detail="Cases with a current factual condition" tone="red" />
+            <section aria-label="Important portfolio metrics" className="mt-7">
+              <div className="mb-4 px-1">
+                <p className="text-[10px] font-bold uppercase tracking-[.16em] text-sky-300">Operational position</p>
+                <h2 className="mt-1.5 text-xl font-semibold tracking-[-.025em] text-white">Money and work requiring attention</h2>
+              </div>
+              <div className="hide-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0 xl:grid-cols-4">
+              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Broken-promise exposure" state="At risk" value={money(recovery.data.broken_promise_exposure)} detail="Outstanding exposure tied to missed payment commitments." tone="amber" />
+              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovery ready" state="Actionable" value={String(recovery.data.cases_eligible_for_recovery)} detail="Cases whose current facts allow operator recovery work." tone="blue" />
+              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovered this cycle" state={latestPayment ? "Confirmed" : "No payment"} value={latestPayment ? money(latestPayment) : "-"} detail={latestPayment ? "A payment was persisted during the current simulation cycle." : "The current simulation cycle contains no payment event."} impact={latestPayment ? "Confirmed factual recovery" : undefined} tone="green" />
+              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Attention required" state="Review" value={String(recovery.data.cases_requiring_attention ?? recovery.data.cases_eligible_for_recovery)} detail="Cases carrying an active factual attention condition." tone="red" />
+              </div>
             </section>
 
             <section aria-label="Portfolio operations" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
               <LiveEventFeed events={events.data} customers={names} />
               <aside className="space-y-5">
                 <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
-                <IntelligenceBoundary />
                 <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} />
               </aside>
             </section>
+            <RecommendationSafety activeDisputes={recovery.data.cases_blocked_by_dispute} activePromises={recovery.data.cases_awaiting_payment} />
           </>
         )}
       </div>

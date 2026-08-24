@@ -43,6 +43,7 @@ export function TodaysOperationalFocus({ intelligence, loading, error, casesByCu
         eyebrow="Today's operational focus"
         title="What needs attention right now"
         detail={intelligence ? "Backend-ranked accounts, presented in current intelligence priority order." : "Loading the current operational priority list."}
+        prominent
       />
       {loading && <FocusLoading />}
       {!loading && error && !intelligence && (
@@ -74,20 +75,22 @@ function FocusItem({ item, index, recoveryCase, caseLinkLoading, affected, onSel
   const signals = item.signals.slice(0, 2);
 
   return (
-    <article className={cx("border-l-2 px-4 py-5 transition hover:bg-white/[.018] sm:px-5", presentation.border, affected && "live-enter bg-sky-300/[.035]")}>
-      <div className="grid gap-5 lg:grid-cols-[minmax(180px,.7fr)_minmax(320px,1.5fr)_auto] lg:items-center">
+    <article className={cx("border-l-2 px-4 py-4 transition hover:bg-white/[.018] sm:px-5", presentation.border, affected && "live-enter bg-sky-300/[.035]")}> 
+      <div className="grid gap-4 lg:grid-cols-[minmax(210px,.8fr)_minmax(360px,1.55fr)_auto] lg:items-center">
         <div className="min-w-0">
           <div className="flex items-center gap-2"><span className="text-[10px] tabular-nums text-slate-600">{String(index + 1).padStart(2, "0")}</span><h3 className="truncate text-sm font-semibold text-white">{item.entity_name}</h3></div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <StatusPill tone={riskTone(item.level)}>{item.level} / {item.score}</StatusPill>
             <StatusPill tone={presentation.tone}>{presentation.label}</StatusPill>
           </div>
-          <p className="mt-2 text-[11px] text-slate-500">{formatMoney(item.metrics.overdue_exposure)} overdue / {item.metrics.max_days_overdue} days maximum</p>
+          <p className="mt-2 text-[11px] text-slate-400">{formatMoney(item.metrics.overdue_exposure)} overdue / {item.metrics.max_days_overdue} days maximum</p>
+          {recoveryCase && <p className="mt-1 text-[10px] text-slate-600">Case {recoveryCase.id.slice(0, 8)} / {recoveryCase.state.replaceAll("_", " ")}</p>}
         </div>
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-sky-100">{item.recommendation.title}</p>
+          <p className="text-[9px] font-bold uppercase tracking-[.13em] text-sky-300/70">Current recommendation</p>
+          <p className="mt-1 text-sm font-semibold text-sky-100">{item.recommendation.title}</p>
           <p className="mt-1.5 text-xs leading-5 text-slate-400">{item.recommendation.explanation}</p>
-          {signals.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{signals.map((signal) => <span key={signal.type} title={signal.explanation} className="rounded-full border border-white/[.08] bg-white/[.025] px-2.5 py-1 text-[10px] text-slate-400">{signal.title}</span>)}</div>}
+          {signals.length > 0 && <div className="mt-2.5 flex flex-wrap gap-1.5" aria-label="Important conditions">{signals.map((signal) => <span key={signal.type} title={signal.explanation} className="rounded-full border border-white/[.08] bg-white/[.025] px-2.5 py-1 text-[10px] text-slate-400">{signal.title}</span>)}</div>}
         </div>
         <div className="flex lg:justify-end">
           {caseLinkLoading

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-type AppHeaderProps = { connected: boolean; updating?: boolean; operatingDate?: string | null };
+type AppHeaderProps = { connected: boolean; updating?: boolean };
 
 const navigation = [
   ["/", "Home"],
@@ -13,7 +13,7 @@ const navigation = [
   ["/reports", "Reports"],
 ] as const;
 
-export function AppHeader({ connected, updating = false, operatingDate }: AppHeaderProps) {
+export function AppHeader({ connected, updating = false }: AppHeaderProps) {
   const pathname = usePathname();
   const [today, setToday] = useState("");
 
@@ -24,23 +24,24 @@ export function AppHeader({ connected, updating = false, operatingDate }: AppHea
     return () => window.clearInterval(timer);
   }, []);
 
-  const displayedDate = operatingDate
-    ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${operatingDate}T00:00:00Z`))
-    : today || "-";
   const systemLabel = updating ? "Synchronizing" : connected ? "System optimal" : "Connection degraded";
 
   return (
     <>
     <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b border-white/[0.09] bg-[#07111f]/95 px-4 shadow-lg shadow-black/10 backdrop-blur-xl sm:px-6 lg:px-10">
-      <div className="flex min-w-0 items-center gap-3">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-sky-300/20 bg-sky-400/[.1]">
-          <span className="text-xs font-semibold text-sky-300">R</span>
+      <Link href="/" aria-label="ReconMate home" className="group flex min-w-0 items-center gap-3">
+        <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-sky-200/25 bg-gradient-to-br from-sky-300/20 to-blue-500/10 shadow-[0_0_24px_rgba(56,189,248,.12)] transition group-hover:border-sky-200/45">
+          <svg aria-hidden="true" viewBox="0 0 32 32" className="h-7 w-7 fill-none stroke-sky-200" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M8 24V8h8.5a5 5 0 0 1 0 10H8" />
+            <path d="m16 18 7 6" />
+            <circle cx="23.5" cy="8.5" r="2" className="fill-emerald-300 stroke-none" />
+          </svg>
         </div>
         <div className="min-w-0">
-          <div className="text-[15px] font-semibold tracking-[-0.02em] text-white">ReconMate</div>
-          <div className="truncate text-[10px] font-medium uppercase tracking-[0.16em] text-slate-500">Recovery operations</div>
+          <div className="text-base font-semibold tracking-[-0.025em] text-white">ReconMate</div>
+          <div className="truncate text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500 sm:text-[10px]">Recovery operations</div>
         </div>
-      </div>
+      </Link>
       <nav aria-label="Primary navigation" className="hidden items-center gap-1 rounded-xl border border-white/[.07] bg-white/[.025] p-1 sm:flex lg:ml-6">
         {navigation.map(([href, label]) => {
           const active = href === "/" ? pathname === href : pathname.startsWith(href);
@@ -49,9 +50,9 @@ export function AppHeader({ connected, updating = false, operatingDate }: AppHea
       </nav>
       <div className="flex items-center gap-3">
         <div className={`hidden rounded-lg border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] lg:block ${updating ? "border-sky-300/20 bg-sky-300/[.07] text-sky-200" : connected ? "border-emerald-300/15 bg-emerald-300/[0.06] text-emerald-200" : "border-amber-300/20 bg-amber-300/[.07] text-amber-100"}`}>{systemLabel}</div>
-        <div className="hidden rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-right sm:block">
-          <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">{operatingDate ? "Operating date" : "Today"}</div>
-          <div className="mt-0.5 text-xs font-semibold text-slate-200">{displayedDate}</div>
+        <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 text-right sm:px-3">
+          <div className="text-[8px] font-semibold uppercase tracking-[0.12em] text-slate-500 sm:text-[10px]">Actual date</div>
+          <div className="mt-0.5 whitespace-nowrap text-[10px] font-semibold text-slate-200 sm:text-xs">{today || "-"}</div>
         </div>
         <span className={`h-2 w-2 rounded-full ${updating ? "animate-pulse bg-sky-300" : connected ? "bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,.8)]" : "bg-rose-400"}`} aria-label={updating ? "Refreshing live data" : connected ? "API connected" : "API unavailable"} />
       </div>
