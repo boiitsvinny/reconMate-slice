@@ -21,8 +21,8 @@ export function PriorityQueue({ items, onSelect, changedCaseIds }: { items: Prio
         detail="Ordered by the API recommendation priority, overdue age and exposure."
         action={
           <div className="flex rounded-xl border border-white/[.08] p-0.5 text-[10px] font-semibold uppercase tracking-[.08em]">
-            <button type="button" onClick={() => setShowAll(false)} className={cx("px-2.5 py-1.5 transition", !showAll ? "bg-sky-300 text-slate-950" : "text-slate-500 hover:text-white")}>Focus {focusItems.length}</button>
-            <button type="button" onClick={() => setShowAll(true)} className={cx("px-2.5 py-1.5 transition", showAll ? "bg-sky-300 text-slate-950" : "text-slate-500 hover:text-white")}>All {items.length}</button>
+            <button type="button" onClick={() => setShowAll(false)} className={cx("rounded-lg px-2.5 py-1.5 transition", !showAll ? "bg-sky-300 text-slate-950" : "text-slate-500 hover:text-white")}>Focus {focusItems.length}</button>
+            <button type="button" onClick={() => setShowAll(true)} className={cx("rounded-lg px-2.5 py-1.5 transition", showAll ? "bg-sky-300 text-slate-950" : "text-slate-500 hover:text-white")}>All {items.length}</button>
           </div>
         }
       />

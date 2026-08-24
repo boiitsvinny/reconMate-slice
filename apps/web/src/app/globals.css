@@ -38,6 +38,8 @@ body::before {
 }
 main { background: rgba(5, 8, 18, 0.52); }
 .glass-card { backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
 @keyframes ambient-gradient { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
 @keyframes particle-drift { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(72px, 46px, 0); } }
 @keyframes live-enter { from { opacity: .25; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }

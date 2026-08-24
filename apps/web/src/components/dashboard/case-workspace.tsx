@@ -1,50 +1,49 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiUrl } from "@/lib/api";
 import type { PriorityCase } from "./data";
+import { queryKeys, useCaseWorkspace, useInvalidateOperationalData } from "./queries";
 import { buttonStyles, cx, StatusPill } from "./ui";
-
-type Workspace = {
-  customer: { name: string; strategic: boolean };
-  invoice: { number: string; status: string; outstanding_amount: string; due_date: string } | null;
-  recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; operator_explanation: string; communication_signals: { intent: string; confidence: string | null }[] };
-  promises: { status: string; promised_amount: string; promised_date: string }[];
-  communications: { id: string; direction: string; content: string; occurred_at: string; analyses: { intent?: string }[] }[];
-  actions: { id: string; status: string; recommended_action: string | null; human_approval_required: boolean; decision_reason: string | null; executed_at: string | null }[];
-  audit_events: { id: string; event_type: string; occurred_at: string }[];
-};
 
 function label(value: string) { return value.replaceAll("_", " "); }
 function money(value: string) { return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(value)); }
 
 export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean }) {
-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const reload = () => fetch(apiUrl(`/recovery/cases/${item.id}/workspace`)).then(async (response) => {
-    if (!response.ok) throw new Error((await response.json()).detail ?? "Unable to load the case workspace.");
-    return response.json() as Promise<Workspace>;
-  }).then(setWorkspace).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Unable to load workspace."));
+  const queryClient = useQueryClient();
+  const workspaceQuery = useCaseWorkspace(item.id);
+  const workspace = workspaceQuery.data;
+  const invalidateOperationalData = useInvalidateOperationalData();
+  const action = useMutation({
+    mutationFn: async ({ url, body }: { url: string; body: Record<string, unknown> }) => {
+      const response = await fetch(apiUrl(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(payload?.detail ?? "Workflow action was not accepted.");
+      }
+      return response.json();
+    },
+    onSuccess: async () => { await invalidateOperationalData(); },
+  });
 
-  useEffect(() => { reload(); }, [item.id]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { if (affected) reload(); }, [affected, liveVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (affected) void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(item.id) });
+  }, [affected, item.id, liveVersion, queryClient]);
 
   async function request(url: string, body: Record<string, unknown>) {
-    setBusy(true);
-    setError(null);
     try {
-      const response = await fetch(apiUrl(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      if (!response.ok) throw new Error((await response.json()).detail ?? "Workflow action was not accepted.");
-      reload();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Workflow action failed.");
-    } finally {
-      setBusy(false);
+      await action.mutateAsync({ url, body });
+    } catch {
+      // Mutation error is rendered without discarding the current workspace.
     }
   }
 
   const latest = workspace?.actions[0];
+  const queryError = workspaceQuery.error instanceof Error ? workspaceQuery.error.message : null;
+  const mutationError = action.error instanceof Error ? action.error.message : null;
+  const error = mutationError ?? (!workspace ? queryError : null);
+  const busy = action.isPending;
   const create = () => {
     if (workspace && window.confirm(`Create a workflow action for ${label(workspace.recommendation.recommended_action)}?`)) {
       request(`/recovery/cases/${item.id}/actions`, { expected_recommended_action: workspace.recommendation.recommended_action });
@@ -58,8 +57,8 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-[#050814]/65 p-2 backdrop-blur-sm" onClick={onClose} role="presentation">
-      <section className="h-full w-full max-w-2xl overflow-y-auto rounded-2xl border border-white/[0.12] bg-[#0d1628] p-5 shadow-2xl shadow-black/70 sm:p-7" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${item.customerName} recovery workspace`}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-[#050814]/65 p-0 backdrop-blur-sm sm:p-2" onClick={onClose} role="presentation">
+      <section className="h-full w-full max-w-2xl overflow-y-auto rounded-none border border-white/[0.12] bg-[#0d1628] p-4 pb-24 shadow-2xl shadow-black/70 sm:rounded-2xl sm:p-7" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${item.customerName} recovery workspace`}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-sky-300">Operator case workspace</p>
@@ -70,7 +69,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
         </div>
         {error && <p className="mt-5 border border-rose-300/15 bg-rose-300/[.06] p-3 text-sm text-rose-100">{error}</p>}
         {affected && <p className="live-enter mt-5 border border-sky-300/15 bg-sky-400/[.05] p-3 text-xs text-sky-200">Portfolio update detected. Factual case data and recommendation refreshed.</p>}
-        {!workspace && !error && <div className="mt-8 h-64 animate-pulse bg-white/[.04]" />}
+        {!workspace && !error && <div className="mt-8 h-64 animate-pulse rounded-2xl bg-white/[.04]" />}
         {workspace && (
           <div className="mt-6 space-y-5">
             <section className="grid gap-3 sm:grid-cols-4">

@@ -6,8 +6,18 @@ export type Customer = { id: string; name: string; account_reference: string; ou
 export type CaseApi = { case_id: string; customer_id: string; customer_name: string; evaluation: { derived_state: string; invoice: { outstanding_amount: string; days_overdue: number } | null; promises: { state: string }[]; active_dispute: boolean; eligibility: { allowed: boolean; blocking_reasons: string[] }; next_factual_condition: string } };
 export type Recommendation = { case_id: string; recommended_action: string; priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; human_approval_required: boolean; factual_reasons: string[]; blockers: string[]; relevant_exposure: string; relevant_days_overdue: number; operator_explanation: string };
 export type SimState = { cycle: number; simulation_date: string; tick_interval_seconds: number };
+export type SimulationEvent = { id: string; cycle: number; type: string; customer_id: string | null; invoice_id: string | null; case_id: string | null; metadata: Record<string, string>; occurred_at: string };
 export type Invoice = { id: string; invoice_number: string; customer_id: string; due_date: string; outstanding_amount: string; status: string };
 export type PriorityCase = { id: string; customerId: string; customerName: string; customerReference: string; amount: string; exposure: number; state: string; daysOverdue: number; promiseSignal: string; allowed: boolean; reason: string; recommendedAction: string; recommendationPriority: Recommendation["priority"]; recommendationReason: string; humanApprovalRequired: boolean };
+export type Workspace = {
+  customer: { name: string; strategic: boolean };
+  invoice: { number: string; status: string; outstanding_amount: string; due_date: string } | null;
+  recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; operator_explanation: string; communication_signals: { intent: string; confidence: string | null }[] };
+  promises: { status: string; promised_amount: string; promised_date: string }[];
+  communications: { id: string; direction: string; content: string; occurred_at: string; analyses: { intent?: string }[] }[];
+  actions: { id: string; status: string; recommended_action: string | null; human_approval_required: boolean; decision_reason: string | null; executed_at: string | null }[];
+  audit_events: { id: string; event_type: string; occurred_at: string }[];
+};
 
 export const formatMoney = (value: string | number) => {
   const amount = Number(value);

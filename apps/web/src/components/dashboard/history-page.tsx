@@ -1,38 +1,31 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { AppHeader } from "@/components/layout/app-header";
-import { Customer, fetchJson, Invoice } from "./data";
 import { InvoiceRegister } from "./invoice-register";
+import { useCustomers, useInvoices } from "./queries";
 
 export function HistoryPage() {
-  const [data, setData] = useState<{ customers: Customer[]; invoices: Invoice[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const load = useCallback(async () => {
-    try {
-      const [customers, invoices] = await Promise.all([fetchJson<Customer[]>("/customers"), fetchJson<Invoice[]>("/invoices")]);
-      setData({ customers, invoices });
-      setError(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Unable to load invoice history.");
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-  const customerMap = useMemo(() => new Map(data?.customers.map((customer) => [customer.id, customer]) ?? []), [data?.customers]);
+  const customers = useCustomers();
+  const invoices = useInvoices();
+  const ready = Boolean(customers.data && invoices.data);
+  const error = customers.error ?? invoices.error;
+  const errorMessage = error instanceof Error ? error.message : error ? "Unable to load invoice history." : null;
+  const customerMap = useMemo(() => new Map(customers.data?.map((customer) => [customer.id, customer]) ?? []), [customers.data]);
 
   return (
     <main className="min-h-screen overflow-x-hidden">
-      <AppHeader connected={Boolean(data)} />
-      <div className="mx-auto max-w-[1580px] px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
+      <AppHeader connected={ready} updating={ready && (customers.isFetching || invoices.isFetching)} />
+      <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
         <header className="max-w-3xl">
           <p className="text-[11px] font-bold uppercase tracking-[.22em] text-sky-200">Receivables history</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Invoice History</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300/80">Review every live invoice record. Select a row to inspect its invoice and customer profile beside your pointer.</p>
         </header>
-        {error && <PageError message={error} onRetry={load} />}
-        {!data && !error && <PageSkeleton />}
-        {data && <InvoiceRegister invoices={data.invoices} customers={customerMap} />}
+        {!ready && errorMessage && <PageError message={errorMessage} onRetry={async () => { await Promise.all([customers.refetch(), invoices.refetch()]); }} />}
+        {!ready && !errorMessage && <PageSkeleton />}
+        {ready && errorMessage && <p className="mt-5 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 text-xs text-amber-100">Live refresh is delayed. Showing cached invoice data.</p>}
+        {invoices.data && <InvoiceRegister invoices={invoices.data} customers={customerMap} />}
       </div>
     </main>
   );

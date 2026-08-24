@@ -24,7 +24,7 @@ export function SectionHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-end justify-between gap-4 border-b border-white/[.07] p-5">
+    <div className="flex flex-col items-start justify-between gap-4 border-b border-white/[.07] p-4 sm:flex-row sm:items-end sm:p-5">
       <div className="min-w-0">
         <p className="text-[10px] font-bold uppercase tracking-[.18em] text-sky-300">{eyebrow}</p>
         <h2 className="mt-1 text-sm font-semibold text-white">{title}</h2>

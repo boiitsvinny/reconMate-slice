@@ -2,7 +2,7 @@ import { cx } from "./ui";
 
 type Tone = "blue" | "red" | "amber" | "green";
 
-export function PortfolioMetricCard({ label, value, detail, impact, tone = "blue" }: { label: string; value: string; detail: string; impact?: string; tone?: Tone }) {
+export function PortfolioMetricCard({ label, value, detail, impact, tone = "blue", className }: { label: string; value: string; detail: string; impact?: string; tone?: Tone; className?: string }) {
   const tones: Record<Tone, string> = {
     blue: "border-sky-300/14 text-sky-300",
     red: "border-rose-300/14 text-rose-300",
@@ -11,7 +11,7 @@ export function PortfolioMetricCard({ label, value, detail, impact, tone = "blue
   };
 
   return (
-    <article className={cx("group relative min-h-[156px] overflow-hidden rounded-2xl border bg-[#08111f]/95 p-5 shadow-[0_18px_45px_rgba(0,0,0,.18)] transition duration-300 hover:-translate-y-0.5", tones[tone])}>
+    <article className={cx("group relative min-h-[156px] overflow-hidden rounded-2xl border bg-[#08111f]/95 p-5 shadow-[0_18px_45px_rgba(0,0,0,.18)] transition duration-300 hover:-translate-y-0.5", tones[tone], className)}>
       <div className="absolute inset-x-0 top-0 h-px bg-current opacity-30" />
       <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
       <p className="mt-4 text-2xl font-semibold tracking-[-0.035em] text-white sm:text-3xl">{value}</p>

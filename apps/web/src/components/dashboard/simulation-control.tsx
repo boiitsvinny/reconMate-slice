@@ -37,8 +37,8 @@ export function SimulationControl({ cycle, interval, busy, auto, lastResult, onA
         </div>
       </div>
       <div className="mt-4 flex flex-wrap gap-2 pl-2">
-        <button disabled={busy} onClick={() => onAutoChange(!auto)} className={buttonStyles.secondary}>{auto ? "Pause" : "Start / Resume"}</button>
-        <button disabled={busy} onClick={onTick} className={buttonStyles.primary}>{busy ? "Applying..." : "Run now"}</button>
+        <button disabled={busy} onClick={() => onAutoChange(!auto)} className={cx(buttonStyles.secondary, "max-sm:flex-1")}>{auto ? "Pause" : "Start / Resume"}</button>
+        <button disabled={busy} onClick={onTick} className={cx(buttonStyles.primary, "max-sm:flex-1")}>{busy ? "Applying..." : "Run now"}</button>
       </div>
       {lastResult && <p className="mt-3 pl-2 text-[11px] leading-5 text-slate-500">{lastResult}</p>}
     </section>

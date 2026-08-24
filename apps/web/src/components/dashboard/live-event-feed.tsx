@@ -1,8 +1,9 @@
 "use client";
 
 import { Panel, SectionHeader, cx } from "./ui";
+import type { SimulationEvent } from "./data";
 
-export type SimulationEvent = { id: string; cycle: number; type: string; customer_id: string | null; invoice_id: string | null; case_id: string | null; metadata: Record<string, string>; occurred_at: string };
+export type { SimulationEvent } from "./data";
 
 const tone = (type: string) => type.includes("PAYMENT") ? "border-emerald-400 text-emerald-200" : type.includes("PROMISE") ? "border-rose-400 text-rose-200" : type.includes("DISPUTE") ? "border-amber-300 text-amber-200" : "border-sky-400 text-sky-200";
 const label = (type: string) => type.replaceAll("_", " ");

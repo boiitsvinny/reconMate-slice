@@ -23,7 +23,7 @@ export function NextAction({ item, onSelect }: { item?: PriorityCase; onSelect: 
             <span>{item.daysOverdue > 0 ? `${item.daysOverdue} days overdue` : item.state.replaceAll("_", " ")}</span>
           </div>
           <p className="mt-4 line-clamp-3 text-xs leading-5 text-slate-400">{item.recommendationReason}</p>
-          <div className="mt-auto flex items-end justify-between gap-4 pt-5">
+          <div className="mt-auto flex flex-col items-stretch justify-between gap-4 pt-5 sm:flex-row sm:items-end">
             <p className="text-[10px] uppercase tracking-[.11em] text-slate-500">{item.humanApprovalRequired ? "Human approval required" : "Operator review"}</p>
             <button type="button" onClick={() => onSelect(item)} className={cx(buttonStyles.primary, "shrink-0")}>Review case</button>
           </div>
