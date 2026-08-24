@@ -1,5 +1,5 @@
 import type { PriorityCase } from "./data";
-import { buttonStyles, cx, Panel, StatusPill } from "./ui";
+import { buttonStyles, cx, Panel, SectionEyebrow, StatusPill } from "./ui";
 
 const label = (value: string) => value.replaceAll("_", " ");
 const priorityTone = (priority: PriorityCase["recommendationPriority"]) => priority === "CRITICAL" ? "rose" : priority === "HIGH" ? "amber" : priority === "MEDIUM" ? "sky" : "slate";
@@ -9,8 +9,8 @@ export function NextAction({ item, onSelect }: { item?: PriorityCase; onSelect: 
     <Panel className="flex min-h-[258px] flex-col border-sky-300/15">
       <div className="flex items-center justify-between gap-3 border-b border-white/[.07] px-5 py-4">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[.18em] text-sky-300">Recommended next action</p>
-          <p className="mt-1 text-xs text-slate-500">Highest-priority live recommendation</p>
+          <SectionEyebrow>Recommended next action</SectionEyebrow>
+          <p className="mt-2 text-xs text-slate-500">Highest-priority live recommendation</p>
         </div>
         {item && <StatusPill tone={priorityTone(item.recommendationPriority)}>{item.recommendationPriority}</StatusPill>}
       </div>

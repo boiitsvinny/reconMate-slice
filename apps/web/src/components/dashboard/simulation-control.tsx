@@ -3,9 +3,34 @@
 import { useEffect, useState } from "react";
 import { buttonStyles, cx } from "./ui";
 
-type Props = { cycle: number; interval: number; busy: boolean; auto: boolean; lastResult: string; onAutoChange: (enabled: boolean) => void; onTick: () => void };
+type Props = {
+  cycle: number;
+  simulationDate: string;
+  interval: number;
+  busy: boolean;
+  resetting: boolean;
+  auto: boolean;
+  feedback?: CycleFeedback;
+  resetFeedback?: ResetFeedback;
+  onAutoChange: (enabled: boolean) => void;
+  onTick: () => void;
+  onReset: () => void;
+};
 
-export function SimulationControl({ cycle, interval, busy, auto, lastResult, onAutoChange, onTick }: Props) {
+export type CycleFeedback = {
+  status: "MATERIAL_CHANGE" | "NO_MATERIAL_CHANGE" | "REFRESH_FAILED";
+  headline: string;
+  event: string;
+  summary: string;
+  changes: string[];
+};
+
+export type ResetFeedback = {
+  status: "SUCCESS" | "REFRESH_FAILED";
+  message: string;
+};
+
+export function SimulationControl({ cycle, simulationDate, interval, busy, resetting, auto, feedback, resetFeedback, onAutoChange, onTick, onReset }: Props) {
   const [remaining, setRemaining] = useState(interval);
 
   useEffect(() => {
@@ -28,7 +53,7 @@ export function SimulationControl({ cycle, interval, busy, auto, lastResult, onA
             Simulation {auto ? "live" : "paused"}
           </p>
           <p className="mt-1 text-xs text-slate-400">
-            Cycle <span className="font-semibold text-white">{cycle}</span> / {interval}s interval
+            Cycle <span className="font-semibold text-white">{cycle}</span> / operating date <span className="font-semibold text-slate-200">{simulationDate}</span>
           </p>
         </div>
         <div className="border-l border-white/[.08] pl-4 text-right">
@@ -38,9 +63,32 @@ export function SimulationControl({ cycle, interval, busy, auto, lastResult, onA
       </div>
       <div className="mt-4 flex flex-wrap gap-2 pl-2">
         <button disabled={busy} onClick={() => onAutoChange(!auto)} className={cx(buttonStyles.secondary, "max-sm:flex-1")}>{auto ? "Pause" : "Start / Resume"}</button>
-        <button disabled={busy} onClick={onTick} className={cx(buttonStyles.primary, "max-sm:flex-1")}>{busy ? "Applying..." : "Run now"}</button>
+        <button disabled={busy} onClick={onTick} className={cx(buttonStyles.primary, "max-sm:flex-1")}>{busy && !resetting ? "Applying..." : "Run now"}</button>
+        <button
+          disabled={busy}
+          onClick={() => {
+            if (window.confirm("Reset the complete ReconMate demo simulation? This restores the original seeded portfolio, cycle 0, operating date, events, payments, promises, disputes, recovery work, and intelligence state.")) onReset();
+          }}
+          className={cx(buttonStyles.secondary, "border-rose-300/15 text-rose-100/75 hover:border-rose-300/35 hover:text-rose-50 max-sm:w-full")}
+        >
+          {resetting ? "Restoring baseline..." : "Reset demo"}
+        </button>
       </div>
-      {lastResult && <p className="mt-3 pl-2 text-[11px] leading-5 text-slate-500">{lastResult}</p>}
+      {busy && <div className="mt-4 border-t border-sky-300/10 pl-2 pt-3" role="status"><p className="text-[11px] font-semibold text-sky-200">{resetting ? "Restoring the seeded portfolio and refreshing every operational view..." : "Persisting facts and synchronizing dashboard intelligence..."}</p></div>}
+      {!busy && feedback && (
+        <div className={cx("live-enter mt-4 border-t pl-2 pt-3", feedback.status === "REFRESH_FAILED" ? "border-amber-300/15" : "border-emerald-300/10")} role="status" aria-live="polite">
+          <p className={cx("text-[11px] font-semibold", feedback.status === "REFRESH_FAILED" ? "text-amber-100" : "text-emerald-200")}>{feedback.headline}</p>
+          <p className="mt-1 text-[10px] leading-4 text-slate-400">{feedback.event}</p>
+          <p className={cx("mt-2 text-[11px] font-medium leading-4", feedback.status === "MATERIAL_CHANGE" ? "text-sky-200" : feedback.status === "REFRESH_FAILED" ? "text-amber-100/80" : "text-slate-300")}>{feedback.summary}</p>
+          {feedback.changes.length > 0 && <ul className="mt-2 space-y-1 text-[10px] leading-4 text-slate-400">{feedback.changes.map((change) => <li key={change}>• {change}</li>)}</ul>}
+        </div>
+      )}
+      {!busy && resetFeedback && (
+        <div className={cx("live-enter mt-4 border-t pl-2 pt-3", resetFeedback.status === "SUCCESS" ? "border-emerald-300/10" : "border-amber-300/15")} role="status" aria-live="polite">
+          <p className={cx("text-[11px] font-semibold leading-4", resetFeedback.status === "SUCCESS" ? "text-emerald-200" : "text-amber-100")}>{resetFeedback.message}</p>
+        </div>
+      )}
+      <p className="mt-3 pl-2 text-[10px] leading-4 text-slate-600">Each completed cycle refreshes portfolio facts, recovery state, recommendations, and intelligence.</p>
     </section>
   );
 }

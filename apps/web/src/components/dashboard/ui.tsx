@@ -12,6 +12,15 @@ export function Panel({ children, className = "" }: { children: ReactNode; class
   );
 }
 
+export function SectionEyebrow({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <div className={cx("flex items-center gap-2.5", className)}>
+      <span className="h-4 w-1 shrink-0 rounded-full bg-sky-300 shadow-[0_0_12px_rgba(125,211,252,.55)]" aria-hidden="true" />
+      <p className="text-[11px] font-extrabold uppercase leading-none tracking-[.14em] text-sky-200">{children}</p>
+    </div>
+  );
+}
+
 export function SectionHeader({
   eyebrow,
   title,
@@ -26,9 +35,9 @@ export function SectionHeader({
   return (
     <div className="flex flex-col items-start justify-between gap-4 border-b border-white/[.07] p-4 sm:flex-row sm:items-end sm:p-5">
       <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-[.18em] text-sky-300">{eyebrow}</p>
-        <h2 className="mt-1 text-sm font-semibold text-white">{title}</h2>
-        {detail && <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>}
+        <SectionEyebrow>{eyebrow}</SectionEyebrow>
+        <h2 className="mt-2 text-base font-semibold tracking-[-.015em] text-white">{title}</h2>
+        {detail && <p className="mt-1.5 text-xs leading-5 text-slate-500">{detail}</p>}
       </div>
       {action}
     </div>

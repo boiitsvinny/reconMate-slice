@@ -29,6 +29,7 @@ from app.models.domain import (
     RecoveryCase,
     RecoveryPriority,
     RecoveryState,
+    SimulationEvent,
     SimulationState,
 )
 
@@ -95,7 +96,7 @@ def _money(value: int) -> Decimal:
 def reset_database(session: Session) -> None:
     """Remove only ReconMate domain records, in FK-safe order."""
     from app.models.domain import CommunicationAnalysis
-    for model in (AuditEvent, RecoveryAction, RecoveryCase, PromiseToPay, Payment, CommunicationAnalysis, Communication, Invoice, Customer, SimulationState):
+    for model in (SimulationEvent, AuditEvent, RecoveryAction, RecoveryCase, PromiseToPay, Payment, CommunicationAnalysis, Communication, Invoice, Customer, SimulationState):
         session.execute(delete(model))
     session.flush()
 

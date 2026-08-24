@@ -1,76 +1,185 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/app-header";
+import { useCommandSession } from "@/components/intelligence/command-session";
 import { apiUrl } from "@/lib/api";
-import { formatMoney as money, SimulationEvent } from "./data";
+import { getPortfolioIntelligence, type PortfolioIntelligence } from "@/lib/intelligence-api";
+import { formatMoney as money, PriorityCase, SimState, SimulationTickResult } from "./data";
+import { CaseWorkspace } from "./case-workspace";
 import { IntelligenceBoundary } from "./intelligence-boundary";
 import { LiveEventFeed } from "./live-event-feed";
-import { PortfolioHealth } from "./portfolio-health";
+import { OperationalIntelligenceHero } from "./operational-intelligence-hero";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
-import { useCustomers, useInvalidateOperationalData, usePortfolio, useRecovery, useSimulationEvents, useSimulationState } from "./queries";
-import { SimulationControl } from "./simulation-control";
+import { queryKeys, useCustomers, useInvalidateOperationalData, usePortfolio, usePortfolioIntelligence, useRecovery, useRecoveryQueue, useSimulationEvents, useSimulationState } from "./queries";
+import { CycleFeedback, ResetFeedback, SimulationControl } from "./simulation-control";
+import { TodaysOperationalFocus } from "./todays-operational-focus";
 
 export function Dashboard() {
   const [auto, setAuto] = useState(false);
-  const [lastResult, setLastResult] = useState("");
-  const tickInFlight = useRef(false);
+  const [lastTick, setLastTick] = useState<SimulationTickResult | null>(null);
+  const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback | undefined>();
+  const [resetFeedback, setResetFeedback] = useState<ResetFeedback | undefined>();
+  const [selected, setSelected] = useState<PriorityCase | null>(null);
+  const operationInFlight = useRef(false);
+  const queryClient = useQueryClient();
+  const commandSession = useCommandSession();
   const portfolio = usePortfolio();
   const recovery = useRecovery();
   const customers = useCustomers();
   const simulation = useSimulationState();
   const events = useSimulationEvents();
+  const intelligence = usePortfolioIntelligence();
+  const recoveryQueue = useRecoveryQueue();
   const queries = [portfolio, recovery, customers, simulation, events];
+  const connectedQueries = [...queries, intelligence, recoveryQueue.cases, recoveryQueue.recommendations];
   const dataReady = Boolean(portfolio.data && recovery.data && customers.data && simulation.data && events.data);
   const queryError = queries.find((query) => query.isError)?.error;
   const errorMessage = queryError instanceof Error ? queryError.message : queryError ? "Unable to connect to ReconMate." : null;
   const backgroundError = dataReady && Boolean(errorMessage);
-  const isUpdating = dataReady && queries.some((query) => query.isFetching);
+  const connectionsHealthy = dataReady && connectedQueries.every((query) => !query.isError);
   const invalidateOperationalData = useInvalidateOperationalData();
 
   const tick = useMutation({
+    onMutate: () => setResetFeedback(undefined),
     mutationFn: async () => {
+      const before = await queryClient.fetchQuery({
+        queryKey: queryKeys.portfolioIntelligence,
+        queryFn: getPortfolioIntelligence,
+        staleTime: 0,
+      });
       const response = await fetch(apiUrl("/simulation/tick"), { method: "POST" });
-      if (!response.ok) throw new Error("Simulation tick failed.");
-      return response.json() as Promise<{ cycle: number; event_count: number; events: SimulationEvent[] }>;
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(payload?.detail ?? "Simulation tick failed.");
+      }
+      const result = await response.json() as SimulationTickResult;
+      return { before, result };
     },
-    onSuccess: async (result) => {
-      setLastResult(`Cycle ${result.cycle}: ${result.event_count} persisted event${result.event_count === 1 ? "" : "s"}.`);
+    onSuccess: async ({ before, result }) => {
       await invalidateOperationalData();
+      const after = queryClient.getQueryData<PortfolioIntelligence>(queryKeys.portfolioIntelligence);
+      const refreshFailed = [
+        queryKeys.portfolio,
+        queryKeys.portfolioIntelligence,
+        queryKeys.recovery,
+        queryKeys.customers,
+        queryKeys.cases,
+        queryKeys.recommendations,
+        queryKeys.simulationState,
+        queryKeys.simulationEvents,
+      ].some((queryKey) => queryClient.getQueryState(queryKey)?.error);
+      setLastTick(result);
+      setCycleFeedback(buildCycleFeedback(result, before, after, refreshFailed));
     },
   });
+  const resetDemo = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(apiUrl("/simulation/reset"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation: "RESET_DEMO_SIMULATION" }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { detail?: string } | null;
+        throw new Error(payload?.detail ?? "The demo simulation could not be reset.");
+      }
+      return response.json() as Promise<{ state: SimState; summary: Record<string, string | number> }>;
+    },
+    onSuccess: async (response) => {
+      setAuto(false);
+      setLastTick(null);
+      setCycleFeedback(undefined);
+      setSelected(null);
+      commandSession.clearSession();
+      await queryClient.resetQueries({ queryKey: queryKeys.all });
+      const refreshedState = queryClient.getQueryData<SimState>(queryKeys.simulationState);
+      const refreshFailed = [
+        queryKeys.portfolio,
+        queryKeys.portfolioIntelligence,
+        queryKeys.recovery,
+        queryKeys.customers,
+        queryKeys.cases,
+        queryKeys.recommendations,
+        queryKeys.simulationState,
+        queryKeys.simulationEvents,
+      ].some((queryKey) => queryClient.getQueryState(queryKey)?.error);
+      const baselineVerified = refreshedState?.cycle === response.state.cycle && refreshedState?.simulation_date === response.state.simulation_date;
+      setResetFeedback(refreshFailed || !baselineVerified
+        ? { status: "REFRESH_FAILED", message: `Baseline restored to cycle ${response.state.cycle}, but one or more dashboard views did not refresh. Retry before continuing the demo.` }
+        : { status: "SUCCESS", message: `Demo baseline restored successfully: cycle ${response.state.cycle} / operating date ${response.state.simulation_date}.` });
+    },
+  });
+  const busy = tick.isPending || resetDemo.isPending;
+  const isUpdating = busy || connectedQueries.some((query) => query.isFetching);
   const mutateTick = tick.mutateAsync;
+  const mutateReset = resetDemo.mutateAsync;
 
   const runTick = useCallback(async () => {
-    if (tickInFlight.current) return;
-    tickInFlight.current = true;
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     try {
       await mutateTick();
     } catch {
       // Mutation state supplies the existing error presentation.
     } finally {
-      tickInFlight.current = false;
+      operationInFlight.current = false;
     }
   }, [mutateTick]);
+
+  const runReset = useCallback(async () => {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
+    setAuto(false);
+    try {
+      await mutateReset();
+    } catch {
+      // Mutation state supplies the reset error presentation.
+    } finally {
+      operationInFlight.current = false;
+    }
+  }, [mutateReset]);
 
   useEffect(() => {
     if (!auto || !simulation.data) return;
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible" && !tickInFlight.current) void runTick();
+      if (document.visibilityState === "visible" && !operationInFlight.current) void runTick();
     }, simulation.data.tick_interval_seconds * 1000);
     return () => window.clearInterval(timer);
   }, [auto, simulation.data, runTick]);
 
   const names = useMemo(() => new Map(customers.data?.map((customer) => [customer.id, customer.name]) ?? []), [customers.data]);
-  const latestPayment = events.data?.[0]?.metadata.payment_amount;
+  const currentCycleEvents = events.data?.filter((event) => event.cycle === simulation.data?.cycle) ?? [];
+  const latestPayment = currentCycleEvents.find((event) => event.metadata.payment_amount)?.metadata.payment_amount;
   const tickError = tick.error instanceof Error ? tick.error.message : null;
+  const resetError = resetDemo.error instanceof Error ? resetDemo.error.message : null;
   const retry = () => Promise.all(queries.map((query) => query.refetch()));
+  const intelligenceError = intelligence.error instanceof Error ? intelligence.error.message : intelligence.isError ? "Unable to load current portfolio intelligence." : null;
+  const casesByCustomer = useMemo(() => {
+    const result = new Map<string, PriorityCase>();
+    for (const item of recoveryQueue.queue) {
+      const current = result.get(item.customerId);
+      const actionable = item.recommendedAction !== "NO_ACTION_REQUIRED" && item.state !== "RESOLVED";
+      const currentActionable = current && current.recommendedAction !== "NO_ACTION_REQUIRED" && current.state !== "RESOLVED";
+      if (!current || (actionable && !currentActionable)) result.set(item.customerId, item);
+    }
+    for (const event of lastTick?.events ?? []) {
+      if (!event.customer_id || !event.case_id) continue;
+      const affectedCase = recoveryQueue.queue.find((item) => item.id === event.case_id);
+      if (affectedCase) result.set(event.customer_id, affectedCase);
+    }
+    return result;
+  }, [lastTick, recoveryQueue.queue]);
+  const affectedCustomerIds = useMemo(() => new Set(lastTick?.events.flatMap((event) => event.customer_id ? [event.customer_id] : []) ?? []), [lastTick]);
+  const selectedAffected = Boolean(selected && lastTick?.events.some((event) => event.case_id === selected.id || event.customer_id === selected.customerId));
+  const caseLinksLoading = recoveryQueue.cases.isLoading || recoveryQueue.recommendations.isLoading;
+  const caseLinksError = recoveryQueue.cases.isError || recoveryQueue.recommendations.isError;
 
   return (
     <main className="min-h-screen overflow-x-hidden">
-      <AppHeader connected={dataReady} updating={isUpdating} />
+      <AppHeader connected={connectionsHealthy} updating={isUpdating} operatingDate={simulation.data?.simulation_date} />
       <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
         {!dataReady && !errorMessage && <DashboardLoading />}
         {!dataReady && errorMessage && (
@@ -84,6 +193,7 @@ export function Dashboard() {
         )}
         {backgroundError && <p className="mb-4 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 text-xs text-amber-100">Live refresh is delayed. Showing the last successful portfolio data.</p>}
         {tickError && <p className="mb-4 rounded-xl border border-rose-300/15 bg-rose-300/[.06] px-4 py-3 text-xs text-rose-100">{tickError}</p>}
+        {resetError && <p className="mb-4 rounded-xl border border-rose-300/15 bg-rose-300/[.06] px-4 py-3 text-xs text-rose-100">Reset failed: {resetError}</p>}
         {portfolio.data && recovery.data && customers.data && simulation.data && events.data && (
           <>
             <section className="flex flex-col justify-between gap-7 pb-8 lg:flex-row lg:items-end">
@@ -96,21 +206,36 @@ export function Dashboard() {
               </div>
             </section>
 
-            <section aria-label="Portfolio health">
-              <PortfolioHealth
+            <section aria-label="Portfolio intelligence summary">
+              <OperationalIntelligenceHero
+                key={`intelligence-${intelligence.data?.calculated_at ?? "loading"}`}
+                intelligence={intelligence.data}
+                loading={intelligence.isLoading}
+                error={intelligenceError}
                 totalOutstanding={portfolio.data.total_outstanding_amount}
                 overdueExposure={recovery.data.overdue_exposure}
-                totalCustomers={portfolio.data.total_customers}
-                totalInvoices={portfolio.data.total_invoices}
-                attentionCases={recovery.data.cases_requiring_attention ?? recovery.data.cases_eligible_for_recovery}
                 formatMoney={money}
+                synchronizing={tick.isPending || intelligence.isFetching}
+                synchronizedCycle={lastTick?.cycle}
               />
             </section>
+
+            <TodaysOperationalFocus
+              intelligence={intelligence.data}
+              loading={intelligence.isLoading}
+              error={intelligenceError}
+              casesByCustomer={casesByCustomer}
+              caseLinksLoading={caseLinksLoading}
+              caseLinksError={caseLinksError}
+              affectedCustomerIds={affectedCustomerIds}
+              onSelectCase={setSelected}
+              onRetry={() => void intelligence.refetch()}
+            />
 
             <section aria-label="Important portfolio metrics" className="hide-scrollbar mt-4 flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0 xl:grid-cols-4">
               <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Broken-promise exposure" value={money(recovery.data.broken_promise_exposure)} detail="Money at risk behind missed commitments" tone="amber" />
               <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovery ready" value={String(recovery.data.cases_eligible_for_recovery)} detail="Cases currently eligible for operator action" tone="blue" />
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovered this cycle" value={latestPayment ? money(latestPayment) : "-"} detail="Latest persisted payment event" impact={latestPayment ? "Confirmed factual recovery" : undefined} tone="green" />
+              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovered this cycle" value={latestPayment ? money(latestPayment) : "-"} detail={latestPayment ? "Payment persisted in the current cycle" : "No payment event in the current cycle"} impact={latestPayment ? "Confirmed factual recovery" : undefined} tone="green" />
               <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Attention required" value={String(recovery.data.cases_requiring_attention ?? recovery.data.cases_eligible_for_recovery)} detail="Cases with a current factual condition" tone="red" />
             </section>
 
@@ -119,14 +244,65 @@ export function Dashboard() {
               <aside className="space-y-5">
                 <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
                 <IntelligenceBoundary />
-                <SimulationControl cycle={simulation.data.cycle} interval={simulation.data.tick_interval_seconds} busy={tick.isPending} auto={auto} lastResult={lastResult} onAutoChange={setAuto} onTick={() => void runTick()} />
+                <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} />
               </aside>
             </section>
           </>
         )}
       </div>
+      {selected && <CaseWorkspace item={selected} onClose={() => setSelected(null)} liveVersion={simulation.data?.cycle ?? 0} affected={selectedAffected} />}
     </main>
   );
+}
+
+function buildCycleFeedback(
+  result: SimulationTickResult,
+  before: PortfolioIntelligence,
+  after: PortfolioIntelligence | undefined,
+  refreshFailed: boolean,
+): CycleFeedback {
+  const event = result.events[0];
+  const beforeById = new Map(before.customers.map((item) => [item.entity_id, item]));
+  const afterById = new Map(after?.customers.map((item) => [item.entity_id, item]) ?? []);
+  const previous = event?.customer_id ? beforeById.get(event.customer_id) : undefined;
+  const current = event?.customer_id ? afterById.get(event.customer_id) : undefined;
+  const customer = current?.entity_name ?? previous?.entity_name ?? "Portfolio account";
+  const eventLabel = event ? event.type.replaceAll("_", " ").toLowerCase() : "No factual event recorded";
+  const eventSummary = `${customer}: ${eventLabel}. ${result.recovery_synchronization.cases_evaluated} cases re-evaluated${result.recovery_synchronization.cases_changed ? `; ${result.recovery_synchronization.cases_changed} recovery state change${result.recovery_synchronization.cases_changed === 1 ? "" : "s"}` : ""}.`;
+
+  if (refreshFailed || !after || after.calculated_at !== result.simulation_date) {
+    return {
+      status: "REFRESH_FAILED",
+      headline: `Cycle ${result.cycle} completed; dashboard refresh is incomplete`,
+      event: eventSummary,
+      summary: "The factual event was persisted, but ReconMate could not verify every refreshed intelligence view. Retry the page data before treating it as current.",
+      changes: [],
+    };
+  }
+
+  const changes: string[] = [];
+  if (previous && current && previous.level !== current.level) changes.push(`Risk changed: ${previous.level} → ${current.level}`);
+  if (previous && current && previous.recommendation.action !== current.recommendation.action) changes.push(`Recommendation changed: ${previous.recommendation.action} → ${current.recommendation.action}`);
+  const beforeRank = event?.customer_id ? before.highest_priority.findIndex((item) => item.entity_id === event.customer_id) : -1;
+  const afterRank = event?.customer_id ? after.highest_priority.findIndex((item) => item.entity_id === event.customer_id) : -1;
+  if (afterRank >= 0 && afterRank < 5 && (beforeRank < 0 || beforeRank >= 5)) changes.push("Added to Today's Operational Focus");
+  else if (beforeRank >= 0 && afterRank >= 0 && beforeRank !== afterRank && afterRank < 5) changes.push(`Operational focus rank changed: ${beforeRank + 1} → ${afterRank + 1}`);
+
+  return changes.length > 0
+    ? {
+        status: "MATERIAL_CHANGE",
+        headline: `Cycle ${result.cycle} completed successfully`,
+        event: eventSummary,
+        summary: "ReconMate detected a material operational intelligence change.",
+        changes,
+      }
+    : {
+        status: "NO_MATERIAL_CHANGE",
+        headline: `Cycle ${result.cycle} completed successfully`,
+        event: eventSummary,
+        summary: "ReconMate re-evaluated the portfolio. No material intelligence changes were detected.",
+        changes: [],
+      };
 }
 
 function DashboardLoading() {

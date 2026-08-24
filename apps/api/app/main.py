@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.routes.health import router as health_router
+from app.api.routes.commands import router as commands_router
 from app.api.routes.intelligence import router as intelligence_router
 from app.api.routes.portfolio import router as portfolio_router
 from app.api.routes.recovery import customer_recovery_router, router as recovery_router
@@ -25,6 +26,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health_router)
+app.include_router(commands_router)
 app.include_router(intelligence_router)
 app.include_router(portfolio_router)
 app.include_router(recovery_router)

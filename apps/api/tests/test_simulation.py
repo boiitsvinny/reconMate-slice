@@ -5,6 +5,8 @@ from uuid import uuid4
 
 from app.models.domain import Customer, Invoice, InvoiceStatus, PromiseStatus, PromiseToPay, RecoveryCase, RecoveryPriority, RecoveryState
 from app.recovery.engine import evaluate_case, evaluate_invoice
+from app.seed.portfolio import reset_database
+from app.simulation import service as simulation_service
 from app.simulation.service import _event_id
 
 
@@ -31,3 +33,37 @@ def test_broken_promise_is_a_factual_recovery_condition() -> None:
     case = RecoveryCase(id=uuid4(), customer=customer, invoice=invoice, current_state=RecoveryState.IN_PROGRESS, priority=RecoveryPriority.HIGH)
     invoice.promises_to_pay = [promise]
     assert evaluate_case(case, today).derived_state == RecoveryState.ESCALATED.value
+
+
+def test_seed_reset_deletes_simulation_events_with_domain_records() -> None:
+    class RecordingSession:
+        def __init__(self) -> None:
+            self.tables: list[str] = []
+
+        def execute(self, statement) -> None:
+            self.tables.append(statement.table.name)
+
+        def flush(self) -> None:
+            pass
+
+    session = RecordingSession()
+    reset_database(session)  # type: ignore[arg-type]
+    assert session.tables[0] == "simulation_events"
+    assert "simulation_states" in session.tables
+
+
+def test_simulation_reset_reseeds_and_clears_command_plans(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeSession:
+        def scalar(self, _statement):
+            calls.append("locked")
+            return object()
+
+    monkeypatch.setattr(simulation_service, "seed_database", lambda _db, reset: calls.append(f"seed:{reset}") or {"customers": 56})
+    monkeypatch.setattr(simulation_service, "simulation_state", lambda _db: {"cycle": 0, "simulation_date": "2026-08-01"})
+    monkeypatch.setattr("app.commands.service.PLAN_REGISTRY.clear", lambda: calls.append("plans-cleared"))
+
+    result = simulation_service.reset_simulation(FakeSession())  # type: ignore[arg-type]
+    assert result["state"]["cycle"] == 0
+    assert calls == ["locked", "seed:True", "plans-cleared"]

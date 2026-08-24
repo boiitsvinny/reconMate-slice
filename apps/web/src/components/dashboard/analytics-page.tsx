@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { AppHeader } from "@/components/layout/app-header";
+import { CommandCenter } from "@/components/intelligence/command-center";
+import { PortfolioIntelligenceSnapshot } from "@/components/intelligence/portfolio-intelligence-snapshot";
 import { CaseWorkspace } from "./case-workspace";
 import { formatMoney, PriorityCase, Recommendation } from "./data";
 import { IntelligenceBoundary } from "./intelligence-boundary";
@@ -24,6 +26,14 @@ export function AnalyticsPage() {
   const errorMessage = error instanceof Error ? error.message : error ? "Unable to load recovery intelligence." : null;
   const updating = ready && queries.some((query) => query.isFetching);
   const actionable = queue.filter((item) => item.recommendedAction !== "NO_ACTION_REQUIRED");
+  const openCommandTarget = (targetType: string, targetId: string) => {
+    const match = targetType === "CUSTOMER"
+      ? queue.find((item) => item.customerId === targetId)
+      : queue.find((item) => item.id === targetId);
+    if (!match) return false;
+    setSelected(match);
+    return true;
+  };
 
   return (
     <main className="min-h-screen overflow-x-hidden">
@@ -34,11 +44,13 @@ export function AnalyticsPage() {
           <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Recovery Intelligence</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300/80">Prioritized next-best actions and explanations based on live recovery facts and bounded communication intelligence.</p>
         </header>
+        <CommandCenter onOpenTarget={openCommandTarget} />
         {!ready && errorMessage && <div className="mt-7 rounded-2xl border border-rose-300/20 bg-rose-300/[.07] p-5 text-sm text-rose-100">{errorMessage}</div>}
         {!ready && !errorMessage && <div className="mt-7 h-[560px] animate-pulse rounded-2xl border border-white/[.07] bg-white/[.035]" />}
         {ready && errorMessage && <p className="mt-5 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 text-xs text-amber-100">Live refresh is delayed. Showing cached recommendations.</p>}
         {ready && (
           <>
+            <section className="mt-7"><PortfolioIntelligenceSnapshot /></section>
             <section className="mt-7 grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,.75fr)]">
               <NextAction item={queue[0]} onSelect={setSelected} />
               <IntelligenceBoundary />

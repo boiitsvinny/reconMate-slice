@@ -40,6 +40,11 @@ main { background: rgba(5, 8, 18, 0.52); }
 .glass-card { backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
 .hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .hide-scrollbar::-webkit-scrollbar { display: none; }
+.operational-scrollbar { scrollbar-color: rgba(125, 211, 252, .42) rgba(255, 255, 255, .035); scrollbar-width: thin; }
+.operational-scrollbar::-webkit-scrollbar { width: 8px; }
+.operational-scrollbar::-webkit-scrollbar-track { background: rgba(255, 255, 255, .035); }
+.operational-scrollbar::-webkit-scrollbar-thumb { background: rgba(125, 211, 252, .32); border: 2px solid transparent; border-radius: 999px; background-clip: padding-box; }
+.operational-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(125, 211, 252, .52); border: 2px solid transparent; background-clip: padding-box; }
 @keyframes ambient-gradient { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
 @keyframes particle-drift { from { transform: translate3d(0, 0, 0); } to { transform: translate3d(72px, 46px, 0); } }
 @keyframes live-enter { from { opacity: .25; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }

@@ -10,17 +10,17 @@ const label = (type: string) => type.replaceAll("_", " ");
 
 export function LiveEventFeed({ events, customers }: { events: SimulationEvent[]; customers: Map<string, string> }) {
   return (
-    <Panel>
+    <Panel className="overflow-hidden">
       <SectionHeader
         eyebrow="Live recovery stream"
         title="Operational events"
-        action={<span className="text-[10px] font-semibold uppercase tracking-[.13em] text-slate-500">{events.length} latest</span>}
+        action={<span className="text-[10px] font-semibold uppercase tracking-[.13em] text-slate-500">{events.length} events / newest first</span>}
       />
-      <div className="space-y-1 p-3">
-        {events.length ? events.map((event) => (
-          <article key={event.id} className={cx("live-enter border-l-2 px-3 py-3", tone(event.type))}>
+      <div className="operational-scrollbar max-h-[22rem] space-y-1 overflow-y-auto overscroll-contain p-3 pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-300/35 sm:max-h-[34rem]" role="region" aria-label="Operational events, newest first" tabIndex={0}>
+        {events.length ? events.map((event, index) => (
+          <article key={event.id} className={cx("live-enter border-l-2 px-3 py-3", tone(event.type), index === 0 && "bg-sky-300/[.045]")}>
             <div className="flex justify-between gap-3">
-              <p className="text-xs font-bold">{label(event.type)}</p>
+              <p className="text-xs font-bold">{label(event.type)}{index === 0 && <span className="ml-2 text-[9px] uppercase tracking-[.12em] text-sky-200">Latest</span>}</p>
               <span className="text-[10px] opacity-60">#{event.cycle}</span>
             </div>
             <p className="mt-1 text-[11px] text-slate-300">

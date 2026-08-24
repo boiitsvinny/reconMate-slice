@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 
-type AppHeaderProps = { connected: boolean; updating?: boolean };
+type AppHeaderProps = { connected: boolean; updating?: boolean; operatingDate?: string | null };
 
 const navigation = [
   ["/", "Home"],
@@ -13,7 +13,7 @@ const navigation = [
   ["/reports", "Reports"],
 ] as const;
 
-export function AppHeader({ connected, updating = false }: AppHeaderProps) {
+export function AppHeader({ connected, updating = false, operatingDate }: AppHeaderProps) {
   const pathname = usePathname();
   const [today, setToday] = useState("");
 
@@ -23,6 +23,11 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
     const timer = window.setInterval(update, 60_000);
     return () => window.clearInterval(timer);
   }, []);
+
+  const displayedDate = operatingDate
+    ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }).format(new Date(`${operatingDate}T00:00:00Z`))
+    : today || "-";
+  const systemLabel = updating ? "Synchronizing" : connected ? "System optimal" : "Connection degraded";
 
   return (
     <>
@@ -43,10 +48,10 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
         })}
       </nav>
       <div className="flex items-center gap-3">
-        <div className="hidden rounded-lg border border-emerald-300/15 bg-emerald-300/[0.06] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] text-emerald-200 lg:block">System optimal</div>
+        <div className={`hidden rounded-lg border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] lg:block ${updating ? "border-sky-300/20 bg-sky-300/[.07] text-sky-200" : connected ? "border-emerald-300/15 bg-emerald-300/[0.06] text-emerald-200" : "border-amber-300/20 bg-amber-300/[.07] text-amber-100"}`}>{systemLabel}</div>
         <div className="hidden rounded-lg border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-right sm:block">
-          <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">Today</div>
-          <div className="mt-0.5 text-xs font-semibold text-slate-200">{today || "-"}</div>
+          <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-slate-500">{operatingDate ? "Operating date" : "Today"}</div>
+          <div className="mt-0.5 text-xs font-semibold text-slate-200">{displayedDate}</div>
         </div>
         <span className={`h-2 w-2 rounded-full ${updating ? "animate-pulse bg-sky-300" : connected ? "bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,.8)]" : "bg-rose-400"}`} aria-label={updating ? "Refreshing live data" : connected ? "API connected" : "API unavailable"} />
       </div>

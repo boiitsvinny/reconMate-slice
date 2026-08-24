@@ -2,7 +2,9 @@
 
 import { useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { apiUrl } from "@/lib/api";
+import { useCommandSession } from "@/components/intelligence/command-session";
 import type { PriorityCase } from "./data";
 import { queryKeys, useCaseWorkspace, useInvalidateOperationalData } from "./queries";
 import { buttonStyles, cx, StatusPill } from "./ui";
@@ -11,7 +13,9 @@ function label(value: string) { return value.replaceAll("_", " "); }
 function money(value: string) { return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(value)); }
 
 export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean }) {
+  const router = useRouter();
   const queryClient = useQueryClient();
+  const commandSession = useCommandSession();
   const workspaceQuery = useCaseWorkspace(item.id);
   const workspace = workspaceQuery.data;
   const invalidateOperationalData = useInvalidateOperationalData();
@@ -44,6 +48,11 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
   const mutationError = action.error instanceof Error ? action.error.message : null;
   const error = mutationError ?? (!workspace ? queryError : null);
   const busy = action.isPending;
+  const runContextCommand = (command: string, context: { context_customer_id?: string; context_case_id?: string }) => {
+    onClose();
+    router.push("/analytics");
+    void commandSession.runCommand({ command, ...context });
+  };
   const create = () => {
     if (workspace && window.confirm(`Create a workflow action for ${label(workspace.recommendation.recommended_action)}?`)) {
       request(`/recovery/cases/${item.id}/actions`, { expected_recommended_action: workspace.recommendation.recommended_action });
@@ -66,6 +75,11 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
             <p className="mt-1 text-xs text-slate-500">{workspace?.customer.strategic ? "Strategic account / " : ""}{item.customerReference}</p>
           </div>
           <button onClick={onClose} className="rounded-lg border border-white/10 px-2.5 py-1 text-slate-400 transition hover:border-white/20 hover:text-white">Close</button>
+        </div>
+        <div className="mt-5 grid gap-2 sm:grid-cols-3" aria-label="Contextual intelligence commands">
+          <button type="button" disabled={commandSession.processing} onClick={() => runContextCommand("Analyze this customer", { context_customer_id: item.customerId })} className={buttonStyles.secondary}>Analyze customer</button>
+          <button type="button" disabled={commandSession.processing} onClick={() => runContextCommand("Why is this case critical?", { context_case_id: item.id })} className={buttonStyles.secondary}>Explain recommendation</button>
+          <button type="button" disabled={commandSession.processing} onClick={() => runContextCommand("Analyze this case", { context_case_id: item.id })} className={buttonStyles.secondary}>Review case intelligence</button>
         </div>
         {error && <p className="mt-5 border border-rose-300/15 bg-rose-300/[.06] p-3 text-sm text-rose-100">{error}</p>}
         {affected && <p className="live-enter mt-5 border border-sky-300/15 bg-sky-400/[.05] p-3 text-xs text-sky-200">Portfolio update detected. Factual case data and recommendation refreshed.</p>}

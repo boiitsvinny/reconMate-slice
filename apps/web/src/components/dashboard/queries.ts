@@ -3,12 +3,14 @@
 import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CaseApi, createPriorityQueue, Customer, fetchJson, Invoice, Portfolio, Recommendation, Recovery, SimState, SimulationEvent, Workspace } from "./data";
+import { getPortfolioIntelligence } from "@/lib/intelligence-api";
 
 export const LIVE_REFRESH_INTERVAL = 15_000;
 
 export const queryKeys = {
   all: ["reconmate"] as const,
   portfolio: ["reconmate", "portfolio"] as const,
+  portfolioIntelligence: ["reconmate", "portfolio-intelligence"] as const,
   recovery: ["reconmate", "recovery-summary"] as const,
   customers: ["reconmate", "customers"] as const,
   invoices: ["reconmate", "invoices"] as const,
@@ -22,6 +24,7 @@ export const queryKeys = {
 const liveQuery = { refetchInterval: LIVE_REFRESH_INTERVAL, refetchIntervalInBackground: false } as const;
 
 export const usePortfolio = () => useQuery({ queryKey: queryKeys.portfolio, queryFn: () => fetchJson<Portfolio>("/portfolio/summary"), ...liveQuery });
+export const usePortfolioIntelligence = () => useQuery({ queryKey: queryKeys.portfolioIntelligence, queryFn: getPortfolioIntelligence, ...liveQuery });
 export const useRecovery = () => useQuery({ queryKey: queryKeys.recovery, queryFn: () => fetchJson<Recovery>("/recovery/portfolio/summary"), ...liveQuery });
 export const useCustomers = () => useQuery({ queryKey: queryKeys.customers, queryFn: () => fetchJson<Customer[]>("/customers"), ...liveQuery });
 export const useInvoices = () => useQuery({ queryKey: queryKeys.invoices, queryFn: () => fetchJson<Invoice[]>("/invoices"), ...liveQuery });

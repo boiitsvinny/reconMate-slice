@@ -17,6 +17,7 @@ from app.models.domain import (
     RecoveryPriority, RecoveryState, SimulationEvent, SimulationState,
 )
 from app.recovery.engine import synchronize_recovery_states
+from app.seed.portfolio import seed_database
 
 
 def _when(state: SimulationState) -> datetime:
@@ -128,6 +129,17 @@ def run_tick(db: Session) -> dict[str, Any]:
     # synchronize commits; persist any event records and cycle as the final atomic outcome.
     db.commit()
     return {"cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "recovery_synchronization": synchronization}
+
+
+def reset_simulation(db: Session) -> dict[str, Any]:
+    """Atomically restore the complete deterministic portfolio baseline."""
+    db.scalar(select(SimulationState).where(SimulationState.name == "default").with_for_update())
+    summary = seed_database(db, reset=True)
+    # Confirmation plans contain record-specific recommendations from the old
+    # operational world and must not survive a baseline replacement.
+    from app.commands.service import PLAN_REGISTRY
+    PLAN_REGISTRY.clear()
+    return {"state": simulation_state(db), "summary": summary}
 
 
 def simulation_state(db: Session) -> dict[str, Any]:
