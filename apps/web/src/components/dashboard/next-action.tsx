@@ -6,7 +6,7 @@ const priorityTone = (priority: PriorityCase["recommendationPriority"]) => prior
 
 export function NextAction({ item, onSelect }: { item?: PriorityCase; onSelect: (item: PriorityCase) => void }) {
   return (
-    <Panel className="flex min-h-[258px] flex-col border-sky-300/15 bg-sky-400/[.035]">
+    <Panel className="flex min-h-[258px] flex-col border-sky-300/15">
       <div className="flex items-center justify-between gap-3 border-b border-white/[.07] px-5 py-4">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[.18em] text-sky-300">Recommended next action</p>

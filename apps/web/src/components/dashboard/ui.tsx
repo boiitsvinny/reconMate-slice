@@ -6,7 +6,7 @@ export function cx(...classes: Array<string | false | null | undefined>) {
 
 export function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <section className={cx("rounded-2xl border border-white/[.09] bg-slate-950/35 shadow-[0_18px_45px_rgba(0,0,0,.18)]", className)}>
+    <section className={cx("rounded-2xl border border-white/[.09] bg-[#08111f]/95 shadow-[0_18px_45px_rgba(0,0,0,.22)]", className)}>
       {children}
     </section>
   );

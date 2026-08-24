@@ -15,7 +15,7 @@ export function LiveEventFeed({ events, customers }: { events: SimulationEvent[]
         title="Operational events"
         action={<span className="text-[10px] font-semibold uppercase tracking-[.13em] text-slate-500">{events.length} latest</span>}
       />
-      <div className="max-h-[410px] space-y-1 overflow-y-auto p-3 pr-2">
+      <div className="space-y-1 p-3">
         {events.length ? events.map((event) => (
           <article key={event.id} className={cx("live-enter border-l-2 px-3 py-3", tone(event.type))}>
             <div className="flex justify-between gap-3">
