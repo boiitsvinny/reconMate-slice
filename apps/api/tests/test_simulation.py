@@ -1,18 +1,46 @@
 """Focused invariants for the deterministic simulation foundation."""
 from datetime import date
 from decimal import Decimal
+import random
 from uuid import uuid4
 
 from app.models.domain import Customer, Invoice, InvoiceStatus, PromiseStatus, PromiseToPay, RecoveryCase, RecoveryPriority, RecoveryState
 from app.recovery.engine import evaluate_case, evaluate_invoice
 from app.seed.portfolio import reset_database
 from app.simulation import service as simulation_service
-from app.simulation.service import _event_id
+from app.simulation.config import SCENARIO_CONFIG
+from app.simulation.service import _available_event_kinds, _event_id, _fractional_amount, _promise_date, _roll_event_plan
 
 
 def test_simulation_event_identity_is_repeatable() -> None:
     assert _event_id(9, 0) == _event_id(9, 0)
     assert _event_id(9, 0) != _event_id(10, 0)
+
+
+def test_seeded_event_roll_is_reproducible_and_bounded() -> None:
+    valid = ["PARTIAL_PAYMENT", "FULL_PAYMENT", "PROMISE_CREATED", "DISPUTE_OPENED", "CUSTOMER_DELAY_RESPONSE"]
+    assert _roll_event_plan(random.Random(431), valid) == _roll_event_plan(random.Random(431), valid)
+    rolls = [_roll_event_plan(random.Random(seed), valid) for seed in range(200)]
+    assert all(primary in valid and 0 <= secondary <= 4 for primary, secondary in rolls)
+    counts = [secondary for _, secondary in rolls]
+    assert counts.count(1) + counts.count(2) > counts.count(3) + counts.count(4)
+    assert 0 in counts and 4 in counts
+
+
+def test_event_candidates_protect_settled_and_disputed_invoices() -> None:
+    customer = Customer(id=uuid4(), name="Candidate Test", account_reference="SIM-CANDIDATE")
+    paid = Invoice(id=uuid4(), customer=customer, invoice_number="PAID-1", issue_date=date(2026, 7, 1), due_date=date(2026, 7, 20), original_amount=Decimal("100"), outstanding_amount=Decimal("0"), status=InvoiceStatus.PAID)
+    disputed = Invoice(id=uuid4(), customer=customer, invoice_number="DSP-1", issue_date=date(2026, 7, 1), due_date=date(2026, 7, 20), original_amount=Decimal("100"), outstanding_amount=Decimal("100"), status=InvoiceStatus.DISPUTED)
+    assert _available_event_kinds([paid], [], set()) == []
+    assert _available_event_kinds([disputed], [], set()) == ["DISPUTE_RESOLVED"]
+
+
+def test_generated_monetary_and_promise_date_bounds() -> None:
+    balance = Decimal("1000")
+    amounts = [_fractional_amount(balance, random.Random(seed), SCENARIO_CONFIG.payment_fraction_min, SCENARIO_CONFIG.payment_fraction_max) for seed in range(30)]
+    assert all(Decimal("0") < amount <= balance for amount in amounts)
+    dates = [_promise_date(date(2026, 8, 1), random.Random(seed)) for seed in range(30)]
+    assert all(SCENARIO_CONFIG.promise_days_min <= (value - date(2026, 8, 1)).days <= SCENARIO_CONFIG.promise_days_max for value in dates)
 
 
 def test_payment_fact_changes_recovery_without_operator_action() -> None:
@@ -60,7 +88,7 @@ def test_simulation_reset_reseeds_and_clears_command_plans(monkeypatch) -> None:
             calls.append("locked")
             return object()
 
-    monkeypatch.setattr(simulation_service, "seed_database", lambda _db, reset: calls.append(f"seed:{reset}") or {"customers": 56})
+    monkeypatch.setattr(simulation_service, "seed_database", lambda _db, reset: calls.append(f"seed:{reset}") or {"customers": 84})
     monkeypatch.setattr(simulation_service, "simulation_state", lambda _db: {"cycle": 0, "simulation_date": "2026-08-01"})
     monkeypatch.setattr("app.commands.service.PLAN_REGISTRY.clear", lambda: calls.append("plans-cleared"))
 

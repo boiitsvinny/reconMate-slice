@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from enum import Enum
 from uuid import UUID
 
@@ -96,6 +97,33 @@ class EntityReference(BaseModel):
     display_name: str
 
 
+class ReminderInvoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    invoice_number: str
+    outstanding_amount: Decimal
+    due_date: date
+    days_overdue: int
+
+
+class ReminderArtifact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    customer_name: str
+    account_reference: str
+    invoices: list[ReminderInvoice]
+    total_outstanding: Decimal
+    promise_state: str
+    dispute_state: str
+    intended_channel: str
+    purpose: str
+    tone: str
+    prepared_at: datetime
+    body: str | None = None
+    reason: str
+
+
 class ActionProposal(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -111,6 +139,7 @@ class ActionProposal(BaseModel):
     executable: bool
     requires_confirmation: bool
     workflow_recommendation_action: str | None = None
+    reminder_artifact: ReminderArtifact | None = None
     limitations: list[str] = Field(default_factory=list)
 
 

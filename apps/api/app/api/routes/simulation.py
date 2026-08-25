@@ -21,8 +21,8 @@ def get_state(db: Session = Depends(get_db)) -> dict:
     except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 @router.post("/tick")
-def tick(db: Session = Depends(get_db)) -> dict:
-    try: return run_tick(db)
+def tick(seed: int | None = Query(default=None), mode: Literal["normal", "judge"] = Query(default="normal"), db: Session = Depends(get_db)) -> dict:
+    try: return run_tick(db, seed=seed, judge=mode == "judge")
     except ValueError as exc: raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 

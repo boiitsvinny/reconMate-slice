@@ -2,6 +2,7 @@
 
 import type { ActionOutcome, ActionProposal, PriorityLevel } from "@/lib/intelligence-api";
 import { buttonStyles, cx, StatusPill } from "@/components/dashboard/ui";
+import { ReminderArtifact } from "./reminder-artifact";
 
 const label = (value: string) => value.replaceAll("_", " ");
 const tone = (level: PriorityLevel) => level === "CRITICAL" ? "rose" : level === "HIGH" ? "amber" : level === "MEDIUM" ? "sky" : "slate";
@@ -62,6 +63,7 @@ export function ActionProposalCard({
         {outcome && <StatusPill tone={statusTone(outcome.status)}>{label(outcome.status)}</StatusPill>}
       </div>
       <p className="mt-4 text-xs leading-5 text-slate-300/85">{proposal.explanation}</p>
+      {proposal.reminder_artifact && <ReminderArtifact artifact={proposal.reminder_artifact} />}
       <dl className="mt-4 grid grid-cols-2 gap-3 border-y border-white/[.06] py-3 text-xs sm:grid-cols-3">
         <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-600">Risk level</dt><dd className="mt-1 font-semibold text-slate-200">{proposal.risk_level}</dd></div>
         <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-600">Current decision</dt><dd className="mt-1 font-semibold text-slate-200">{proposal.workflow_recommendation_action ? label(proposal.workflow_recommendation_action) : proposal.executable ? "Review current intelligence" : "Review safeguard"}</dd></div>

@@ -81,7 +81,7 @@ function FocusItem({ item, index, recoveryCase, caseLinkLoading, affected, onSel
         <div className="min-w-0">
           <div className="flex items-center gap-2"><span className="text-[10px] tabular-nums text-slate-600">{String(index + 1).padStart(2, "0")}</span><h3 className="truncate text-sm font-semibold text-white">{item.entity_name}</h3></div>
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <StatusPill tone={riskTone(item.level)}>{item.level} / {item.score}</StatusPill>
+            <StatusPill tone={riskTone(item.level)}>Current account risk: {item.level} / {item.score}</StatusPill>
             <StatusPill tone={presentation.tone}>{presentation.label}</StatusPill>
           </div>
           <p className="mt-2 text-[11px] text-slate-400">{formatMoney(item.metrics.overdue_exposure)} overdue / {item.metrics.max_days_overdue} days maximum</p>

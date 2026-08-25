@@ -153,6 +153,9 @@ class FakeCommandTools:
     def get_customer_intelligence(self, customer_id):
         return CUSTOMER_RESULT if customer_id == CUSTOMER_ID else None
 
+    def get_customer(self, customer_id):
+        return self.candidate.case.customer if str(customer_id) == str(CUSTOMER_ID) else None
+
     def get_case_intelligence(self, case_id):
         return CASE_RESULT if case_id == CASE_ID else None
 
@@ -299,6 +302,39 @@ def test_reminder_command_prepares_draft_without_sending(monkeypatch) -> None:
     assert body["plan"]["execution_mode"] == "PREPARE"
     assert body["outcomes"][0]["status"] == "PREPARED"
     assert "does not send" in body["plan"]["proposed_actions"][0]["limitations"][0]
+    artifact = body["plan"]["proposed_actions"][0]["reminder_artifact"]
+    assert artifact["status"] == "PREPARED_FOR_REVIEW"
+    assert artifact["invoices"][0]["invoice_number"] == "TEST-INV"
+    assert "INR 450000.00" in artifact["body"]
+    assert "payment promise has passed" in artifact["body"]
+
+
+def test_reminder_artifact_is_blocked_by_current_dispute(monkeypatch) -> None:
+    class DisputedTools(FakeCommandTools):
+        def get_overdue_customers(self, top_n=None):
+            metrics = CUSTOMER_RESULT.metrics.model_copy(update={"active_dispute_count": 1})
+            return [CUSTOMER_RESULT.model_copy(update={"metrics": metrics})]
+
+    client = _client(monkeypatch, DisputedTools)
+    response = client.post("/commands", json={"command": "Draft payment reminders for overdue customers"})
+    app.dependency_overrides.clear()
+    artifact = response.json()["plan"]["proposed_actions"][0]["reminder_artifact"]
+    assert artifact["status"] == "BLOCKED"
+    assert artifact["body"] is None
+
+
+def test_reminder_artifact_is_deferred_by_active_promise(monkeypatch) -> None:
+    class ActivePromiseTools(FakeCommandTools):
+        def get_overdue_customers(self, top_n=None):
+            metrics = CUSTOMER_RESULT.metrics.model_copy(update={"active_promise_count": 1, "broken_promise_count": 0})
+            return [CUSTOMER_RESULT.model_copy(update={"metrics": metrics})]
+
+    client = _client(monkeypatch, ActivePromiseTools)
+    response = client.post("/commands", json={"command": "Draft payment reminders for overdue customers"})
+    app.dependency_overrides.clear()
+    artifact = response.json()["plan"]["proposed_actions"][0]["reminder_artifact"]
+    assert artifact["status"] == "DEFERRED"
+    assert artifact["body"] is None
 
 
 def test_unknown_missing_context_and_empty_results_are_honest(monkeypatch) -> None:

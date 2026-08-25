@@ -58,7 +58,7 @@ export function PriorityQueue({ items, onSelect, changedCaseIds }: { items: Prio
             </div>
             <div className="flex items-center justify-between gap-2">
               <StatusPill tone={stateTone(item.state)}>{item.state.replaceAll("_", " ")}</StatusPill>
-              <span className="text-slate-600 transition group-hover:translate-x-0.5 group-hover:text-sky-300">View</span>
+              <span className="text-[10px] font-semibold text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-sky-300">{item.recommendedAction === "NO_ACTION_REQUIRED" ? "Inspect case" : "Review action"}</span>
             </div>
           </button>
         ))}

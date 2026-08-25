@@ -102,6 +102,9 @@ class CommandTools:
         customer = next((item for item in self.customers() if item.id == customer_id), None)
         return evaluate_customer_intelligence(customer, self.simulation_date) if customer is not None else None
 
+    def get_customer(self, customer_id: UUID | str) -> Customer | None:
+        return next((item for item in self.customers() if str(item.id) == str(customer_id)), None)
+
     def get_case_intelligence(self, case_id: UUID) -> IntelligenceResult | None:
         case = self.get_case(case_id)
         return evaluate_case_intelligence(case, self.simulation_date) if case is not None else None

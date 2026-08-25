@@ -9,8 +9,9 @@ export type { SimulationEvent } from "./data";
 const tone = (type: string) => type.includes("PAYMENT") ? "border-emerald-400 text-emerald-200" : type.includes("PROMISE") ? "border-rose-400 text-rose-200" : type.includes("DISPUTE") ? "border-amber-300 text-amber-200" : "border-sky-400 text-sky-200";
 const label = (type: string) => type.replaceAll("_", " ");
 
-export function LiveEventFeed({ events, customers, onOpenCase }: { events: SimulationEvent[]; customers: Map<string, string>; onOpenCase?: (caseId: string) => void }) {
+export function LiveEventFeed({ events, customers, onOpenCase }: { events: SimulationEvent[]; customers: Map<string, string>; onOpenCase?: (caseId: string) => boolean }) {
   const [order, setOrder] = useState<"newest" | "oldest">("newest");
+  const [caseNotice, setCaseNotice] = useState<string | null>(null);
   const orderedEvents = useMemo(() => [...events].sort((left, right) => {
     const time = new Date(left.occurred_at).getTime() - new Date(right.occurred_at).getTime();
     const comparison = time || left.cycle - right.cycle;
@@ -39,10 +40,14 @@ export function LiveEventFeed({ events, customers, onOpenCase }: { events: Simul
               {customers.get(event.customer_id ?? "") ?? "Portfolio account"} / {event.metadata.payment_amount ? `INR ${event.metadata.payment_amount} received` : event.metadata.promise_amount ? `INR ${event.metadata.promise_amount} commitment` : event.metadata.resulting_status ?? "Factual portfolio update"}
             </p>
             <p className="mt-0.5 text-[9px] text-slate-600">{new Date(event.occurred_at).toLocaleString()}</p>
-            {event.case_id && onOpenCase && <button type="button" onClick={() => onOpenCase(event.case_id!)} className="mt-2 text-[10px] font-semibold text-sky-200 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/40">Open affected case →</button>}
+            {event.case_id && onOpenCase && <button type="button" onClick={() => {
+              const opened = onOpenCase(event.case_id!);
+              setCaseNotice(opened ? null : "This event's case is no longer active in the current recovery queue.");
+            }} className="mt-2 text-[10px] font-semibold text-sky-200 transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/40">Open affected case →</button>}
           </article>
         )) : <p className="py-8 text-center text-xs text-slate-500">No simulation events yet.</p>}
       </div>
+      {caseNotice && <p className="border-t border-amber-300/15 bg-amber-300/[.04] px-5 py-3 text-xs text-amber-100" role="status">{caseNotice}</p>}
     </Panel>
   );
 }

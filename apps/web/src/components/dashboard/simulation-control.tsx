@@ -13,9 +13,11 @@ type Props = {
   auto: boolean;
   feedback?: CycleFeedback;
   resetFeedback?: ResetFeedback;
+  phase?: "STARTING" | "APPLYING_EVENTS" | "REEVALUATING" | "SYNCHRONIZING" | "TAKING_LONGER";
   onAutoChange: (enabled: boolean) => void;
   onTick: () => void;
   onReset: () => void;
+  onReconcile: () => void;
 };
 
 export type CycleFeedback = {
@@ -25,6 +27,8 @@ export type CycleFeedback = {
   summary: string;
   changes: string[];
   transition?: IntelligenceTransition;
+  transitions: IntelligenceTransition[];
+  portfolio: { previousCycle: number; cycle: number; previousDate: string; date: string; eventCount: number; customersAffected: number; materialCustomers: number; recommendationsChanged: number; recommendationsUnchanged: number; families: string[]; seed: number };
 };
 
 export type ResetFeedback = {
@@ -32,7 +36,15 @@ export type ResetFeedback = {
   message: string;
 };
 
-export function SimulationControl({ cycle, simulationDate, interval, busy, resetting, auto, feedback, resetFeedback, onAutoChange, onTick, onReset }: Props) {
+const phaseLabel = {
+  STARTING: "Starting the next operating cycle…",
+  APPLYING_EVENTS: "Applying deterministic portfolio events…",
+  REEVALUATING: "Re-evaluating recovery intelligence…",
+  SYNCHRONIZING: "Synchronizing refreshed portfolio state…",
+  TAKING_LONGER: "This cycle is taking longer than usual. The backend may still be finishing safely.",
+};
+
+export function SimulationControl({ cycle, simulationDate, interval, busy, resetting, auto, feedback, resetFeedback, phase, onAutoChange, onTick, onReset, onReconcile }: Props) {
   const [remaining, setRemaining] = useState(interval);
 
   useEffect(() => {
@@ -86,12 +98,13 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
           {resetting ? "Restoring baseline..." : "Reset demo"}
         </button>
       </div>
-      {busy && <div className="mt-4 border-t border-sky-300/10 pl-2 pt-3" role="status"><p className="text-[11px] font-semibold text-sky-200">{resetting ? "Restoring the seeded portfolio and refreshing every operational view..." : "Persisting facts and synchronizing dashboard intelligence..."}</p></div>}
+      {busy && <div className="mt-4 border-t border-sky-300/10 pl-2 pt-3" role="status" aria-live="polite"><p className="text-[11px] font-semibold text-sky-200">{resetting ? "Restoring the seeded portfolio and refreshing every operational view..." : phase ? phaseLabel[phase] : "Persisting facts and synchronizing dashboard intelligence..."}</p>{!resetting && phase === "TAKING_LONGER" && <button type="button" onClick={onReconcile} className="mt-2 text-[11px] font-semibold text-sky-100 underline decoration-sky-300/40 underline-offset-4">Refresh current state</button>}</div>}
       {!busy && feedback && (
         <div className={cx("live-enter mt-4 border-t pl-2 pt-3", feedback.status === "REFRESH_FAILED" ? "border-amber-300/15" : "border-emerald-300/10")} role="status" aria-live="polite">
           <p className={cx("text-[11px] font-semibold", feedback.status === "REFRESH_FAILED" ? "text-amber-100" : "text-emerald-200")}>{feedback.headline}</p>
           <p className="mt-1 text-[10px] leading-4 text-slate-400">{feedback.event}</p>
           <p className={cx("mt-2 text-[11px] font-medium leading-4", feedback.status === "MATERIAL_CHANGE" ? "text-sky-200" : feedback.status === "REFRESH_FAILED" ? "text-amber-100/80" : "text-slate-300")}>{feedback.summary}</p>
+          <div className="mt-3 rounded-xl border border-white/[.07] bg-black/10 p-3"><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">What ReconMate noticed</p><p className="mt-2 text-xs font-semibold text-white">{feedback.portfolio.eventCount} operational event{feedback.portfolio.eventCount === 1 ? "" : "s"} received / {feedback.portfolio.materialCustomers} materially affected customer decision{feedback.portfolio.materialCustomers === 1 ? "" : "s"}</p><p className="mt-1 text-[10px] text-slate-400">Cycle {feedback.portfolio.previousCycle} → {feedback.portfolio.cycle} / {feedback.portfolio.previousDate} → {feedback.portfolio.date} / {feedback.portfolio.customersAffected} customer{feedback.portfolio.customersAffected === 1 ? "" : "s"} affected</p><p className="mt-1 text-[10px] text-slate-500">Families: {feedback.portfolio.families.join(" / ")} / recommendations changed {feedback.portfolio.recommendationsChanged}, unchanged {feedback.portfolio.recommendationsUnchanged} / replay seed {feedback.portfolio.seed}</p></div>
           {feedback.transition && (
             <div className="mt-3 space-y-3 rounded-xl border border-white/[.07] bg-black/10 p-3">
               <div>
@@ -109,6 +122,7 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
             </div>
           )}
           {feedback.changes.length > 0 && <ul className="mt-2 space-y-1 text-[10px] leading-4 text-slate-400">{feedback.changes.map((change) => <li key={change}>• {change}</li>)}</ul>}
+          {feedback.transitions.length > 1 && <div className="mt-3 space-y-2"><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Other affected accounts</p>{feedback.transitions.slice(1, 4).map((item) => <div key={`${item.entity_type}-${item.entity_id}`} className="rounded-lg border border-white/[.06] px-3 py-2"><p className="text-[11px] font-semibold text-slate-200">{item.entity_name}</p><p className="mt-1 text-[10px] text-slate-500">{item.previous_risk_level ?? "New"} {item.previous_score ?? "-"} → {item.current_risk_level} {item.current_score} / {item.related_events?.map((related) => related.type.replaceAll("_", " ")).join(" + ") ?? item.related_event_type.replaceAll("_", " ")}</p></div>)}</div>}
         </div>
       )}
       {!busy && resetFeedback && (
@@ -116,6 +130,7 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
           <p className={cx("text-[11px] font-semibold leading-4", resetFeedback.status === "SUCCESS" ? "text-emerald-200" : "text-amber-100")}>{resetFeedback.message}</p>
         </div>
       )}
+      {!busy && feedback?.status === "REFRESH_FAILED" && <button type="button" onClick={onReconcile} className={`${buttonStyles.secondary} mt-3 ml-2`}>Reconcile dashboard state</button>}
       <p className="mt-3 pl-2 text-[10px] leading-4 text-slate-600">Each completed cycle refreshes portfolio facts, recovery state, recommendations, and intelligence.</p>
     </section>
   );

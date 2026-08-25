@@ -24,6 +24,7 @@ export function Dashboard() {
   const [lastTick, setLastTick] = useState<SimulationTickResult | null>(null);
   const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback | undefined>();
   const [resetFeedback, setResetFeedback] = useState<ResetFeedback | undefined>();
+  const [tickPhase, setTickPhase] = useState<"STARTING" | "APPLYING_EVENTS" | "REEVALUATING" | "SYNCHRONIZING" | "TAKING_LONGER">();
   const [selected, setSelected] = useState<PriorityCase | null>(null);
   const { preview, openPreview, closePreview } = useCasePreview();
   const operationInFlight = useRef(false);
@@ -46,7 +47,7 @@ export function Dashboard() {
   const invalidateOperationalData = useInvalidateOperationalData();
 
   const tick = useMutation({
-    onMutate: () => setResetFeedback(undefined),
+    onMutate: () => { setResetFeedback(undefined); setTickPhase("STARTING"); },
     mutationFn: async () => {
       const response = await apiFetch("/simulation/tick", { method: "POST" }, 90_000);
       if (!response.ok) {
@@ -57,6 +58,7 @@ export function Dashboard() {
       return result;
     },
     onSuccess: async (result) => {
+      setTickPhase("SYNCHRONIZING");
       await invalidateOperationalData();
       const refreshFailed = [
         queryKeys.portfolio,
@@ -71,6 +73,7 @@ export function Dashboard() {
       setLastTick(result);
       setCycleFeedback(buildCycleFeedback(result, refreshFailed));
     },
+    onSettled: () => setTickPhase(undefined),
   });
   const resetDemo = useMutation({
     mutationFn: async () => {
@@ -118,14 +121,24 @@ export function Dashboard() {
   const runTick = useCallback(async () => {
     if (operationInFlight.current) return;
     operationInFlight.current = true;
+    const applyingTimer = window.setTimeout(() => setTickPhase("APPLYING_EVENTS"), 800);
+    const evaluationTimer = window.setTimeout(() => setTickPhase("REEVALUATING"), 3_000);
+    const longTimer = window.setTimeout(() => setTickPhase("TAKING_LONGER"), 12_000);
     try {
       await mutateTick();
     } catch {
       // Mutation state supplies the existing error presentation.
     } finally {
+      window.clearTimeout(applyingTimer);
+      window.clearTimeout(evaluationTimer);
+      window.clearTimeout(longTimer);
       operationInFlight.current = false;
     }
   }, [mutateTick]);
+
+  const reconcile = useCallback(() => {
+    void invalidateOperationalData();
+  }, [invalidateOperationalData]);
 
   const runReset = useCallback(async () => {
     if (operationInFlight.current) return;
@@ -248,11 +261,13 @@ export function Dashboard() {
             <section aria-label="Portfolio operations" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
               <LiveEventFeed events={events.data} customers={names} onOpenCase={(caseId) => {
                 const item = recoveryQueue.queue.find((candidate) => candidate.id === caseId);
-                if (item) openPreview(item);
+                if (!item) return false;
+                openPreview(item);
+                return true;
               }} />
               <aside className="space-y-5">
                 <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
-                {inspectionEnabled && <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} />}
+                {inspectionEnabled && <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} phase={tickPhase} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} onReconcile={reconcile} />}
               </aside>
             </section>
             {inspectionEnabled && <RecommendationSafety activeDisputes={recovery.data.cases_blocked_by_dispute} activePromises={recovery.data.cases_awaiting_payment} />}
@@ -266,19 +281,23 @@ export function Dashboard() {
 }
 
 function buildCycleFeedback(result: SimulationTickResult, refreshFailed: boolean): CycleFeedback {
-  const event = result.events[0];
-  const transition = result.intelligence_transitions.find((item) => item.entity_type === "CUSTOMER") ?? result.intelligence_transitions[0];
+  const transitions = result.intelligence_transitions.filter((item) => item.entity_type === "CUSTOMER").sort((left, right) => Number(right.material) - Number(left.material));
+  const transition = transitions[0] ?? result.intelligence_transitions[0];
   const customer = transition?.entity_name ?? "Portfolio account";
-  const eventLabel = event ? event.type.replaceAll("_", " ").toLowerCase() : "No factual event recorded";
+  const eventLabel = result.events.length ? result.events.map((item) => `${item.metadata.role === "PRIMARY" ? "Primary" : "Secondary"}: ${item.type.replaceAll("_", " ").toLowerCase()}`).join(" / ") : "No factual event recorded";
   const eventSummary = `${customer}: ${eventLabel}. ${result.recovery_synchronization.cases_evaluated} cases re-evaluated${result.recovery_synchronization.cases_changed ? `; ${result.recovery_synchronization.cases_changed} recovery state change${result.recovery_synchronization.cases_changed === 1 ? "" : "s"}` : ""}.`;
 
   if (refreshFailed) {
-    return { status: "REFRESH_FAILED", headline: `Cycle ${result.cycle} completed; dashboard refresh is incomplete`, event: eventSummary, summary: "The factual event and backend intelligence comparison completed, but one or more refreshed dashboard views failed.", changes: [], transition };
+    return { status: "REFRESH_FAILED", headline: `Cycle ${result.cycle} completed; dashboard refresh is incomplete`, event: eventSummary, summary: "The factual events and backend intelligence comparison completed, but one or more refreshed dashboard views failed.", changes: [], transition, transitions, portfolio: cyclePortfolio(result) };
   }
   const changes = transition?.classifications.filter((item) => item !== "NO_MATERIAL_CHANGE").map((item) => item.replaceAll("_", " ")) ?? [];
   return transition?.material
-    ? { status: "MATERIAL_CHANGE", headline: `Cycle ${result.cycle}: intelligence ${transition.change_direction.toLowerCase()}`, event: eventSummary, summary: transition.operator_significance, changes, transition }
-    : { status: "NO_MATERIAL_CHANGE", headline: `Cycle ${result.cycle}: no material intelligence change`, event: eventSummary, summary: transition?.operator_significance ?? "ReconMate re-evaluated the affected records without changing a material decision.", changes: [], transition };
+    ? { status: "MATERIAL_CHANGE", headline: `Cycle ${result.cycle}: intelligence ${transition.change_direction.toLowerCase()}`, event: eventSummary, summary: transition.operator_significance, changes, transition, transitions, portfolio: cyclePortfolio(result) }
+    : { status: "NO_MATERIAL_CHANGE", headline: `Cycle ${result.cycle}: no material intelligence change`, event: eventSummary, summary: transition?.operator_significance ?? "ReconMate re-evaluated the affected records without changing a material decision.", changes: [], transition, transitions, portfolio: cyclePortfolio(result) };
+}
+
+function cyclePortfolio(result: SimulationTickResult): CycleFeedback["portfolio"] {
+  return { previousCycle: result.previous_cycle, cycle: result.cycle, previousDate: result.previous_simulation_date, date: result.simulation_date, eventCount: result.event_count, customersAffected: result.change_summary.customers_affected, materialCustomers: result.change_summary.material_customers, recommendationsChanged: result.change_summary.recommendations_changed, recommendationsUnchanged: result.change_summary.recommendations_unchanged, families: result.generation.families, seed: result.generation.seed };
 }
 
 function DashboardLoading() {

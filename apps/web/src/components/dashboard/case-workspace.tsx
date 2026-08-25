@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { useCommandSession } from "@/components/intelligence/command-session";
+import { ReminderArtifact } from "@/components/intelligence/reminder-artifact";
+import type { ReminderArtifact as ReminderArtifactData } from "@/lib/intelligence-api";
 import type { IntelligenceTransition, PriorityCase } from "./data";
 import { queryKeys, useCaseWorkspace, useInvalidateOperationalData } from "./queries";
 import { buttonStyles, cx, StatusPill } from "./ui";
@@ -24,6 +26,8 @@ function executedActionExplanation(action: { executed_at: string | null; recomme
 }
 
 export function CaseWorkspace({ item, onClose, liveVersion, affected, transition }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean; transition?: IntelligenceTransition }) {
+  const [reviewingRecommendation, setReviewingRecommendation] = useState(false);
+  const [reminderDraft, setReminderDraft] = useState<ReminderArtifactData | null>(null);
   const router = useRouter();
   const queryClient = useQueryClient();
   const commandSession = useCommandSession();
@@ -49,8 +53,10 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
   async function request(url: string, body: Record<string, unknown>) {
     try {
       await action.mutateAsync({ url, body });
+      return true;
     } catch {
       // Mutation error is rendered without discarding the current workspace.
+      return false;
     }
   }
 
@@ -67,10 +73,23 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
     router.push("/analytics");
     void commandSession.runCommand({ command, ...context });
   };
-  const create = () => {
-    if (workspace && window.confirm(`Create a workflow action for ${label(workspace.recommendation.recommended_action)}?`)) {
-      request(`/recovery/cases/${item.id}/actions`, { expected_recommended_action: workspace.recommendation.recommended_action });
-    }
+  const create = async () => {
+    if (!workspace) return;
+    const created = await request(`/recovery/cases/${item.id}/actions`, { expected_recommended_action: workspace.recommendation.recommended_action });
+    if (created) setReviewingRecommendation(false);
+  };
+  const prepareReminder = () => {
+    if (!workspace?.invoice || workspace.recommendation.recommended_action !== "SEND_PAYMENT_REMINDER") return;
+    const invoice = workspace.invoice;
+    const amount = Number(invoice.outstanding_amount).toFixed(2);
+    setReminderDraft({
+      status: "PREPARED_FOR_REVIEW", customer_name: workspace.customer.name, account_reference: item.customerReference,
+      invoices: [{ invoice_number: invoice.number, outstanding_amount: invoice.outstanding_amount, due_date: invoice.due_date, days_overdue: workspace.recommendation.relevant_days_overdue }],
+      total_outstanding: invoice.outstanding_amount, promise_state: "NONE", dispute_state: "NONE", intended_channel: "Operator-selected channel",
+      purpose: "Request payment status and expected resolution", tone: "Professional payment-status follow-up", prepared_at: new Date().toISOString(),
+      body: `Hello ${workspace.customer.name},\n\nOur records show invoice ${invoice.number} with an outstanding balance of INR ${amount}. The invoice was due on ${invoice.due_date} and is ${workspace.recommendation.relevant_days_overdue} days overdue. Please confirm the current payment status and expected resolution date.\n\nThank you.`,
+      reason: "The current recommendation is a payment reminder and no active promise or dispute blocks operator-reviewed outreach.",
+    });
   };
   const decision = (verb: "approve" | "reject" | "hold" | "cancel" | "execute") => {
     if (!latest || !window.confirm(`${label(verb)} this simulated recovery action?`)) return;
@@ -120,8 +139,8 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
             <section className="grid gap-3 sm:grid-cols-4">
               <Card label="Exposure" value={workspace.invoice ? money(workspace.invoice.outstanding_amount) : "-"} />
               <Card label="Overdue" value={`${workspace.recommendation.relevant_days_overdue} days`} />
-              <Card label="Invoice" value={workspace.invoice?.status ?? "-"} />
-              <Card label="Promise" value={workspace.promises[0] ? label(workspace.promises[0].status) : "None"} />
+              <Card label="Invoice status" value={workspace.invoice?.status ?? "-"} />
+              <Card label="Recovery state" value={label(workspace.workflow.recovery_state)} />
             </section>
             <section className="rounded-2xl border border-sky-300/25 bg-sky-400/[.07] p-5 shadow-[0_16px_35px_rgba(14,165,233,.07)]">
               <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">Recommended operator next step</p>
@@ -131,9 +150,10 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               </div>
               <div className="mt-4 rounded-xl border border-white/[.07] bg-black/10 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Current case risk assessment</p>
-                  <p className="text-xs font-semibold text-white">{workspace.intelligence.level} / {workspace.intelligence.score} of 100</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Current intelligence score</p>
+                  <p className="text-xs font-semibold text-white">{workspace.intelligence.score}/100 / {workspace.intelligence.level}</p>
                 </div>
+                <p className="mt-1 text-[10px] text-slate-500">Evaluated for operating date {workspace.intelligence.calculated_at}.{workspace.intelligence.raw_score > 100 ? ` Raw weighted score ${workspace.intelligence.raw_score}; displayed score capped at 100.` : ""}</p>
                 {(workspace.intelligence.factors.length > 0 || workspace.intelligence.signals.length > 0) ? (
                   <ul className="mt-3 space-y-2">
                     {(workspace.intelligence.factors.length ? workspace.intelligence.factors : workspace.intelligence.signals).slice(0, 2).map((factor) => <li key={`${factor.title}-${factor.explanation}`} className="text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-200">{factor.title}:</span> {factor.explanation}</li>)}
@@ -141,6 +161,8 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                 ) : <p className="mt-3 text-xs leading-5 text-slate-400">No material risk factor is present in the current case facts.</p>}
               </div>
               <p className="mt-3 text-sm leading-6 text-slate-300">{workspace.recommendation.operator_explanation}</p>
+              <div className="mt-3 grid gap-3 rounded-xl border border-white/[.07] bg-black/10 p-3 sm:grid-cols-2"><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Stored workflow priority</p><p className="mt-1 text-xs font-semibold text-slate-200">{workspace.workflow.stored_priority} / {label(workspace.workflow.recovery_state)}</p></div><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Current recommended action</p><p className="mt-1 text-xs font-semibold text-slate-200">{label(workspace.recommendation.recommended_action)}</p></div></div>
+              {workspace.workflow.stored_priority !== workspace.intelligence.level && <p className="mt-2 text-[11px] leading-5 text-slate-400"><span className="font-semibold text-slate-200">Why these differ:</span> current intelligence is recalculated from today’s persisted facts; stored workflow priority records the case’s existing operational state until an operator updates it.</p>}
               <div className="mt-4 grid gap-3 border-t border-sky-200/10 pt-4 sm:grid-cols-2">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-200/70">Operator step</p>
@@ -157,13 +179,29 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               </div>
               {workspace.recommendation.blockers.length > 0 && <p className="mt-3 text-xs text-amber-200">Blockers: {workspace.recommendation.blockers.map(label).join(" / ")}</p>}
               <p className="mt-3 text-xs text-slate-400">Human approval {workspace.recommendation.human_approval_required ? "required" : "not required"}. Interpretation signals are supporting evidence only.</p>
+              {workspace.recommendation.recommended_action === "SEND_PAYMENT_REMINDER" && !reminderDraft && <button type="button" onClick={prepareReminder} className={`${buttonStyles.primary} mt-4`}>Prepare reminder draft</button>}
+              {reminderDraft && <ReminderArtifact artifact={reminderDraft} />}
             </section>
             <section className="rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
               <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-slate-500">Operator decision</p>
               <h3 className="mt-1.5 text-lg font-semibold tracking-[-.02em] text-white sm:text-xl">Choose the controlled workflow response</h3>
               <p className="mt-1 text-[11px] leading-4 text-slate-500">Creating an action records internal recovery work. It does not contact the customer or modify financial facts automatically.</p>
               {!latest ? (
-                <button disabled={busy || workspace.recommendation.recommended_action === "NO_ACTION_REQUIRED"} onClick={create} className={cx("mt-4", buttonStyles.primary)}>{busy ? "Creating internal action..." : "Create internal action from recommendation"}</button>
+                workspace.recommendation.recommended_action === "NO_ACTION_REQUIRED" ? (
+                  <div className="mt-4 rounded-xl border border-white/[.08] bg-black/10 p-4"><p className="text-sm font-semibold text-slate-200">Analysis only — no workflow action available</p><p className="mt-1 text-xs leading-5 text-slate-500">The current factual recommendation requires monitoring only, so ReconMate will not create unnecessary recovery work.</p></div>
+                ) : reviewingRecommendation ? (
+                  <div className="mt-4 rounded-xl border border-sky-300/20 bg-sky-300/[.04] p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.13em] text-sky-300">Prepared action review</p><StatusPill tone={workspace.recommendation.human_approval_required ? "amber" : "sky"}>{workspace.recommendation.human_approval_required ? "Approval required" : "Operator controlled"}</StatusPill></div>
+                    <h4 className="mt-2 text-base font-semibold text-white">{label(workspace.recommendation.recommended_action)}</h4>
+                    <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2"><div><dt className="text-slate-500">Account / invoice</dt><dd className="mt-1 text-slate-200">{workspace.customer.name} / {workspace.invoice?.number ?? "Account-level case"}</dd></div><div><dt className="text-slate-500">Current exposure</dt><dd className="mt-1 text-slate-200">{workspace.invoice ? money(workspace.invoice.outstanding_amount) : "-"}</dd></div><div><dt className="text-slate-500">Internal workflow type</dt><dd className="mt-1 text-slate-200">{label(workspace.recommendation.recommended_action)}</dd></div><div><dt className="text-slate-500">Result if prepared</dt><dd className="mt-1 text-slate-200">{workspace.recommendation.human_approval_required ? "Pending operator approval" : "Recommended internal action"}</dd></div></dl>
+                    <p className="mt-3 text-xs leading-5 text-slate-300">{workspace.recommendation.workflow_effect}</p>
+                    {workspace.recommendation.blockers.length > 0 && <p className="mt-2 text-xs text-amber-200">Current guardrail: {workspace.recommendation.blockers.map(label).join(" / ")}. The prepared action remains bounded by this condition.</p>}
+                    <p className="mt-2 text-[11px] text-slate-500">Internal record only — no customer communication, payment, promise, invoice, or dispute fact will be changed.</p>
+                    <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={busy} onClick={() => setReviewingRecommendation(false)} className={buttonStyles.secondary}>Cancel review</button><button type="button" disabled={busy} onClick={() => void create()} className={buttonStyles.primary}>{busy ? "Preparing internal action..." : "Prepare internal workflow action"}</button></div>
+                  </div>
+                ) : (
+                  <button type="button" disabled={busy} onClick={() => setReviewingRecommendation(true)} className={cx("mt-4", buttonStyles.primary)}>Review recommended action</button>
+                )
               ) : (
                 <div className="mt-4 rounded-xl border border-white/[.08] bg-black/10 p-4">
                   {latest.status === "EXECUTED" ? (
@@ -183,14 +221,17 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                       </div>
                       <h4 className="mt-2 text-base font-semibold text-white">{actionName(latest)}</h4>
                       <p className="mt-2 text-xs leading-5 text-slate-400">This is an internal recovery workflow record. Its current status is {label(latest.status).toLowerCase()}.</p>
+                      <p className="mt-1 text-[11px] text-slate-500">Created {latest.created_at ? new Date(latest.created_at).toLocaleString() : "in the current operator session"} / approval state {label(latest.approval_status)}</p>
                       {latest.decision_reason && <p className="mt-2 text-xs leading-5 text-slate-400">Operator reason: {latest.decision_reason}</p>}
+                      {latest.decision_at && <p className="mt-1 text-[11px] text-slate-500">Decision recorded {new Date(latest.decision_at).toLocaleString()}{latest.decision_by ? ` by ${latest.decision_by}` : ""}.</p>}
                     </div>
                   )}
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {latest.status === "PENDING_APPROVAL" && <button disabled={busy} onClick={() => decision("approve")} className={buttonStyles.success}>Approve</button>}
+                    {latest.status === "PENDING_APPROVAL" && <button disabled={busy} onClick={() => decision("approve")} className={buttonStyles.success}>Approve internal action</button>}
                     {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("hold")} className={buttonStyles.warning}>Hold</button>}
                     {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("reject")} className={buttonStyles.danger}>Reject</button>}
-                    {["RECOMMENDED", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("execute")} className={buttonStyles.primary}>Execute simulated action</button>}
+                    {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED", "HELD", "REJECTED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("cancel")} className={buttonStyles.secondary}>Cancel workflow action</button>}
+                    {["RECOMMENDED", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("execute")} className={buttonStyles.primary}>Record simulated internal action</button>}
                   </div>
                 </div>
               )}

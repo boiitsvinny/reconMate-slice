@@ -125,6 +125,7 @@ def case_workspace(case_id: UUID, db: Session = Depends(get_db)) -> dict[str, An
     events = db.scalars(select(AuditEvent).where((AuditEvent.entity_type == "RecoveryCase") & (AuditEvent.entity_id == case.id)).order_by(AuditEvent.occurred_at.desc())).all()
     return {
         "case_id": str(case.id), "customer": {"id": str(case.customer.id), "name": case.customer.name, "strategic": bool(case.customer.is_strategic_account)},
+        "workflow": {"stored_priority": case.priority.value, "recovery_state": case.current_state.value, "opened_at": case.opened_at, "updated_at": case.updated_at},
         "recommendation": recommend_case(case, simulation_date).model_dump(mode="json"),
         "intelligence": evaluate_case_intelligence(case, simulation_date).model_dump(mode="json"),
         "invoice": None if case.invoice is None else {"id": str(case.invoice.id), "number": case.invoice.invoice_number, "status": case.invoice.status.value, "outstanding_amount": case.invoice.outstanding_amount, "due_date": case.invoice.due_date},

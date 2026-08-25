@@ -45,6 +45,10 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
   });
   const isUnknown = result.interpreted_intent.intent === "UNKNOWN";
   const selectedCount = selected.size;
+  const openTarget = (targetType: string, targetId: string) => {
+    const opened = onOpenTarget?.(targetType, targetId) ?? false;
+    setTargetNotice(opened ? null : "This result has no active recovery case workspace. Its current intelligence remains available below.");
+  };
   if (isUnknown) {
     return (
       <Panel className="mt-6 border-amber-300/15">
@@ -74,7 +78,7 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
                   <p className="mt-1 text-[11px] text-emerald-100/60">{outcome.recovery_action_status ? `Workflow status: ${label(outcome.recovery_action_status)}.` : "Workflow record created."}{outcome.recovery_action_created_at ? ` Recorded ${new Date(outcome.recovery_action_created_at).toLocaleString()}.` : ""}</p>
                   {outcome.workflow_effect && <p className="mt-1 text-[11px] leading-4 text-emerald-100/60">{outcome.workflow_effect}</p>}
                 </div>
-                {onOpenTarget && <button type="button" onClick={() => onOpenTarget(proposal.target_type, proposal.target_id)} className={`${buttonStyles.success} w-full sm:w-auto`}>Open affected case</button>}
+                {onOpenTarget && <button type="button" onClick={() => openTarget(proposal.target_type, proposal.target_id)} className={`${buttonStyles.success} w-full sm:w-auto`}>Open affected case</button>}
               </article>
             ))}
           </div>
@@ -116,7 +120,7 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
         <div className="operational-scrollbar max-h-[34rem] divide-y divide-white/[.06] overflow-y-auto overscroll-contain" role="region" aria-label="Recommendation evidence" tabIndex={0}>
           {result.analyzed_entities.map((entity) => (
             <details key={`${entity.entity_type}-${entity.entity_id}`} className="group p-4 sm:p-5" open={result.analyzed_entities.length === 1}>
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/40"><div><p className="text-sm font-semibold text-white">{entity.entity_name}</p><p className="mt-1 text-xs text-slate-500">Score {entity.score}/100 / {entity.recommendation.title}</p></div><StatusPill tone={tone(entity.level)}>{entity.level}</StatusPill></summary>
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/40"><div><p className="text-sm font-semibold text-white">{entity.entity_name}</p><p className="mt-1 text-xs text-slate-500">Current intelligence score {entity.score}/100 / {entity.recommendation.title}</p></div><StatusPill tone={tone(entity.level)}>{entity.level}</StatusPill></summary>
               <div className="mt-4 grid gap-3 md:grid-cols-2">{(entity.factors.length ? entity.factors : entity.signals).map((factor) => <FactorExplanation key={`${factor.type}-${factor.explanation}`} factor={factor} />)}{!entity.factors.length && !entity.signals.length && <p className="text-xs text-slate-500">No material intelligence factor is currently detected.</p>}</div>
             </details>
           ))}

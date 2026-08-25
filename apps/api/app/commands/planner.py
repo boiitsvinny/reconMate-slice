@@ -120,7 +120,7 @@ class CommandPlanner:
         elif intent is CommandIntentType.PREPARE_PAYMENT_REMINDERS:
             analyzed = tools.get_overdue_customers(interpreted.filters.top_n)
             summary = f"Prepared {len(analyzed)} deterministic reminder drafts for customers with current overdue exposure."
-            actions.extend(self._reminder_proposal(plan_id, item) for item in analyzed)
+            actions.extend(self._reminder_proposal(plan_id, item, tools.get_customer(item.entity_id), created_at, tools.simulation_date) for item in analyzed)
 
         if not actions and intent is not CommandIntentType.UNKNOWN and not warnings:
             warnings.append("No current data matched the command filters; no action was invented.")
@@ -255,8 +255,26 @@ class CommandPlanner:
             limitations=["Confirmation creates only an internal workflow action; it does not contact the customer."],
         )
 
-    def _reminder_proposal(self, plan_id: UUID, result: IntelligenceResult) -> ActionProposal:
+    def _reminder_proposal(self, plan_id: UUID, result: IntelligenceResult, customer, prepared_at: datetime, simulation_date) -> ActionProposal:
         action = ProposalActionType.DRAFT_PAYMENT_REMINDER
+        invoices = [] if customer is None else [invoice for invoice in customer.invoices if invoice.outstanding_amount > 0 and invoice.due_date < simulation_date]
+        invoices.sort(key=lambda invoice: (invoice.due_date, invoice.invoice_number))
+        invoice_facts = [{"invoice_number": invoice.invoice_number, "outstanding_amount": invoice.outstanding_amount, "due_date": invoice.due_date, "days_overdue": (simulation_date - invoice.due_date).days} for invoice in invoices]
+        references = ", ".join(invoice.invoice_number for invoice in invoices)
+        total = sum((invoice.outstanding_amount for invoice in invoices), start=0)
+        broken = result.metrics.broken_promise_count > 0
+        blocked = result.metrics.active_dispute_count > 0
+        deferred = result.metrics.active_promise_count > 0
+        missing_facts = not invoices
+        status = "BLOCKED" if blocked else "DEFERRED" if deferred else "UNAVAILABLE" if missing_facts else "PREPARED_FOR_REVIEW"
+        reason = "An active dispute requires operator review before payment outreach." if blocked else "An active payment promise is still being monitored; a reminder is not appropriate yet." if deferred else "No current overdue invoice facts were available for a grounded reminder." if missing_facts else "Current overdue invoices have no active dispute or active promise blocking an operator-reviewed reminder."
+        tone = "Firm factual follow-up" if broken else "Professional payment-status follow-up"
+        body = None if blocked or deferred or missing_facts else (
+            f"Hello {result.entity_name},\n\nOur records show {references} with a total outstanding balance of INR {total:.2f}. "
+            f"The oldest referenced invoice is {max((simulation_date - invoice.due_date).days for invoice in invoices)} days overdue. "
+            + ("A previously recorded payment promise has passed without matching payment evidence. " if broken else "")
+            + "Please confirm the current payment status and expected resolution date.\n\nThank you."
+        )
         return ActionProposal(
             proposal_id=self._proposal_id(plan_id, result.entity_id, action), action_type=action,
             target_type="CUSTOMER", target_id=result.entity_id,
@@ -267,6 +285,7 @@ class CommandPlanner:
             ),
             priority=result.level, risk_level=result.level, execution_mode=ExecutionMode.PREPARE,
             executable=True, requires_confirmation=False,
+            reminder_artifact={"status": status, "customer_name": result.entity_name, "account_reference": customer.account_reference if customer else "", "invoices": invoice_facts, "total_outstanding": total, "promise_state": "BROKEN" if broken else "ACTIVE" if deferred else "NONE", "dispute_state": "ACTIVE" if blocked else "NONE", "intended_channel": "Operator-selected channel", "purpose": "Request payment status and expected resolution", "tone": tone, "prepared_at": prepared_at, "body": body, "reason": reason},
             limitations=["Draft preparation does not send email, SMS, WhatsApp, or a payment link."],
         )
 

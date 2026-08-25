@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import uuid
+import random
+import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -24,6 +26,7 @@ from app.models.domain import (
 from app.recovery.engine import synchronize_recovery_states
 from app.recommendations.service import recommend_case
 from app.seed.portfolio import seed_database
+from app.simulation.config import SCENARIO_CONFIG
 
 
 def _when(state: SimulationState) -> datetime:
@@ -41,7 +44,7 @@ def _audit(db: Session, entity_type: str, entity_id: uuid.UUID, event_type: str,
 def _case_for(db: Session, invoice: Invoice, when: datetime) -> RecoveryCase:
     case = db.scalar(select(RecoveryCase).where(RecoveryCase.invoice_id == invoice.id, RecoveryCase.closed_at.is_(None)))
     if case is None:
-        case = RecoveryCase(customer_id=invoice.customer_id, invoice=invoice, current_state=RecoveryState.NEW,
+        case = RecoveryCase(id=uuid.uuid5(uuid.NAMESPACE_URL, f"reconmate.simulation/case/{invoice.id}"), customer_id=invoice.customer_id, invoice=invoice, current_state=RecoveryState.NEW,
                             priority=RecoveryPriority.HIGH if invoice.outstanding_amount >= Decimal("150000") else RecoveryPriority.NORMAL,
                             opened_at=when, updated_at=when)
         db.add(case)
@@ -54,7 +57,7 @@ def _record(db: Session, state: SimulationState, ordinal: int, event_type: str, 
     event = SimulationEvent(id=_event_id(state.cycle, ordinal), cycle=state.cycle, event_type=event_type,
                             customer_id=customer.id if customer else (invoice.customer_id if invoice else None),
                             invoice_id=invoice.id if invoice else None, recovery_case_id=case.id if case else None,
-                            metadata_=metadata, occurred_at=_when(state))
+                            metadata_=metadata, occurred_at=_when(state) + timedelta(minutes=ordinal * 7))
     db.add(event)
     return {"id": str(event.id), "type": event_type, "customer_id": str(event.customer_id) if event.customer_id else None,
             "invoice_id": str(event.invoice_id) if event.invoice_id else None, "case_id": str(event.recovery_case_id) if event.recovery_case_id else None, "metadata": metadata}
@@ -103,19 +106,22 @@ def _build_transitions(
 ) -> list[dict[str, Any]]:
     tools = CommandTools(db)
     transitions = []
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for event in events:
-        targets = [("CUSTOMER", event.get("customer_id")), ("RECOVERY_CASE", event.get("case_id"))]
-        for entity_type, entity_id in targets:
+        for entity_type, entity_id in [("CUSTOMER", event.get("customer_id")), ("RECOVERY_CASE", event.get("case_id"))]:
             if not entity_id:
                 continue
-            if entity_type == "CUSTOMER":
+            grouped.setdefault((entity_type, entity_id), []).append(event)
+    for (entity_type, entity_id), related_events in grouped.items():
+        event = related_events[0]
+        if entity_type == "CUSTOMER":
                 result = tools.get_customer_intelligence(uuid.UUID(entity_id))
                 current_recommendation = result.recommendation.action.value if result else None
                 current_title = result.recommendation.title if result else None
                 current_explanation = result.recommendation.explanation if result else None
                 operator_next_step = None
                 workflow_effect = None
-            else:
+        else:
                 case = tools.get_case(entity_id)
                 result = tools.get_case_intelligence(uuid.UUID(entity_id)) if case else None
                 recommendation = recommend_case(case, tools.simulation_date) if case else None
@@ -124,10 +130,10 @@ def _build_transitions(
                 current_explanation = recommendation.operator_explanation if recommendation else None
                 operator_next_step = recommendation.operator_next_step if recommendation else None
                 workflow_effect = recommendation.workflow_effect if recommendation else None
-            if result is None or current_recommendation is None:
-                continue
-            previous = before.get((entity_type, entity_id))
-            transition = compare_intelligence(
+        if result is None or current_recommendation is None:
+            continue
+        previous = before.get((entity_type, entity_id))
+        transition = compare_intelligence(
                 before=previous.result if previous else None,
                 after=result,
                 previous_recommendation=previous.recommendation if previous else None,
@@ -140,16 +146,137 @@ def _build_transitions(
                 current_recommendation_explanation=current_explanation,
                 operator_next_step=operator_next_step,
                 workflow_effect=workflow_effect,
-            )
-            transitions.append(transition.model_dump(mode="json"))
+        )
+        payload = transition.model_dump(mode="json")
+        payload["related_events"] = [{"id": item["id"], "type": item["type"], "family": item["metadata"].get("family"), "role": item["metadata"].get("role")} for item in related_events]
+        transitions.append(payload)
     return transitions
 
 
-def run_tick(db: Session) -> dict[str, Any]:
+_EVENT_FAMILY = {
+    "PARTIAL_PAYMENT": "PAYMENT", "FULL_PAYMENT": "PAYMENT",
+    "PROMISE_CREATED": "PROMISE", "PROMISE_BROKEN": "PROMISE",
+    "DISPUTE_OPENED": "DISPUTE", "DISPUTE_RESOLVED": "DISPUTE",
+    "CUSTOMER_DELAY_RESPONSE": "COMMUNICATION",
+}
+
+
+def _roll_event_plan(rng: random.Random, valid_primary: list[str]) -> tuple[str, int]:
+    """Return the reproducible initial roll; state checks still govern each applied secondary."""
+    weighted = [kind for kind in SCENARIO_CONFIG.primary_event_population if kind in valid_primary]
+    if not weighted:
+        raise ValueError("No financially valid primary simulation event is currently available.")
+    return rng.choice(weighted), rng.choice(SCENARIO_CONFIG.secondary_count_population)
+
+
+def _fractional_amount(balance: Decimal, rng: random.Random, minimum: float, maximum: float) -> Decimal:
+    fraction = Decimal(str(rng.uniform(minimum, maximum)))
+    amount = max(Decimal("0.01"), (balance * fraction).quantize(Decimal("0.01")))
+    return min(amount, balance)
+
+
+def _promise_date(simulation_date, rng: random.Random):
+    return simulation_date + timedelta(days=rng.randint(SCENARIO_CONFIG.promise_days_min, SCENARIO_CONFIG.promise_days_max))
+
+
+def _pick(rng: random.Random, candidates: list[Any], preferred_customer_id: uuid.UUID | None = None):
+    if preferred_customer_id is not None and rng.random() < SCENARIO_CONFIG.same_account_probability:
+        related = [item for item in candidates if getattr(item, "customer_id", None) == preferred_customer_id]
+        if related:
+            candidates = related
+    return rng.choice(candidates)
+
+
+def _available_event_kinds(invoices: list[Invoice], promises: list[PromiseToPay], used: set[tuple[str, str]]) -> list[str]:
+    payable = [item for item in invoices if item.outstanding_amount > 0 and item.status is not InvoiceStatus.DISPUTED]
+    disputed = [item for item in invoices if item.outstanding_amount > 0 and item.status is InvoiceStatus.DISPUTED]
+    active = [item for item in promises if item.status is PromiseStatus.ACTIVE and item.invoice is not None and item.invoice.outstanding_amount > 0]
+    without_active_promise = [item for item in payable if not any(p.status is PromiseStatus.ACTIVE for p in item.promises_to_pay)]
+    kinds = []
+    if any(("PARTIAL_PAYMENT", str(item.id)) not in used and item.outstanding_amount > Decimal("0.01") for item in payable): kinds.append("PARTIAL_PAYMENT")
+    if any(("FULL_PAYMENT", str(item.id)) not in used for item in payable): kinds.append("FULL_PAYMENT")
+    if any(("PROMISE_CREATED", str(item.id)) not in used for item in without_active_promise): kinds.append("PROMISE_CREATED")
+    if any(("PROMISE_BROKEN", str(item.id)) not in used for item in active): kinds.append("PROMISE_BROKEN")
+    if any(("DISPUTE_OPENED", str(item.id)) not in used for item in payable): kinds.append("DISPUTE_OPENED")
+    if any(("DISPUTE_RESOLVED", str(item.id)) not in used for item in disputed): kinds.append("DISPUTE_RESOLVED")
+    if any(("CUSTOMER_DELAY_RESPONSE", str(item.id)) not in used for item in payable): kinds.append("CUSTOMER_DELAY_RESPONSE")
+    return kinds
+
+
+def _apply_generated_event(db: Session, state: SimulationState, rng: random.Random, seed: int, kind: str, role: str, ordinal: int, invoices: list[Invoice], promises: list[PromiseToPay], used: set[tuple[str, str]], preferred_customer_id: uuid.UUID | None) -> dict[str, Any]:
+    payable = [item for item in invoices if item.outstanding_amount > 0 and item.status is not InvoiceStatus.DISPUTED and (kind, str(item.id)) not in used]
+    disputed = [item for item in invoices if item.outstanding_amount > 0 and item.status is InvoiceStatus.DISPUTED and (kind, str(item.id)) not in used]
+    when = _when(state)
+    metadata: dict[str, Any] = {"family": _EVENT_FAMILY[kind], "role": role, "seed": seed}
+    invoice: Invoice
+    event_type: str
+
+    if kind in {"PARTIAL_PAYMENT", "FULL_PAYMENT"}:
+        invoice = _pick(rng, payable, preferred_customer_id)
+        previous = invoice.outstanding_amount
+        if kind == "FULL_PAYMENT": amount = previous
+        else:
+            amount = _fractional_amount(previous, rng, SCENARIO_CONFIG.payment_fraction_min, SCENARIO_CONFIG.payment_fraction_max)
+            if amount >= previous: amount = max(Decimal("0.01"), previous - Decimal("0.01"))
+        invoice.outstanding_amount -= amount
+        invoice.status = InvoiceStatus.PAID if invoice.outstanding_amount == 0 else InvoiceStatus.PARTIALLY_PAID
+        db.add(Payment(invoice=invoice, amount=amount, payment_date=state.simulation_date, reference=f"SIM-{state.cycle:04d}-{ordinal}"))
+        for promise in invoice.promises_to_pay:
+            if promise.status is PromiseStatus.ACTIVE and amount >= promise.promised_amount: promise.status = PromiseStatus.FULFILLED
+        event_type = "FULL_PAYMENT_RECEIVED" if invoice.outstanding_amount == 0 else "PARTIAL_PAYMENT_RECEIVED"
+        metadata.update(previous_outstanding=str(previous), payment_amount=str(amount), resulting_outstanding=str(invoice.outstanding_amount))
+        _audit(db, "Invoice", invoice.id, "SIMULATION_PAYMENT_RECEIVED", metadata, when)
+    elif kind == "PROMISE_CREATED":
+        candidates = [item for item in payable if not any(p.status is PromiseStatus.ACTIVE for p in item.promises_to_pay)]
+        invoice = _pick(rng, candidates, preferred_customer_id)
+        amount = _fractional_amount(invoice.outstanding_amount, rng, SCENARIO_CONFIG.promise_fraction_min, SCENARIO_CONFIG.promise_fraction_max)
+        promised_date = _promise_date(state.simulation_date, rng)
+        message = _communication(db, state, invoice.customer, invoice, f"We expect to pay INR {amount} by {promised_date}; please note the revised cash-flow timing.", ordinal)
+        promise = PromiseToPay(id=uuid.uuid5(uuid.NAMESPACE_URL, f"reconmate.simulation/promise/{state.cycle}/{ordinal}"), customer=invoice.customer, invoice=invoice, promised_amount=amount, promised_date=promised_date, status=PromiseStatus.ACTIVE, source_communication=message, confidence=Decimal("0.7600"))
+        db.add(promise); db.flush(); promises.append(promise)
+        event_type = "PAYMENT_COMMITMENT_RECEIVED"
+        metadata.update(communication_id=str(message.id), promise_id=str(promise.id), promise_amount=str(amount), promised_date=str(promised_date))
+        _audit(db, "PromiseToPay", promise.id, "SIMULATION_PROMISE_CREATED", metadata, when)
+        used.add(("PROMISE_BROKEN", str(promise.id)))
+    elif kind == "PROMISE_BROKEN":
+        active = [item for item in promises if item.status is PromiseStatus.ACTIVE and item.invoice is not None and item.invoice.outstanding_amount > 0 and (kind, str(item.id)) not in used]
+        promise = _pick(rng, active, preferred_customer_id)
+        invoice = promise.invoice
+        previous_date = promise.promised_date; promise.promised_date = state.simulation_date - timedelta(days=1); promise.status = PromiseStatus.BROKEN
+        event_type = "PROMISE_BROKEN"
+        metadata.update(promise_id=str(promise.id), previous_promised_date=str(previous_date), promised_date=str(promise.promised_date))
+        _audit(db, "PromiseToPay", promise.id, "SIMULATION_PROMISE_BROKEN", metadata, when)
+        used.add((kind, str(promise.id)))
+    elif kind == "DISPUTE_OPENED":
+        invoice = _pick(rng, payable, preferred_customer_id); previous = invoice.status; invoice.status = InvoiceStatus.DISPUTED
+        message = _communication(db, state, invoice.customer, invoice, f"We dispute invoice {invoice.invoice_number}; please hold recovery while the delivery discrepancy is reviewed.", ordinal)
+        event_type = "DISPUTE_OPENED"; metadata.update(previous_status=previous.value, communication_id=str(message.id))
+        _audit(db, "Invoice", invoice.id, "SIMULATION_DISPUTE_OPENED", metadata, when)
+        used.add(("DISPUTE_RESOLVED", str(invoice.id)))
+    elif kind == "DISPUTE_RESOLVED":
+        invoice = _pick(rng, disputed, preferred_customer_id); invoice.status = InvoiceStatus.OVERDUE if invoice.due_date < state.simulation_date else InvoiceStatus.OPEN
+        event_type = "DISPUTE_RESOLVED"; metadata.update(resulting_status=invoice.status.value)
+        _audit(db, "Invoice", invoice.id, "SIMULATION_DISPUTE_RESOLVED", metadata, when)
+        used.add(("DISPUTE_OPENED", str(invoice.id)))
+    else:
+        invoice = _pick(rng, payable, preferred_customer_id)
+        message = _communication(db, state, invoice.customer, invoice, "Payment is delayed while we complete an internal cash-flow review; we will provide a confirmed date when available.", ordinal)
+        event_type = "CUSTOMER_DELAY_REASON_RECEIVED"; metadata.update(communication_id=str(message.id), signal="PAYMENT_DELAY")
+        _audit(db, "Communication", message.id, "SIMULATION_CUSTOMER_RESPONSE", metadata, when)
+
+    used.add((kind, str(invoice.id)))
+    case = _case_for(db, invoice, when)
+    return _record(db, state, ordinal, event_type, invoice=invoice, case=case, metadata=metadata)
+
+
+def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> dict[str, Any]:
     state = db.scalar(select(SimulationState).where(SimulationState.name == "default").with_for_update())
     if state is None:
         raise ValueError("Synthetic simulation state has not been seeded.")
     before_intelligence = _capture_intelligence(db)
+    previous_cycle, previous_simulation_date = state.cycle, state.simulation_date
+    selected_seed = SCENARIO_CONFIG.judge_seed if judge else seed if seed is not None else secrets.randbits(63)
+    rng = random.Random(selected_seed)
     state.cycle += 1
     state.simulation_date += timedelta(days=1)
     db.flush()
@@ -162,57 +289,27 @@ def run_tick(db: Session) -> dict[str, Any]:
             previous = invoice.status.value
             invoice.status = InvoiceStatus.OVERDUE
             _audit(db, "Invoice", invoice.id, "SIMULATION_INVOICE_BECAME_OVERDUE", {"previous_status": previous, "due_date": str(invoice.due_date)}, when)
-    open_invoices = [item for item in invoices if item.outstanding_amount > 0 and item.status is not InvoiceStatus.DISPUTED]
     active_promises = db.scalars(select(PromiseToPay).options(selectinload(PromiseToPay.invoice), selectinload(PromiseToPay.customer)).where(PromiseToPay.status == PromiseStatus.ACTIVE).order_by(PromiseToPay.promised_date)).all()
-    ordinal = 0
-    # A deterministic rotating scenario. Each arm validates candidates before mutating.
-    scenario = cycle % 6
-    if scenario == 1 and open_invoices:
-        invoice = open_invoices[0]; previous = invoice.outstanding_amount
-        amount = previous if cycle % 12 == 1 else (previous / Decimal("2")).quantize(Decimal("0.01"))
-        invoice.outstanding_amount -= amount; invoice.status = InvoiceStatus.PAID if invoice.outstanding_amount == 0 else InvoiceStatus.PARTIALLY_PAID
-        payment = Payment(invoice=invoice, amount=amount, payment_date=state.simulation_date, reference=f"SIM-{cycle:04d}"); db.add(payment)
-        for promise in invoice.promises_to_pay:
-            if promise.status is PromiseStatus.ACTIVE and amount >= promise.promised_amount: promise.status = PromiseStatus.FULFILLED
-        case = _case_for(db, invoice, when); _audit(db, "Invoice", invoice.id, "SIMULATION_PAYMENT_RECEIVED", {"previous_outstanding": str(previous), "payment_amount": str(amount), "resulting_outstanding": str(invoice.outstanding_amount)}, when)
-        events.append(_record(db, state, ordinal, "FULL_PAYMENT_RECEIVED" if invoice.outstanding_amount == 0 else "PARTIAL_PAYMENT_RECEIVED", invoice=invoice, case=case, metadata={"previous_outstanding": str(previous), "payment_amount": str(amount), "resulting_outstanding": str(invoice.outstanding_amount)}))
-    elif scenario == 2 and active_promises:
-        promise = active_promises[0]; previous_date = promise.promised_date
-        # The event advances the factual deadline into the past before recording
-        # the missed promise; it never relies on an interpretation to break one.
-        promise.promised_date = state.simulation_date - timedelta(days=1); promise.status = PromiseStatus.BROKEN; case = _case_for(db, promise.invoice, when)
-        _audit(db, "PromiseToPay", promise.id, "SIMULATION_PROMISE_BROKEN", {"previous_promised_date": str(previous_date), "promised_date": str(promise.promised_date)}, when)
-        events.append(_record(db, state, ordinal, "PROMISE_BROKEN", customer=promise.customer, invoice=promise.invoice, case=case, metadata={"promise_id": str(promise.id), "previous_promised_date": str(previous_date), "promised_date": str(promise.promised_date)}))
-    elif scenario == 3 and open_invoices:
-        invoice = open_invoices[-1]; case = _case_for(db, invoice, when)
-        message = _communication(db, state, invoice.customer, invoice, "We can make a partial transfer next Tuesday; please allow for cash-flow timing.", ordinal)
-        promise = PromiseToPay(customer=invoice.customer, invoice=invoice, promised_amount=(invoice.outstanding_amount * Decimal("0.40")).quantize(Decimal("0.01")), promised_date=state.simulation_date + timedelta(days=5), status=PromiseStatus.ACTIVE, source_communication=message, confidence=Decimal("0.6200"))
-        db.add(promise); db.flush(); _audit(db, "PromiseToPay", promise.id, "SIMULATION_PROMISE_CREATED", {"invoice_id": str(invoice.id)}, when)
-        events.append(_record(db, state, ordinal, "PAYMENT_COMMITMENT_RECEIVED", invoice=invoice, case=case, metadata={"communication_id": str(message.id), "promise_amount": str(promise.promised_amount), "promised_date": str(promise.promised_date)}))
-    elif scenario == 4 and open_invoices:
-        invoice = open_invoices[cycle % len(open_invoices)]; previous = invoice.status; invoice.status = InvoiceStatus.DISPUTED; case = _case_for(db, invoice, when)
-        message = _communication(db, state, invoice.customer, invoice, f"We dispute invoice {invoice.invoice_number} due to a delivery issue; please hold collection.", ordinal)
-        _audit(db, "Invoice", invoice.id, "SIMULATION_DISPUTE_OPENED", {"previous_status": previous.value}, when)
-        events.append(_record(db, state, ordinal, "DISPUTE_OPENED", invoice=invoice, case=case, metadata={"previous_status": previous.value, "communication_id": str(message.id)}))
-    elif scenario == 5:
-        disputed = next((item for item in invoices if item.status is InvoiceStatus.DISPUTED), None)
-        if disputed:
-            disputed.status = InvoiceStatus.OVERDUE if disputed.due_date < state.simulation_date else InvoiceStatus.OPEN; case = _case_for(db, disputed, when)
-            _audit(db, "Invoice", disputed.id, "SIMULATION_DISPUTE_RESOLVED", {"resulting_status": disputed.status.value}, when)
-            events.append(_record(db, state, ordinal, "DISPUTE_RESOLVED", invoice=disputed, case=case, metadata={"resulting_status": disputed.status.value}))
-    if not events and open_invoices:
-        invoice = open_invoices[0]; case = _case_for(db, invoice, when)
-        previous = invoice.status.value
-        if invoice.status is not InvoiceStatus.DISPUTED:
-            invoice.status = InvoiceStatus.OVERDUE
-        _audit(db, "Invoice", invoice.id, "SIMULATION_INVOICE_BECAME_OVERDUE", {"previous_status": previous, "due_date": str(invoice.due_date)}, when)
-        events.append(_record(db, state, ordinal, "INVOICE_BECAME_OVERDUE", invoice=invoice, case=case, metadata={"previous_status": previous, "resulting_status": invoice.status.value, "due_date": str(invoice.due_date), "simulation_date": str(state.simulation_date)}))
+    used: set[tuple[str, str]] = set()
+    valid = _available_event_kinds(invoices, active_promises, used)
+    primary_kind, secondary_target = _roll_event_plan(rng, valid)
+    primary = _apply_generated_event(db, state, rng, selected_seed, primary_kind, "PRIMARY", 0, invoices, active_promises, used, None)
+    events.append(primary)
+    preferred_customer_id = uuid.UUID(primary["customer_id"]) if primary.get("customer_id") else None
+    for ordinal in range(1, secondary_target + 1):
+        valid = _available_event_kinds(invoices, active_promises, used)
+        if not valid: break
+        kind = rng.choice(valid)
+        events.append(_apply_generated_event(db, state, rng, selected_seed, kind, "SECONDARY", ordinal, invoices, active_promises, used, preferred_customer_id))
     db.flush()
     synchronization = synchronize_recovery_states(db, state.simulation_date)
     # synchronize commits; persist any event records and cycle as the final atomic outcome.
     db.commit()
     transitions = _build_transitions(db, before_intelligence, events, cycle)
-    return {"cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "intelligence_transitions": transitions, "recovery_synchronization": synchronization}
+    customer_transitions = [item for item in transitions if item["entity_type"] == "CUSTOMER"]
+    families = sorted({item["metadata"]["family"] for item in events})
+    summary = {"customers_affected": len({item["customer_id"] for item in events if item.get("customer_id")}), "material_customers": sum(bool(item["material"]) for item in customer_transitions), "recommendations_changed": sum("RECOMMENDATION_CHANGED" in item["classifications"] for item in customer_transitions), "recommendations_unchanged": sum("RECOMMENDATION_CHANGED" not in item["classifications"] for item in customer_transitions), "blockers_added": sum("NEW_BLOCKER" in item["classifications"] for item in customer_transitions), "blockers_removed": sum("BLOCKER_RESOLVED" in item["classifications"] for item in customer_transitions)}
+    return {"previous_cycle": previous_cycle, "previous_simulation_date": previous_simulation_date, "cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "intelligence_transitions": transitions, "recovery_synchronization": synchronization, "generation": {"seed": selected_seed, "mode": "JUDGE" if judge else "NORMAL", "primary_event_id": primary["id"], "secondary_event_count": len(events) - 1, "families": families}, "change_summary": summary}
 
 
 def reset_simulation(db: Session) -> dict[str, Any]:

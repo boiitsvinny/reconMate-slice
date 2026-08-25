@@ -81,7 +81,7 @@ export function CustomerPreview({ preview, onClose, onViewMore }: { preview: Cas
         <li>{item.promiseSignal}</li>
         <li className={item.allowed ? "text-emerald-300" : "text-amber-200"}>{item.reason}</li>
       </ul>
-      <button type="button" onClick={() => onViewMore(item)} className={`${buttonStyles.primary} mt-4 w-full`}>View more</button>
+      <button type="button" onClick={() => onViewMore(item)} className={`${buttonStyles.primary} mt-4 w-full`}>{item.recommendedAction === "NO_ACTION_REQUIRED" ? "Inspect case" : "Review recommended action"}</button>
     </div>
   );
 }

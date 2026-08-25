@@ -92,6 +92,7 @@ class IntelligenceResult(BaseModel):
     entity_name: str
     calculated_at: date
     score: int = Field(ge=0, le=100)
+    raw_score: int = Field(default=0, ge=0)
     level: PriorityLevel
     metrics: IntelligenceMetrics
     signals: list[IntelligenceSignal]

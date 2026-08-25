@@ -39,6 +39,7 @@ export type IntelligenceResult = {
   entity_name: string;
   calculated_at: string;
   score: number;
+  raw_score: number;
   level: PriorityLevel;
   metrics: {
     total_outstanding_amount: string;
@@ -99,7 +100,24 @@ export type ActionProposal = {
   executable: boolean;
   requires_confirmation: boolean;
   workflow_recommendation_action: string | null;
+  reminder_artifact: ReminderArtifact | null;
   limitations: string[];
+};
+
+export type ReminderArtifact = {
+  status: "PREPARED_FOR_REVIEW" | "BLOCKED" | "DEFERRED" | "UNAVAILABLE";
+  customer_name: string;
+  account_reference: string;
+  invoices: { invoice_number: string; outstanding_amount: string; due_date: string; days_overdue: number }[];
+  total_outstanding: string;
+  promise_state: string;
+  dispute_state: string;
+  intended_channel: string;
+  purpose: string;
+  tone: string;
+  prepared_at: string;
+  body: string | null;
+  reason: string;
 };
 
 export type ActionOutcome = {

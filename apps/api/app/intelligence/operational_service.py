@@ -347,7 +347,8 @@ def _evaluate(
 ) -> IntelligenceResult:
     metrics = _metrics(scope, calculated_at, policy)
     signals, factors = _signals_and_factors(metrics, calculated_at, policy)
-    score = min(100, max(0, sum(factor.points for factor in factors)))
+    raw_score = max(0, sum(factor.points for factor in factors))
+    score = min(100, raw_score)
     level = priority_level(score, policy)
     return IntelligenceResult(
         entity_type=entity_type,
@@ -355,6 +356,7 @@ def _evaluate(
         entity_name=entity_name,
         calculated_at=calculated_at,
         score=score,
+        raw_score=raw_score,
         level=level,
         metrics=metrics,
         signals=signals,
