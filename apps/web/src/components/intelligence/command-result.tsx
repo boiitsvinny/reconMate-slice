@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CommandIntentType, CommandResult, ContributingFactor, IntelligenceSignal, PriorityLevel } from "@/lib/intelligence-api";
 import { ActionProposalCard } from "./action-proposal-card";
 import { useCommandSession } from "./command-session";
+import { useInsightMode } from "./insight-mode";
 import { buttonStyles, Panel, SectionHeader, StatusPill } from "@/components/dashboard/ui";
 
 const label = (value: string) => value.replaceAll("_", " ");
@@ -24,6 +25,7 @@ const objectives: Record<CommandIntentType, string> = {
 
 export function CommandResultView({ command, result, onOpenTarget }: { command: string; result: CommandResult; onOpenTarget?: (targetType: string, targetId: string) => boolean }) {
   const { confirmPlan, confirming } = useCommandSession();
+  const { enabled: inspectionEnabled } = useInsightMode();
   const confirmationIds = useMemo(() => result.outcomes.filter((item) => item.status === "AWAITING_CONFIRMATION").map((item) => item.proposal_id), [result.outcomes]);
   const [selected, setSelected] = useState<Set<string>>(new Set(confirmationIds));
   const [reviewing, setReviewing] = useState(false);
@@ -54,10 +56,10 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
 
   return (
     <div className="mt-6 space-y-6" aria-live="polite">
-      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,.92fr)]">
+      {inspectionEnabled && <section className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,.92fr)]">
         <InterpretationPanel command={command} result={result} />
         <AnalysisApproach result={result} />
-      </section>
+      </section>}
 
       {executedProposals.length > 0 && (
         <Panel className="overflow-hidden border-emerald-300/20 bg-emerald-300/[.035]">
@@ -109,7 +111,7 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
         )}
       </Panel>
 
-      <Panel className="overflow-hidden">
+      {inspectionEnabled && <Panel className="overflow-hidden">
         <SectionHeader eyebrow="Recommendation evidence" title="Why ReconMate recommends this" detail={`${result.analyzed_entities.length} detailed intelligence record${result.analyzed_entities.length === 1 ? "" : "s"} returned by the command`} prominent />
         <div className="operational-scrollbar max-h-[34rem] divide-y divide-white/[.06] overflow-y-auto overscroll-contain" role="region" aria-label="Recommendation evidence" tabIndex={0}>
           {result.analyzed_entities.map((entity) => (
@@ -120,9 +122,9 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
           ))}
           {!result.analyzed_entities.length && <p className="p-8 text-center text-xs text-slate-500">No intelligence records matched this command.</p>}
         </div>
-      </Panel>
+      </Panel>}
 
-      {(result.warnings.length > 0 || result.limitations.length > 0) && (
+      {inspectionEnabled && (result.warnings.length > 0 || result.limitations.length > 0) && (
         <details className="rounded-2xl border border-white/[.08] bg-[#08111f]/80 p-4 sm:p-5"><summary className="cursor-pointer text-sm font-semibold text-slate-300">Notices and operating boundaries ({result.warnings.length + result.limitations.length})</summary><ul className="mt-3 space-y-2 text-xs leading-5 text-slate-500">{[...result.warnings, ...result.limitations].map((item) => <li key={item}>• {item}</li>)}</ul></details>
       )}
     </div>

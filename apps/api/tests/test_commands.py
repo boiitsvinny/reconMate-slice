@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes import commands as commands_route
@@ -206,6 +207,35 @@ def test_interpreter_extracts_top_n_critical_and_handles_ambiguous_wording() -> 
     assert unknown.intent is CommandIntentType.UNKNOWN
     assert unknown.confidence < .5
     assert unknown.guidance
+
+
+@pytest.mark.parametrize(("command", "intent"), [
+    ("Any followups required?", CommandIntentType.PREPARE_FOLLOW_UPS),
+    ("Do I need to follow up with anyone?", CommandIntentType.PREPARE_FOLLOW_UPS),
+    ("Who needs a follow-up?", CommandIntentType.PREPARE_FOLLOW_UPS),
+    ("Who should I contact again?", CommandIntentType.PREPARE_FOLLOW_UPS),
+    ("Any customers waiting for a response?", CommandIntentType.PREPARE_FOLLOW_UPS),
+    ("Show me people I should chase", CommandIntentType.PREPARE_FOLLOW_UPS),
+    ("Who should I focus on?", CommandIntentType.PRIORITIZE_CASES),
+    ("What needs my attention?", CommandIntentType.PRIORITIZE_CASES),
+    ("Which customers are risky?", CommandIntentType.PRIORITIZE_CASES),
+    ("Who has broken their promise?", CommandIntentType.REVIEW_BROKEN_PROMISES),
+    ("Who promised to pay but didn’t?", CommandIntentType.REVIEW_BROKEN_PROMISES),
+    ("Prepare recovery work for critical accounts", CommandIntentType.PREPARE_RECOVERY_ACTIONS),
+    ("What overdue customers need action?", CommandIntentType.PRIORITIZE_CASES),
+    ("Show me the worst cases", CommandIntentType.PRIORITIZE_CASES),
+    ("Who needs escalation?", CommandIntentType.PRIORITIZE_CASES),
+    ("Draft payment reminders for overdue customers", CommandIntentType.PREPARE_PAYMENT_REMINDERS),
+    ("Analyze portfolio health", CommandIntentType.PORTFOLIO_ANALYSIS),
+])
+def test_interpreter_accepts_realistic_operator_paraphrases(command: str, intent: CommandIntentType) -> None:
+    assert RuleBasedCommandInterpreter().interpret(CommandRequest(command=command)).intent is intent
+
+
+def test_interpreter_handles_competing_operational_intents_safely() -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command="Prepare recovery work and follow up with everyone"))
+    assert result.intent is CommandIntentType.UNKNOWN
+    assert result.guidance and "could mean" in result.guidance
 
 
 def test_prioritization_command_runs_through_api(monkeypatch) -> None:

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/app-header";
 import { useCommandSession } from "@/components/intelligence/command-session";
+import { useInsightMode } from "@/components/intelligence/insight-mode";
 import { apiFetch } from "@/lib/api";
 import { formatMoney as money, PriorityCase, SimState, SimulationTickResult } from "./data";
 import { CaseWorkspace } from "./case-workspace";
@@ -18,6 +19,7 @@ import { CycleFeedback, ResetFeedback, SimulationControl } from "./simulation-co
 import { TodaysOperationalFocus } from "./todays-operational-focus";
 
 export function Dashboard() {
+  const { enabled: inspectionEnabled } = useInsightMode();
   const [auto, setAuto] = useState(false);
   const [lastTick, setLastTick] = useState<SimulationTickResult | null>(null);
   const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback | undefined>();
@@ -250,10 +252,10 @@ export function Dashboard() {
               }} />
               <aside className="space-y-5">
                 <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
-                <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} />
+                {inspectionEnabled && <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} />}
               </aside>
             </section>
-            <RecommendationSafety activeDisputes={recovery.data.cases_blocked_by_dispute} activePromises={recovery.data.cases_awaiting_payment} />
+            {inspectionEnabled && <RecommendationSafety activeDisputes={recovery.data.cases_blocked_by_dispute} activePromises={recovery.data.cases_awaiting_payment} />}
           </>
         )}
       </div>

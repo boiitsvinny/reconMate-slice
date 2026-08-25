@@ -8,6 +8,7 @@ import { CaseWorkspace } from "./case-workspace";
 import { CustomerPreview, useCasePreview } from "./customer-preview";
 import { PriorityCase, Recommendation } from "./data";
 import { IntelligenceBoundary } from "./intelligence-boundary";
+import { useInsightMode } from "@/components/intelligence/insight-mode";
 import { NextAction } from "./next-action";
 import { useRecoveryQueue } from "./queries";
 import { Panel, SectionHeader, StatusPill, buttonStyles } from "./ui";
@@ -17,6 +18,7 @@ const priorityTone = (priority: Recommendation["priority"]) => priority === "CRI
 const queueState = (action: string) => action === "ESCALATE_TO_HUMAN" ? "Decision required" : action === "HOLD_FOR_DISPUTE" ? "Review required" : action === "MONITOR_ACTIVE_PROMISE" ? "Waiting / blocked" : action === "NO_ACTION_REQUIRED" ? "Monitoring" : "Follow-up recommended";
 
 export function AnalyticsPage() {
+  const { enabled: inspectionEnabled } = useInsightMode();
   const [selected, setSelected] = useState<PriorityCase | null>(null);
   const { preview, openPreview, closePreview } = useCasePreview();
   const { customers, cases, recommendations, queue } = useRecoveryQueue();
@@ -69,7 +71,7 @@ export function AnalyticsPage() {
                 {!actionable.length && <p className="p-10 text-center text-sm text-slate-500">No operator action is currently recommended.</p>}
               </div>
             </Panel>
-            <section className="mt-7"><IntelligenceBoundary /></section>
+            {inspectionEnabled && <section className="mt-7"><IntelligenceBoundary /></section>}
           </>
         )}
       </div>

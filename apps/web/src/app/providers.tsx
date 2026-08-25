@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { CommandSessionProvider } from "@/components/intelligence/command-session";
+import { InsightModeProvider } from "@/components/intelligence/insight-mode";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient({
@@ -19,5 +20,5 @@ export function Providers({ children }: { children: React.ReactNode }) {
     },
   }));
 
-  return <QueryClientProvider client={queryClient}><CommandSessionProvider>{children}</CommandSessionProvider></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><InsightModeProvider><CommandSessionProvider>{children}</CommandSessionProvider></InsightModeProvider></QueryClientProvider>;
 }

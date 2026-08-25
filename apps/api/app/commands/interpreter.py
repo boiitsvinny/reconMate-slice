@@ -30,23 +30,41 @@ class FutureLLMCommandInterpreter(BaseCommandInterpreter):
 
 class RuleBasedCommandInterpreter(BaseCommandInterpreter):
     def interpret(self, request: CommandRequest) -> CommandIntent:
-        text = " ".join(request.command.lower().split())
+        text = self._normalize(request.command)
         filters = self._filters(text)
 
-        explanation_words = ("why", "explain", "reason", "recommendation")
+        explanation_words = ("why", "explain", "reason", "recommendation", "what makes")
         case_words = ("case", "recovery")
         customer_words = ("customer", "account")
         broken_words = (
             "broken promise", "broken promises", "promise is broken", "promises are broken",
-            "missed payment promise", "missed promises",
+            "missed payment promise", "missed promises", "promise to pay but did not",
+            "promised to pay but did not", "promise was not kept", "did not keep promise",
+            "broken their promise", "broke their promise", "broke a promise",
+            "promised to pay but didn t", "promise to pay but didn t",
         )
-        reminder_words = ("draft reminder", "draft reminders", "payment reminder", "payment reminders", "overdue reminder")
-        recovery_prepare_words = ("prepare recovery action", "prepare recovery actions", "prepare recovery plan", "critical recoveries")
-        follow_up_words = ("follow up", "follow-up", "followups", "follow ups")
+        reminder_words = ("draft reminder", "draft reminders", "payment reminder", "payment reminders", "overdue reminder", "remind overdue")
+        recovery_prepare_words = (
+            "prepare recovery action", "prepare recovery actions", "prepare recovery plan", "critical recoveries",
+            "prepare recovery work", "prepare recovery", "recovery work for", "prepare escalation work",
+        )
+        follow_up_words = (
+            "follow up", "followups", "follow ups", "contact again", "chase", "chase up",
+            "waiting for a response", "waiting response", "needs a response", "need a response",
+        )
         prioritize_words = (
             "focus on", "should i focus", "prioritize", "priority", "highest risk",
             "high-risk", "critical customer", "urgent case", "urgent customer", "top risk",
+            "needs my attention", "need my attention", "what needs attention", "risky customers",
+            "customers are risky", "worst cases", "worst case", "needs escalation", "need escalation",
+            "overdue customers need action", "overdue customer needs action",
         )
+
+        if any(word in text for word in follow_up_words) and any(word in text for word in recovery_prepare_words):
+            return self._unknown(
+                filters,
+                "This request could mean reviewing who needs follow-up or preparing recovery workflow work. Ask for one of those supported operations explicitly.",
+            )
 
         if any(word in text for word in explanation_words):
             if request.context_case_id is not None and any(word in text for word in case_words):
@@ -73,6 +91,10 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         if any(word in text for word in recovery_prepare_words):
             return self._intent(CommandIntentType.PREPARE_RECOVERY_ACTIONS, .97, CommandScope.PORTFOLIO, filters,
                                 "The command explicitly requests preparation of recovery work.")
+
+        if any(word in text for word in follow_up_words):
+            return self._intent(CommandIntentType.PREPARE_FOLLOW_UPS, .94, CommandScope.PORTFOLIO, filters,
+                                "The command asks which customers require a controlled recovery follow-up.")
 
         if "analy" in text and any(word in text for word in customer_words):
             if request.context_customer_id is None:
@@ -106,7 +128,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         risk_levels: list[PriorityLevel] = []
         if "critical" in text:
             risk_levels.append(PriorityLevel.CRITICAL)
-        if "high risk" in text or "high-risk" in text or "high priority" in text:
+        if "high risk" in text or "high priority" in text or "risky" in text or "worst" in text:
             risk_levels.append(PriorityLevel.HIGH)
             if PriorityLevel.CRITICAL not in risk_levels:
                 risk_levels.append(PriorityLevel.CRITICAL)
@@ -120,6 +142,20 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             ),
             include_all=bool(re.search(r"\ball\b", text)),
         )
+
+    @staticmethod
+    def _normalize(command: str) -> str:
+        """Normalize common operator phrasing before deterministic intent matching."""
+        text = command.lower().replace("’", "'")
+        text = re.sub(r"[^a-z0-9']+", " ", text)
+        text = re.sub(r"\banyone\b", "customers", text)
+        text = re.sub(r"\bpeople\b", "customers", text)
+        text = re.sub(r"\baccounts?\b", "account", text)
+        text = re.sub(r"\bcases?\b", "case", text)
+        text = re.sub(r"\bfollow\s*ups?\b", "follow up", text)
+        text = re.sub(r"\bpromised\s+to\s+pay\s+but\s+didn'?t\b", "promised to pay but did not", text)
+        text = re.sub(r"\bwho'?s\b", "who is", text)
+        return " ".join(text.split())
 
     @staticmethod
     def _intent(

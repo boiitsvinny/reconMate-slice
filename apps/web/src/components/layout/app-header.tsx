@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { useInsightMode } from "@/components/intelligence/insight-mode";
 
 type AppHeaderProps = { connected: boolean; updating?: boolean };
 
@@ -18,6 +19,7 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
   const [today, setToday] = useState("");
   const [navigationVisible, setNavigationVisible] = useState(true);
   const lastScrollY = useRef(0);
+  const { enabled: inspectionEnabled, toggle: toggleInspection } = useInsightMode();
 
   useEffect(() => {
     const update = () => setToday(new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date()));
@@ -52,19 +54,21 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
   return (
     <>
     <header className={`sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b border-white/[0.09] bg-[#07111f]/95 px-4 shadow-lg shadow-black/10 backdrop-blur-xl transition-transform duration-300 ease-out sm:px-6 lg:px-10 ${navigationVisible ? "translate-y-0" : "-translate-y-full"}`}>
-      <Link href="/" aria-label="ReconMate home" className="group flex min-w-0 items-center gap-3">
-        <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-sky-200/25 bg-gradient-to-br from-sky-300/20 to-blue-500/10 shadow-[0_0_24px_rgba(56,189,248,.12)] transition group-hover:border-sky-200/45">
+      <div className="group flex min-w-0 items-center gap-3">
+        <button type="button" onClick={toggleInspection} aria-label="Toggle Intelligence Inspection" aria-pressed={inspectionEnabled} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-sky-200/25 bg-gradient-to-br from-sky-300/20 to-blue-500/10 shadow-[0_0_24px_rgba(56,189,248,.12)] transition hover:border-sky-200/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60">
           <svg aria-hidden="true" viewBox="0 0 32 32" className="h-7 w-7 fill-none stroke-sky-200" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M8 24V8h8.5a5 5 0 0 1 0 10H8" />
             <path d="m16 18 7 6" />
             <circle cx="23.5" cy="8.5" r="2" className="fill-emerald-300 stroke-none" />
           </svg>
-        </div>
+        </button>
+        <Link href="/" aria-label="ReconMate home" className="min-w-0">
         <div className="min-w-0">
           <div className="text-base font-semibold tracking-[-0.025em] text-white">ReconMate</div>
           <div className="truncate text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500 sm:text-[10px]">Recovery operations</div>
         </div>
-      </Link>
+        </Link>
+      </div>
       <nav aria-label="Primary navigation" className="hidden items-center gap-1 rounded-xl border border-white/[.07] bg-white/[.025] p-1 sm:flex lg:ml-6">
         {navigation.map(([href, label]) => {
           const active = href === "/" ? pathname === href : pathname.startsWith(href);

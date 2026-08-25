@@ -44,7 +44,7 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
           <div className="relative">
             <SectionEyebrow>Intelligence command center</SectionEyebrow>
             <h2 className="mt-3 text-xl font-semibold tracking-[-.03em] text-white sm:text-2xl">What do you want ReconMate to work on?</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Each command runs a structured analysis of the current portfolio, then returns an explainable operational plan for review.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ask about operational priorities, overdue exposure, broken promises, recovery work, or payment reminders.</p>
             <form onSubmit={submit} className="mt-5 flex flex-col gap-3 sm:flex-row">
               <label htmlFor="reconmate-command" className="sr-only">Operational command</label>
               <input
@@ -59,7 +59,7 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
               <button disabled={processing || !command.trim()} className={`${buttonStyles.primary} min-h-12 px-6 sm:w-auto`}>{processing ? "Analyzing..." : "Analyze"}</button>
             </form>
             <div className="mt-4 flex flex-wrap gap-2" aria-label="Supported command examples">
-              {examples.map((example) => <button type="button" disabled={processing} key={example} onClick={() => runExample(example)} className="rounded-full border border-white/[.08] bg-white/[.025] px-3 py-1.5 text-left text-[11px] text-slate-400 transition hover:border-sky-300/25 hover:text-sky-100 disabled:opacity-50">{example}</button>)}
+              {examples.map((example) => <button type="button" disabled={processing} key={example} onClick={() => runExample(example)} className="rounded-full border border-white/[.08] bg-white/[.025] px-3 py-1.5 text-left text-[11px] text-slate-400 transition hover:border-sky-300/25 hover:text-sky-100 disabled:opacity-50">Try: {example}</button>)}
             </div>
           </div>
         </div>
