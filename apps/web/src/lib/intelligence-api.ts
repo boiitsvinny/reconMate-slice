@@ -1,4 +1,4 @@
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 export type PriorityLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export type CommandIntentType =
@@ -160,7 +160,7 @@ export class ApiRequestError extends Error {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(apiUrl(path), init);
+  const response = await apiFetch(path, init, init?.method === "POST" ? 60_000 : undefined);
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { detail?: string } | null;
     throw new ApiRequestError(payload?.detail ?? `ReconMate API request failed (${response.status}).`, response.status);

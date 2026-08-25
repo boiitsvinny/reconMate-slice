@@ -16,6 +16,7 @@ type Props = {
   affectedCustomerIds: Set<string>;
   onSelectCase: (item: PriorityCase) => void;
   onRetry: () => void;
+  onRetryCaseLinks: () => void;
 };
 
 type FocusLane = "urgent" | "review" | "waiting";
@@ -34,7 +35,7 @@ const lanePresentation = {
 
 const riskTone = (level: IntelligenceResult["level"]) => level === "CRITICAL" ? "rose" : level === "HIGH" ? "amber" : level === "MEDIUM" ? "sky" : "slate";
 
-export function TodaysOperationalFocus({ intelligence, loading, error, casesByCustomer, caseLinksLoading, caseLinksError, affectedCustomerIds, onSelectCase, onRetry }: Props) {
+export function TodaysOperationalFocus({ intelligence, loading, error, casesByCustomer, caseLinksLoading, caseLinksError, affectedCustomerIds, onSelectCase, onRetry, onRetryCaseLinks }: Props) {
   const items = intelligence?.highest_priority.filter((item) => item.recommendation.action !== "MONITOR").slice(0, 5) ?? [];
 
   return (
@@ -52,7 +53,7 @@ export function TodaysOperationalFocus({ intelligence, loading, error, casesByCu
           <button type="button" onClick={onRetry} className={buttonStyles.secondary}>Try intelligence again</button>
         </div>
       )}
-      {intelligence && caseLinksError && <p className="border-b border-amber-300/10 bg-amber-300/[.04] px-5 py-3 text-[11px] text-amber-100/75">Case workspace links are temporarily unavailable. Intelligence review remains available.</p>}
+      {intelligence && caseLinksError && <div className="flex flex-col justify-between gap-2 border-b border-amber-300/10 bg-amber-300/[.04] px-5 py-3 text-[11px] text-amber-100/75 sm:flex-row sm:items-center"><p>Case workspace links are temporarily unavailable. Intelligence review remains available.</p><button type="button" onClick={onRetryCaseLinks} className="font-semibold text-amber-100 underline decoration-amber-200/30 underline-offset-4">Retry case links</button></div>}
       {!loading && intelligence && !items.length && (
         <div className="px-6 py-12 text-center">
           <div className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-emerald-300/20 bg-emerald-300/[.07] text-emerald-200">✓</div>

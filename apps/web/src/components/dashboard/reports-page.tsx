@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AppHeader } from "@/components/layout/app-header";
 import { CaseWorkspace } from "./case-workspace";
+import { CustomerPreview, useCasePreview } from "./customer-preview";
 import { PriorityCase } from "./data";
 import { PortfolioSignals } from "./portfolio-signals";
 import { PriorityQueue } from "./priority-queue";
@@ -10,6 +11,7 @@ import { useRecovery, useRecoveryQueue } from "./queries";
 
 export function ReportsPage() {
   const [selected, setSelected] = useState<PriorityCase | null>(null);
+  const { preview, openPreview, closePreview } = useCasePreview();
   const { customers, cases, recommendations, queue } = useRecoveryQueue();
   const recovery = useRecovery();
   const queries = [customers, cases, recommendations, recovery];
@@ -17,25 +19,28 @@ export function ReportsPage() {
   const error = queries.find((query) => query.isError)?.error;
   const errorMessage = error instanceof Error ? error.message : error ? "Unable to load recovery reports." : null;
   const updating = ready && queries.some((query) => query.isFetching);
+  const retry = () => Promise.all(queries.map((query) => query.refetch()));
 
   return (
     <main className="min-h-screen overflow-x-hidden">
-      <AppHeader connected={ready} updating={updating} />
+      <AppHeader connected={ready && !errorMessage} updating={updating && !errorMessage} />
       <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
         <header className="max-w-3xl">
           <p className="text-[11px] font-bold uppercase tracking-[.22em] text-sky-200">Recovery reports</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Priority Recovery Work</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300/80">Review the complete recovery queue, ordered by the backend recommendation engine. Open a case to approve or execute its existing workflow.</p>
         </header>
-        {!ready && errorMessage && <div className="mt-7 rounded-2xl border border-rose-300/20 bg-rose-300/[.07] p-5 text-sm text-rose-100">{errorMessage}</div>}
+        {!ready && errorMessage && <div className="mt-7 flex flex-col justify-between gap-4 rounded-2xl border border-rose-300/20 bg-rose-300/[.07] p-5 sm:flex-row sm:items-center"><p className="text-sm text-rose-100">{errorMessage}</p><button type="button" onClick={() => void retry()} className="rounded-lg border border-rose-200/25 px-3 py-2 text-xs font-bold text-rose-50">Try again</button></div>}
         {!ready && !errorMessage && <div className="mt-7 h-[560px] animate-pulse rounded-2xl border border-white/[.07] bg-white/[.035]" />}
+        {ready && errorMessage && <div className="mt-5 flex flex-col justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 sm:flex-row sm:items-center"><p className="text-xs text-amber-100">Live refresh is delayed. Showing the last successful recovery data.</p><button type="button" onClick={() => void retry()} className="text-xs font-semibold text-amber-50 underline decoration-amber-200/30 underline-offset-4">Retry refresh</button></div>}
         {ready && recovery.data && (
           <section className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,2fr)_minmax(320px,.8fr)]">
-            <PriorityQueue items={queue} onSelect={setSelected} changedCaseIds={new Set()} />
+            <PriorityQueue items={queue} onSelect={openPreview} changedCaseIds={new Set()} />
             <aside><PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} /></aside>
           </section>
         )}
       </div>
+      <CustomerPreview preview={preview} onClose={closePreview} onViewMore={(item) => { closePreview(); setSelected(item); }} />
       {selected && <CaseWorkspace item={selected} onClose={() => setSelected(null)} liveVersion={0} affected={false} />}
     </main>
   );

@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/app-header";
 import { useCommandSession } from "@/components/intelligence/command-session";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { formatMoney as money, PriorityCase, SimState, SimulationTickResult } from "./data";
 import { CaseWorkspace } from "./case-workspace";
+import { CustomerPreview, useCasePreview } from "./customer-preview";
 import { LiveEventFeed } from "./live-event-feed";
 import { OperationalIntelligenceHero } from "./operational-intelligence-hero";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
@@ -22,6 +23,7 @@ export function Dashboard() {
   const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback | undefined>();
   const [resetFeedback, setResetFeedback] = useState<ResetFeedback | undefined>();
   const [selected, setSelected] = useState<PriorityCase | null>(null);
+  const { preview, openPreview, closePreview } = useCasePreview();
   const operationInFlight = useRef(false);
   const queryClient = useQueryClient();
   const commandSession = useCommandSession();
@@ -44,7 +46,7 @@ export function Dashboard() {
   const tick = useMutation({
     onMutate: () => setResetFeedback(undefined),
     mutationFn: async () => {
-      const response = await fetch(apiUrl("/simulation/tick"), { method: "POST" });
+      const response = await apiFetch("/simulation/tick", { method: "POST" }, 90_000);
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { detail?: string } | null;
         throw new Error(payload?.detail ?? "Simulation tick failed.");
@@ -70,11 +72,11 @@ export function Dashboard() {
   });
   const resetDemo = useMutation({
     mutationFn: async () => {
-      const response = await fetch(apiUrl("/simulation/reset"), {
+      const response = await apiFetch("/simulation/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmation: "RESET_DEMO_SIMULATION" }),
-      });
+      }, 90_000);
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { detail?: string } | null;
         throw new Error(payload?.detail ?? "The demo simulation could not be reset.");
@@ -86,6 +88,7 @@ export function Dashboard() {
       setLastTick(null);
       setCycleFeedback(undefined);
       setSelected(null);
+      closePreview();
       commandSession.clearSession();
       await queryClient.resetQueries({ queryKey: queryKeys.all });
       const refreshedState = queryClient.getQueryData<SimState>(queryKeys.simulationState);
@@ -222,8 +225,9 @@ export function Dashboard() {
               caseLinksLoading={caseLinksLoading}
               caseLinksError={caseLinksError}
               affectedCustomerIds={affectedCustomerIds}
-              onSelectCase={setSelected}
+              onSelectCase={openPreview}
               onRetry={() => void intelligence.refetch()}
+              onRetryCaseLinks={() => void Promise.all([recoveryQueue.cases.refetch(), recoveryQueue.recommendations.refetch()])}
             />
 
             <section aria-label="Important portfolio metrics" className="mt-7">
@@ -242,7 +246,7 @@ export function Dashboard() {
             <section aria-label="Portfolio operations" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
               <LiveEventFeed events={events.data} customers={names} onOpenCase={(caseId) => {
                 const item = recoveryQueue.queue.find((candidate) => candidate.id === caseId);
-                if (item) setSelected(item);
+                if (item) openPreview(item);
               }} />
               <aside className="space-y-5">
                 <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
@@ -253,6 +257,7 @@ export function Dashboard() {
           </>
         )}
       </div>
+      <CustomerPreview preview={preview} onClose={closePreview} onViewMore={(item) => { closePreview(); setSelected(item); }} />
       {selected && <CaseWorkspace item={selected} onClose={() => setSelected(null)} liveVersion={simulation.data?.cycle ?? 0} affected={selectedAffected} transition={selectedTransition} />}
     </main>
   );

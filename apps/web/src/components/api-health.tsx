@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { apiBaseUrl, apiUrl } from "@/lib/api";
+import { apiBaseUrl, apiFetch } from "@/lib/api";
 
 type HealthState = "checking" | "healthy" | "unavailable";
 
@@ -12,7 +12,7 @@ export function ApiHealth() {
     const controller = new AbortController();
     async function checkApiHealth() {
       try {
-        const response = await fetch(apiUrl("/health"), { signal: controller.signal });
+        const response = await apiFetch("/health", { signal: controller.signal });
         const payload: unknown = await response.json();
         const isHealthy = response.ok && typeof payload === "object" && payload !== null &&
           "status" in payload && payload.status === "ok";

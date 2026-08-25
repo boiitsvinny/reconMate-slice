@@ -1,4 +1,4 @@
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 
 export type Portfolio = { simulation_date: string | null; total_outstanding_amount: string; total_invoices: number; total_customers: number };
 export type Recovery = { overdue_exposure: string; broken_promise_exposure: string; cases_eligible_for_recovery: number; cases_requiring_attention?: number; cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number; total_cases: number };
@@ -48,7 +48,7 @@ export type Workspace = {
   recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; operator_explanation: string; communication_signals: { intent: string; confidence: string | null }[] };
   promises: { status: string; promised_amount: string; promised_date: string }[];
   communications: { id: string; direction: string; content: string; occurred_at: string; analyses: { intent?: string }[] }[];
-  actions: { id: string; status: string; recommended_action: string | null; human_approval_required: boolean; decision_reason: string | null; executed_at: string | null }[];
+  actions: { id: string; action_type: string; status: string; recommended_action: string | null; human_approval_required: boolean; decision_reason: string | null; executed_at: string | null; created_at: string | null }[];
   audit_events: { id: string; event_type: string; occurred_at: string }[];
 };
 
@@ -61,7 +61,7 @@ export const formatMoney = (value: string | number) => {
 };
 
 export async function fetchJson<T>(path: string): Promise<T> {
-  const response = await fetch(apiUrl(path));
+  const response = await apiFetch(path);
   if (!response.ok) throw new Error(`Unable to load ${path.replaceAll("/", " ").trim()}.`);
   return response.json() as Promise<T>;
 }

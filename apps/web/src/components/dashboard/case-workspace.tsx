@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { apiUrl } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { useCommandSession } from "@/components/intelligence/command-session";
 import type { IntelligenceTransition, PriorityCase } from "./data";
 import { queryKeys, useCaseWorkspace, useInvalidateOperationalData } from "./queries";
@@ -11,6 +11,33 @@ import { buttonStyles, cx, StatusPill } from "./ui";
 
 function label(value: string) { return value.replaceAll("_", " "); }
 function money(value: string) { return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(value)); }
+
+const operatorSteps: Record<string, string> = {
+  SEND_PAYMENT_REMINDER: "Review the account and decide whether to advance a payment reminder through the approved recovery process.",
+  MONITOR_ACTIVE_PROMISE: "Monitor the active promise through its due date and verify recorded payment evidence before taking further recovery action.",
+  REQUEST_PAYMENT_DATE: "Review the account and prepare a follow-up requesting a confirmed payment date through the approved recovery process.",
+  REVIEW_PAYMENT_CLAIM: "Verify the customer’s payment claim against recorded payment evidence before changing the recovery response.",
+  HOLD_FOR_DISPUTE: "Keep recovery outreach on hold while the active dispute is reviewed and resolved by an operator.",
+  ESCALATE_TO_HUMAN: "Route the case to an operator for review because its current signals require human judgment.",
+  PREPARE_ESCALATION: "Prepare the case for senior recovery review because its current exposure and risk signals warrant escalation.",
+  NO_ACTION_REQUIRED: "Continue monitoring the case; the current facts do not support creating recovery work.",
+};
+
+function recommendationEffect(action: string) {
+  if (action === "NO_ACTION_REQUIRED") return "ReconMate keeps this as an advisory recommendation. No workflow action is created, and the operator continues monitoring the live case facts.";
+  return "ReconMate creates an internal controlled workflow record for operator review. It does not contact the customer or change invoices, payments, promises, disputes, or case state.";
+}
+
+function actionName(action: { action_type: string; recommended_action: string | null }) {
+  return label(action.recommended_action ?? action.action_type);
+}
+
+function executedActionExplanation(action: { action_type: string; recommended_action: string | null; executed_at: string | null }) {
+  const workflowName = actionName(action).toLowerCase();
+  const executedAt = action.executed_at;
+  const timestamp = executedAt ? ` at ${new Date(executedAt).toLocaleString()}` : "";
+  return `The internal ${workflowName} workflow step was marked executed${timestamp}. Its status and execution time were recorded; the simulated execution did not contact the customer or change invoices, payments, promises, disputes, or case state.`;
+}
 
 export function CaseWorkspace({ item, onClose, liveVersion, affected, transition }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean; transition?: IntelligenceTransition }) {
   const router = useRouter();
@@ -21,7 +48,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
   const invalidateOperationalData = useInvalidateOperationalData();
   const action = useMutation({
     mutationFn: async ({ url, body }: { url: string; body: Record<string, unknown> }) => {
-      const response = await fetch(apiUrl(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const response = await apiFetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, 60_000);
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { detail?: string } | null;
         throw new Error(payload?.detail ?? "Workflow action was not accepted.");
@@ -43,7 +70,10 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
     }
   }
 
-  const latest = workspace?.actions[0];
+  const latest = workspace?.actions.reduce((current, candidate) => {
+    if (!current) return candidate;
+    return new Date(candidate.created_at ?? 0).getTime() > new Date(current.created_at ?? 0).getTime() ? candidate : current;
+  }, workspace.actions[0]);
   const queryError = workspaceQuery.error instanceof Error ? workspaceQuery.error.message : null;
   const mutationError = action.error instanceof Error ? action.error.message : null;
   const error = mutationError ?? (!workspace ? queryError : null);
@@ -116,6 +146,16 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                 <StatusPill tone="sky">{workspace.recommendation.priority}</StatusPill>
               </div>
               <p className="mt-3 text-sm leading-6 text-slate-300">{workspace.recommendation.operator_explanation}</p>
+              <div className="mt-4 grid gap-3 border-t border-sky-200/10 pt-4 sm:grid-cols-2">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-200/70">Operator step</p>
+                  <p className="mt-1.5 text-xs leading-5 text-slate-300">{operatorSteps[workspace.recommendation.recommended_action] ?? "Review the recommendation and current case evidence before deciding whether to create controlled recovery work."}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-200/70">If you proceed</p>
+                  <p className="mt-1.5 text-xs leading-5 text-slate-300">{recommendationEffect(workspace.recommendation.recommended_action)}</p>
+                </div>
+              </div>
               <div className="mt-4 border-t border-sky-200/10 pt-3">
                 <p className="text-xs font-semibold text-slate-200">Why ReconMate recommends this</p>
                 <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{workspace.recommendation.factual_reasons.map((reason) => <li key={reason}>- {reason}</li>)}</ul>
@@ -130,8 +170,27 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               {!latest ? (
                 <button disabled={busy || workspace.recommendation.recommended_action === "NO_ACTION_REQUIRED"} onClick={create} className={cx("mt-4", buttonStyles.primary)}>{busy ? "Creating internal action..." : "Create internal action from recommendation"}</button>
               ) : (
-                <div className="mt-3">
-                  <p className="text-sm text-slate-300">Latest action: <span className="font-semibold text-white">{label(latest.status)}</span>{latest.recommended_action && ` / ${label(latest.recommended_action)}`}</p>
+                <div className="mt-4 rounded-xl border border-white/[.08] bg-black/10 p-4">
+                  {latest.status === "EXECUTED" ? (
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[10px] font-bold uppercase tracking-[.13em] text-emerald-300">Latest action completed</p>
+                        <StatusPill tone="emerald">Executed</StatusPill>
+                      </div>
+                      <h4 className="mt-2 text-base font-semibold text-white">{actionName(latest)}</h4>
+                      <p className="mt-2 text-xs leading-5 text-slate-300">{executedActionExplanation(latest)}</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[10px] font-bold uppercase tracking-[.13em] text-sky-300">Latest workflow action</p>
+                        <StatusPill tone="sky">{label(latest.status)}</StatusPill>
+                      </div>
+                      <h4 className="mt-2 text-base font-semibold text-white">{actionName(latest)}</h4>
+                      <p className="mt-2 text-xs leading-5 text-slate-400">This is an internal recovery workflow record. Its current status is {label(latest.status).toLowerCase()}.</p>
+                      {latest.decision_reason && <p className="mt-2 text-xs leading-5 text-slate-400">Operator reason: {latest.decision_reason}</p>}
+                    </div>
+                  )}
                   <div className="mt-4 flex flex-wrap gap-2">
                     {latest.status === "PENDING_APPROVAL" && <button disabled={busy} onClick={() => decision("approve")} className={buttonStyles.success}>Approve</button>}
                     {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("hold")} className={buttonStyles.warning}>Hold</button>}
@@ -140,10 +199,6 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                   </div>
                 </div>
               )}
-            </section>
-            <section className="grid gap-5 md:grid-cols-2">
-              <Timeline eyebrow="Factual workflow" title="Recovery timeline" detail="Persisted actions and audited case changes" entries={[...workspace.actions.map((action) => `${label(action.status)} / ${action.recommended_action ? label(action.recommended_action) : "historical action"}`), ...workspace.audit_events.slice(0, 6).map((event) => label(event.event_type))]} />
-              <Timeline eyebrow="Interpreted context" title="Communication intelligence" detail="Bounded intent signals; not verified financial facts" entries={workspace.communications.slice(0, 4).map((communication) => `${communication.direction}: ${communication.analyses[0]?.intent ? label(communication.analyses[0].intent) : "Not analysed"}`)} />
             </section>
           </div>
         )}
@@ -158,16 +213,5 @@ function Card({ label, value }: { label: string; value: string }) {
       <p className="text-[10px] uppercase tracking-[.12em] text-slate-500">{label}</p>
       <p className="mt-1 text-sm font-semibold text-white">{value}</p>
     </div>
-  );
-}
-
-function Timeline({ eyebrow, title, detail, entries }: { eyebrow: string; title: string; detail: string; entries: string[] }) {
-  return (
-    <section className="rounded-xl border border-white/[.08] p-4">
-      <p className="text-[9px] font-bold uppercase tracking-[.13em] text-sky-300/70">{eyebrow}</p>
-      <h3 className="mt-1.5 text-base font-semibold tracking-[-.015em] text-white">{title}</h3>
-      <p className="mt-1 text-[10px] leading-4 text-slate-600">{detail}</p>
-      <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-400">{entries.length ? entries.map((entry, index) => <li key={`${entry}-${index}`} className="border-l border-sky-300/25 pl-3">{entry}</li>) : <li>No recorded items.</li>}</ul>
-    </section>
   );
 }

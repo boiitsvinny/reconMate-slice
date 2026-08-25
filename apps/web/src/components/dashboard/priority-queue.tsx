@@ -1,14 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { CustomerPreview } from "./customer-preview";
 import type { PriorityCase } from "./data";
 import { cx, Panel, SectionHeader, StatusPill } from "./ui";
 
 const stateTone = (state: string) => state === "ESCALATED" ? "rose" : state === "AWAITING_CUSTOMER" ? "amber" : state === "RESOLVED" ? "emerald" : "sky";
 
 export function PriorityQueue({ items, onSelect, changedCaseIds }: { items: PriorityCase[]; onSelect: (item: PriorityCase) => void; changedCaseIds: Set<string> }) {
-  const [hovered, setHovered] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const focusItems = items.filter((item) => item.recommendationPriority !== "LOW" && item.recommendedAction !== "NO_ACTION_REQUIRED");
   const visibleItems = showAll ? items : focusItems;
@@ -37,8 +35,6 @@ export function PriorityQueue({ items, onSelect, changedCaseIds }: { items: Prio
           <button
             type="button"
             key={item.id}
-            onMouseEnter={() => setHovered(item.id)}
-            onMouseLeave={() => setHovered(null)}
             onClick={() => onSelect(item)}
             className={cx(
               "group relative grid w-full grid-cols-1 gap-2 rounded-xl border px-3 py-3 text-left transition hover:border-sky-300/20 hover:bg-sky-400/[0.045] md:grid-cols-[minmax(180px,1.6fr)_0.8fr_0.7fr_0.9fr] md:items-center md:gap-4",
@@ -64,7 +60,6 @@ export function PriorityQueue({ items, onSelect, changedCaseIds }: { items: Prio
               <StatusPill tone={stateTone(item.state)}>{item.state.replaceAll("_", " ")}</StatusPill>
               <span className="text-slate-600 transition group-hover:translate-x-0.5 group-hover:text-sky-300">View</span>
             </div>
-            {hovered === item.id && <CustomerPreview item={item} />}
           </button>
         ))}
         {!visibleItems.length && (

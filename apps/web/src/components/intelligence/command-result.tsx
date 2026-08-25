@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { CommandIntentType, CommandResult, ContributingFactor, IntelligenceSignal, PriorityLevel } from "@/lib/intelligence-api";
 import { ActionProposalCard } from "./action-proposal-card";
 import { useCommandSession } from "./command-session";
-import { buttonStyles, cx, Panel, SectionHeader, StatusPill } from "@/components/dashboard/ui";
+import { buttonStyles, Panel, SectionHeader, StatusPill } from "@/components/dashboard/ui";
 
 const label = (value: string) => value.replaceAll("_", " ");
 const tone = (level: PriorityLevel) => level === "CRITICAL" ? "rose" : level === "HIGH" ? "amber" : level === "MEDIUM" ? "sky" : "slate";
@@ -38,10 +38,6 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
   const outcomes = new Map(result.outcomes.map((item) => [item.proposal_id, item]));
   const isUnknown = result.interpreted_intent.intent === "UNKNOWN";
   const selectedCount = selected.size;
-  const executedCount = result.outcomes.filter((item) => item.status === "EXECUTED").length;
-  const awaitingCount = result.outcomes.filter((item) => item.status === "AWAITING_CONFIRMATION").length;
-  const preparedCount = result.outcomes.filter((item) => item.status === "PREPARED").length;
-
   if (isUnknown) {
     return (
       <Panel className="mt-6 border-amber-300/15">
@@ -53,21 +49,6 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
 
   return (
     <div className="mt-6 space-y-6" aria-live="polite">
-      <CommandFlow />
-      <div className={cx("rounded-2xl border p-4 sm:p-5", executedCount ? "border-emerald-300/20 bg-emerald-300/[.06]" : awaitingCount ? "border-amber-300/20 bg-amber-300/[.06]" : "border-sky-300/20 bg-sky-300/[.055]")} role="status">
-        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-          <div>
-            <p className={cx("text-sm font-semibold", executedCount ? "text-emerald-100" : awaitingCount ? "text-amber-100" : "text-sky-100")}>
-              {executedCount ? `${executedCount} workflow action${executedCount === 1 ? "" : "s"} created` : awaitingCount ? "Plan ready for operator review" : preparedCount ? "Preparation complete" : "Analysis complete"}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-slate-300/75">
-              {executedCount ? "The confirmed internal workflow work is now reflected in current recovery data." : awaitingCount ? "Review the proposed actions below and explicitly confirm only the work you want created." : preparedCount ? "The requested drafts are ready for review. Nothing was sent to a customer." : "The command inspected current operational data and completed without changing portfolio records."}
-            </p>
-          </div>
-          <StatusPill tone={executedCount ? "emerald" : awaitingCount ? "amber" : "sky"}>{label(result.plan.execution_mode)}</StatusPill>
-        </div>
-      </div>
-
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,.92fr)]">
         <InterpretationPanel command={command} result={result} />
         <AnalysisApproach result={result} />
@@ -121,10 +102,6 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
       )}
     </div>
   );
-}
-
-function CommandFlow() {
-  return <ol className="grid overflow-hidden rounded-2xl border border-white/[.08] bg-[#08111f]/80 sm:grid-cols-5" aria-label="Command analysis flow">{["Request received", "Intent understood", "Live records inspected", "Plan prioritized", "Operator reviews"].map((step, index) => <li key={step} className="flex items-center gap-3 border-b border-white/[.06] px-3 py-3 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-300 text-[10px] font-bold text-slate-950">{index + 1}</span><span className="text-[11px] font-semibold text-slate-300">{step}</span></li>)}</ol>;
 }
 
 function InterpretationPanel({ command, result }: { command: string; result: CommandResult }) {
