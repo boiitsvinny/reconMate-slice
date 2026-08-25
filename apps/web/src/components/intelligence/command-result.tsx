@@ -53,7 +53,7 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
     return (
       <Panel className="mt-6 border-amber-300/15">
         <SectionHeader eyebrow="Unsupported request" title="ReconMate cannot answer this from the current receivables model." detail={result.interpreted_intent.guidance ?? result.understanding_summary} prominent />
-        <div className="p-5"><AnalysisList title="Supported analysis dimensions" items={["Overdue exposure and invoice age", "Payments and payment activity", "Promises and broken commitments", "Disputes and action blockers", "Current risk and recovery state", "Latest operational changes"]} empty="" /></div>
+        <div className="space-y-4 p-5"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Your request</p><p className="mt-1.5 text-sm leading-6 text-slate-200">“{command}”</p></div><AnalysisList title="Supported analysis dimensions" items={["Overdue exposure and invoice age", "Payments and payment activity", "Promises and broken commitments", "Disputes and action blockers", "Current risk and recovery state", "Latest operational changes"]} empty="" /></div>
       </Panel>
     );
   }

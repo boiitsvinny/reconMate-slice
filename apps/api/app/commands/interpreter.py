@@ -30,6 +30,17 @@ _NUMBER_WORDS = {
 }
 _QUERY_OPERATIONS = ("show", "list", "give", "which", "who", "find", "rank", "top", "count", "how many", "summarize", "summary", "explain")
 _PREDICTIVE = ("churn", "next quarter", "forecast", "predict", "likelihood", "probability", "will pay", "future revenue")
+_DOMAIN_CONCEPTS = (
+    "customer", "customers", "account", "invoice", "invoices", "receivable", "receivables",
+    "collection", "collections", "overdue", "exposure", "payment", "payments", "promise", "promises",
+    "dispute", "disputes", "recovery", "risk", "risky", "riskiest", "priority", "priorities",
+    "escalation", "actionable", "monitoring", "latest cycle", "last cycle",
+)
+_BROAD_FOCUS_PHRASES = (
+    "focus on", "need my attention", "needs my attention", "need attention", "needs attention",
+    "requiring operator attention", "require operator attention", "should collections work on",
+    "worst case",
+)
 
 
 class RuleBasedCommandInterpreter(BaseCommandInterpreter):
@@ -80,7 +91,15 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         if self._direct_invoice_request(text):
             return self._unknown(filters, query, "The command result contract currently returns customer or recovery-case intelligence, not standalone invoice rows. Ask for customers with the invoice condition instead.")
 
-        recognized = self._has(text, _QUERY_OPERATIONS) or self._has_query_condition(query) or self._has(text, ("risk", "risky", "riskiest", "exposure", "priority", "attention", "escalation"))
+        if not self._has_domain_evidence(text, query):
+            return self._unknown(filters, query, "ReconMate cannot answer this from the current receivables and recovery model. Supported dimensions include overdue exposure, payments, promises, disputes, recovery state, risk, and latest operational changes.")
+
+        recognized = (
+            self._has(text, _QUERY_OPERATIONS)
+            or self._has_query_condition(query)
+            or self._has(text, _BROAD_FOCUS_PHRASES)
+            or self._has(text, ("risk", "risky", "riskiest", "exposure", "priority", "attention", "escalation"))
+        )
         if not recognized:
             return self._unknown(filters, query, "ReconMate could not map this wording to current receivables, promise, dispute, payment, risk, or recovery dimensions.")
 
@@ -182,6 +201,19 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         )) or query.min_days_overdue is not None or query.max_days_overdue is not None
         or query.min_score is not None or query.max_score is not None
         or query.limit or query.count_only or query.time_scope is QueryTimeScope.LATEST_CYCLE)
+
+    @staticmethod
+    def _has_domain_evidence(text: str, query: StructuredQuery) -> bool:
+        """Require receivables meaning; generic request verbs are never evidence."""
+        return (
+            RuleBasedCommandInterpreter._has(text, _DOMAIN_CONCEPTS)
+            or RuleBasedCommandInterpreter._has(text, _BROAD_FOCUS_PHRASES)
+            or any(value is not None for value in (
+                query.overdue, query.broken_promise, query.active_promise, query.active_dispute,
+                query.partial_payment, query.recent_payment, query.actionable, query.blocked, query.monitoring,
+                query.min_days_overdue, query.max_days_overdue, query.min_score, query.max_score,
+            ))
+        )
 
     @staticmethod
     def _direct_invoice_request(text: str) -> bool:

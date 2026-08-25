@@ -314,11 +314,41 @@ def test_interpreter_composes_independent_query_dimensions(command: str, expecte
     "Who improved after the latest cycle?",
     "Purple bananas dance quickly",
     "Show overdue invoices",
+    "List weather forecasts for Bengaluru",
+    "Write me a poem",
+    "Tell me a joke",
+    "What is the capital of France?",
+    "Who will win the World Cup?",
+    "Explain quantum mechanics",
+    "Flibbertigibbet zorbles sideways",
 ])
 def test_interpreter_rejects_unsupported_or_ungrounded_requests(command: str) -> None:
     result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
     assert result.intent is CommandIntentType.UNKNOWN
     assert result.guidance
+
+
+@pytest.mark.parametrize("command", [
+    "Who should I focus on today?",
+    "Which accounts need attention?",
+    "Show recovery priorities",
+    "What should collections work on?",
+])
+def test_interpreter_keeps_broad_but_grounded_focus_requests(command: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is CommandIntentType.PRIORITIZE_CASES
+
+
+@pytest.mark.parametrize("command", [
+    "Show me Bengaluru weather",
+    "List the top 5 World Cup teams",
+    "List critical weather alerts",
+    "Find a joke",
+    "Tell me the capital of France",
+])
+def test_generic_operations_do_not_supply_domain_evidence(command: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is CommandIntentType.UNKNOWN
 
 
 def test_composed_predicates_all_apply_to_the_same_grounded_result() -> None:
@@ -343,6 +373,30 @@ def test_prioritization_command_runs_through_api(monkeypatch) -> None:
     assert len(body["analyzed_entities"]) == 1
     assert body["outcomes"][0]["status"] == "ANALYZED"
     assert body["plan"]["execution_mode"] == "READ_ONLY"
+
+
+def test_weather_request_is_unknown_through_serialized_command_endpoint(monkeypatch) -> None:
+    class RejectFallbackTools(FakeCommandTools):
+        def execute_customer_query(self, _query):
+            raise AssertionError("Unsupported commands must not execute a customer query")
+
+        def execute_case_query(self, _query):
+            raise AssertionError("Unsupported commands must not execute a case query")
+
+        def get_portfolio_intelligence(self):
+            raise AssertionError("Unsupported commands must not inspect the portfolio")
+
+    client = _client(monkeypatch, RejectFallbackTools)
+    response = client.post("/commands", json={"command": "List weather forecasts for Bengaluru"})
+    app.dependency_overrides.clear()
+    body = response.json()
+    assert response.status_code == 200
+    assert body["interpreted_intent"]["intent"] == "UNKNOWN"
+    assert body["analyzed_entities"] == []
+    assert body["plan"]["proposed_actions"] == []
+    assert body["query_evidence"]["records_inspected"] == 0
+    assert body["query_evidence"]["records_matched"] == 0
+    assert body["query_evidence"]["ranking"] == []
 
 
 def test_prioritization_exposes_grounded_query_and_ranking_evidence(monkeypatch) -> None:
