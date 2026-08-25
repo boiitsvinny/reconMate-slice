@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -11,12 +12,17 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.intelligence.service import persist_analysis
+from app.intelligence.operational_schemas import IntelligenceResult
+from app.intelligence.operational_service import evaluate_case_intelligence
+from app.intelligence.transitions import compare_intelligence
+from app.commands.tools import CommandTools
 from app.models.domain import (
     AuditEvent, Communication, CommunicationChannel, CommunicationDirection, Customer,
     Invoice, InvoiceStatus, Payment, PromiseStatus, PromiseToPay, RecoveryCase,
     RecoveryPriority, RecoveryState, SimulationEvent, SimulationState,
 )
 from app.recovery.engine import synchronize_recovery_states
+from app.recommendations.service import recommend_case
 from app.seed.portfolio import seed_database
 
 
@@ -63,10 +69,68 @@ def _communication(db: Session, state: SimulationState, customer: Customer, invo
     return message
 
 
+@dataclass(frozen=True)
+class _IntelligenceSnapshot:
+    result: IntelligenceResult
+    recommendation: str
+
+
+def _capture_intelligence(db: Session) -> dict[tuple[str, str], _IntelligenceSnapshot]:
+    """Capture an ephemeral comparison baseline; no intelligence history is persisted."""
+    tools = CommandTools(db)
+    snapshots: dict[tuple[str, str], _IntelligenceSnapshot] = {}
+    for result in tools.get_portfolio_intelligence().customers:
+        snapshots[("CUSTOMER", result.entity_id)] = _IntelligenceSnapshot(result, result.recommendation.action.value)
+    for case in tools.cases():
+        result = evaluate_case_intelligence(case, tools.simulation_date)
+        snapshots[("RECOVERY_CASE", str(case.id))] = _IntelligenceSnapshot(
+            result,
+            recommend_case(case, tools.simulation_date).recommended_action.value,
+        )
+    return snapshots
+
+
+def _build_transitions(
+    db: Session,
+    before: dict[tuple[str, str], _IntelligenceSnapshot],
+    events: list[dict[str, Any]],
+    cycle: int,
+) -> list[dict[str, Any]]:
+    tools = CommandTools(db)
+    transitions = []
+    for event in events:
+        targets = [("CUSTOMER", event.get("customer_id")), ("RECOVERY_CASE", event.get("case_id"))]
+        for entity_type, entity_id in targets:
+            if not entity_id:
+                continue
+            if entity_type == "CUSTOMER":
+                result = tools.get_customer_intelligence(uuid.UUID(entity_id))
+                current_recommendation = result.recommendation.action.value if result else None
+            else:
+                case = tools.get_case(entity_id)
+                result = tools.get_case_intelligence(uuid.UUID(entity_id)) if case else None
+                current_recommendation = recommend_case(case, tools.simulation_date).recommended_action.value if case else None
+            if result is None or current_recommendation is None:
+                continue
+            previous = before.get((entity_type, entity_id))
+            transition = compare_intelligence(
+                before=previous.result if previous else None,
+                after=result,
+                previous_recommendation=previous.recommendation if previous else None,
+                current_recommendation=current_recommendation,
+                cycle=cycle,
+                event_id=event["id"],
+                event_type=event["type"],
+            )
+            transitions.append(transition.model_dump(mode="json"))
+    return transitions
+
+
 def run_tick(db: Session) -> dict[str, Any]:
     state = db.scalar(select(SimulationState).where(SimulationState.name == "default").with_for_update())
     if state is None:
         raise ValueError("Synthetic simulation state has not been seeded.")
+    before_intelligence = _capture_intelligence(db)
     state.cycle += 1
     state.simulation_date += timedelta(days=1)
     db.flush()
@@ -128,7 +192,8 @@ def run_tick(db: Session) -> dict[str, Any]:
     synchronization = synchronize_recovery_states(db, state.simulation_date)
     # synchronize commits; persist any event records and cycle as the final atomic outcome.
     db.commit()
-    return {"cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "recovery_synchronization": synchronization}
+    transitions = _build_transitions(db, before_intelligence, events, cycle)
+    return {"cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "intelligence_transitions": transitions, "recovery_synchronization": synchronization}
 
 
 def reset_simulation(db: Session) -> dict[str, Any]:

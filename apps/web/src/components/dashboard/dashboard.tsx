@@ -5,7 +5,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/app-header";
 import { useCommandSession } from "@/components/intelligence/command-session";
 import { apiUrl } from "@/lib/api";
-import { getPortfolioIntelligence, type PortfolioIntelligence } from "@/lib/intelligence-api";
 import { formatMoney as money, PriorityCase, SimState, SimulationTickResult } from "./data";
 import { CaseWorkspace } from "./case-workspace";
 import { LiveEventFeed } from "./live-event-feed";
@@ -45,22 +44,16 @@ export function Dashboard() {
   const tick = useMutation({
     onMutate: () => setResetFeedback(undefined),
     mutationFn: async () => {
-      const before = await queryClient.fetchQuery({
-        queryKey: queryKeys.portfolioIntelligence,
-        queryFn: getPortfolioIntelligence,
-        staleTime: 0,
-      });
       const response = await fetch(apiUrl("/simulation/tick"), { method: "POST" });
       if (!response.ok) {
         const payload = await response.json().catch(() => null) as { detail?: string } | null;
         throw new Error(payload?.detail ?? "Simulation tick failed.");
       }
       const result = await response.json() as SimulationTickResult;
-      return { before, result };
+      return result;
     },
-    onSuccess: async ({ before, result }) => {
+    onSuccess: async (result) => {
       await invalidateOperationalData();
-      const after = queryClient.getQueryData<PortfolioIntelligence>(queryKeys.portfolioIntelligence);
       const refreshFailed = [
         queryKeys.portfolio,
         queryKeys.portfolioIntelligence,
@@ -72,7 +65,7 @@ export function Dashboard() {
         queryKeys.simulationEvents,
       ].some((queryKey) => queryClient.getQueryState(queryKey)?.error);
       setLastTick(result);
-      setCycleFeedback(buildCycleFeedback(result, before, after, refreshFailed));
+      setCycleFeedback(buildCycleFeedback(result, refreshFailed));
     },
   });
   const resetDemo = useMutation({
@@ -174,6 +167,7 @@ export function Dashboard() {
   }, [lastTick, recoveryQueue.queue]);
   const affectedCustomerIds = useMemo(() => new Set(lastTick?.events.flatMap((event) => event.customer_id ? [event.customer_id] : []) ?? []), [lastTick]);
   const selectedAffected = Boolean(selected && lastTick?.events.some((event) => event.case_id === selected.id || event.customer_id === selected.customerId));
+  const selectedTransition = selected ? lastTick?.intelligence_transitions.find((transition) => transition.entity_type === "RECOVERY_CASE" && transition.entity_id === selected.id) : undefined;
   const caseLinksLoading = recoveryQueue.cases.isLoading || recoveryQueue.recommendations.isLoading;
   const caseLinksError = recoveryQueue.cases.isError || recoveryQueue.recommendations.isError;
 
@@ -246,7 +240,10 @@ export function Dashboard() {
             </section>
 
             <section aria-label="Portfolio operations" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
-              <LiveEventFeed events={events.data} customers={names} />
+              <LiveEventFeed events={events.data} customers={names} onOpenCase={(caseId) => {
+                const item = recoveryQueue.queue.find((candidate) => candidate.id === caseId);
+                if (item) setSelected(item);
+              }} />
               <aside className="space-y-5">
                 <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
                 <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} />
@@ -256,59 +253,25 @@ export function Dashboard() {
           </>
         )}
       </div>
-      {selected && <CaseWorkspace item={selected} onClose={() => setSelected(null)} liveVersion={simulation.data?.cycle ?? 0} affected={selectedAffected} />}
+      {selected && <CaseWorkspace item={selected} onClose={() => setSelected(null)} liveVersion={simulation.data?.cycle ?? 0} affected={selectedAffected} transition={selectedTransition} />}
     </main>
   );
 }
 
-function buildCycleFeedback(
-  result: SimulationTickResult,
-  before: PortfolioIntelligence,
-  after: PortfolioIntelligence | undefined,
-  refreshFailed: boolean,
-): CycleFeedback {
+function buildCycleFeedback(result: SimulationTickResult, refreshFailed: boolean): CycleFeedback {
   const event = result.events[0];
-  const beforeById = new Map(before.customers.map((item) => [item.entity_id, item]));
-  const afterById = new Map(after?.customers.map((item) => [item.entity_id, item]) ?? []);
-  const previous = event?.customer_id ? beforeById.get(event.customer_id) : undefined;
-  const current = event?.customer_id ? afterById.get(event.customer_id) : undefined;
-  const customer = current?.entity_name ?? previous?.entity_name ?? "Portfolio account";
+  const transition = result.intelligence_transitions.find((item) => item.entity_type === "CUSTOMER") ?? result.intelligence_transitions[0];
+  const customer = transition?.entity_name ?? "Portfolio account";
   const eventLabel = event ? event.type.replaceAll("_", " ").toLowerCase() : "No factual event recorded";
   const eventSummary = `${customer}: ${eventLabel}. ${result.recovery_synchronization.cases_evaluated} cases re-evaluated${result.recovery_synchronization.cases_changed ? `; ${result.recovery_synchronization.cases_changed} recovery state change${result.recovery_synchronization.cases_changed === 1 ? "" : "s"}` : ""}.`;
 
-  if (refreshFailed || !after || after.calculated_at !== result.simulation_date) {
-    return {
-      status: "REFRESH_FAILED",
-      headline: `Cycle ${result.cycle} completed; dashboard refresh is incomplete`,
-      event: eventSummary,
-      summary: "The factual event was persisted, but ReconMate could not verify every refreshed intelligence view. Retry the page data before treating it as current.",
-      changes: [],
-    };
+  if (refreshFailed) {
+    return { status: "REFRESH_FAILED", headline: `Cycle ${result.cycle} completed; dashboard refresh is incomplete`, event: eventSummary, summary: "The factual event and backend intelligence comparison completed, but one or more refreshed dashboard views failed.", changes: [], transition };
   }
-
-  const changes: string[] = [];
-  if (previous && current && previous.level !== current.level) changes.push(`Risk changed: ${previous.level} → ${current.level}`);
-  if (previous && current && previous.recommendation.action !== current.recommendation.action) changes.push(`Recommendation changed: ${previous.recommendation.action} → ${current.recommendation.action}`);
-  const beforeRank = event?.customer_id ? before.highest_priority.findIndex((item) => item.entity_id === event.customer_id) : -1;
-  const afterRank = event?.customer_id ? after.highest_priority.findIndex((item) => item.entity_id === event.customer_id) : -1;
-  if (afterRank >= 0 && afterRank < 5 && (beforeRank < 0 || beforeRank >= 5)) changes.push("Added to Today's Operational Focus");
-  else if (beforeRank >= 0 && afterRank >= 0 && beforeRank !== afterRank && afterRank < 5) changes.push(`Operational focus rank changed: ${beforeRank + 1} → ${afterRank + 1}`);
-
-  return changes.length > 0
-    ? {
-        status: "MATERIAL_CHANGE",
-        headline: `Cycle ${result.cycle} completed successfully`,
-        event: eventSummary,
-        summary: "ReconMate detected a material operational intelligence change.",
-        changes,
-      }
-    : {
-        status: "NO_MATERIAL_CHANGE",
-        headline: `Cycle ${result.cycle} completed successfully`,
-        event: eventSummary,
-        summary: "ReconMate re-evaluated the portfolio. No material intelligence changes were detected.",
-        changes: [],
-      };
+  const changes = transition?.classifications.filter((item) => item !== "NO_MATERIAL_CHANGE").map((item) => item.replaceAll("_", " ")) ?? [];
+  return transition?.material
+    ? { status: "MATERIAL_CHANGE", headline: `Cycle ${result.cycle}: intelligence ${transition.change_direction.toLowerCase()}`, event: eventSummary, summary: transition.operator_significance, changes, transition }
+    : { status: "NO_MATERIAL_CHANGE", headline: `Cycle ${result.cycle}: no material intelligence change`, event: eventSummary, summary: transition?.operator_significance ?? "ReconMate re-evaluated the affected records without changing a material decision.", changes: [], transition };
 }
 
 function DashboardLoading() {

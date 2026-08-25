@@ -5,14 +5,14 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { apiUrl } from "@/lib/api";
 import { useCommandSession } from "@/components/intelligence/command-session";
-import type { PriorityCase } from "./data";
+import type { IntelligenceTransition, PriorityCase } from "./data";
 import { queryKeys, useCaseWorkspace, useInvalidateOperationalData } from "./queries";
 import { buttonStyles, cx, StatusPill } from "./ui";
 
 function label(value: string) { return value.replaceAll("_", " "); }
 function money(value: string) { return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(value)); }
 
-export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean }) {
+export function CaseWorkspace({ item, onClose, liveVersion, affected, transition }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean; transition?: IntelligenceTransition }) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const commandSession = useCommandSession();
@@ -88,7 +88,18 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected }: { item: 
           </div>
         </section>
         {error && <p className="mt-5 border border-rose-300/15 bg-rose-300/[.06] p-3 text-sm text-rose-100">{error}</p>}
-        {affected && <p className="live-enter mt-5 border border-sky-300/15 bg-sky-400/[.05] p-3 text-xs text-sky-200">Portfolio update detected. Factual case data and recommendation refreshed.</p>}
+        {affected && transition && (
+          <section className={`live-enter mt-5 rounded-2xl border p-4 ${transition.material ? transition.change_direction === "IMPROVED" ? "border-emerald-300/20 bg-emerald-300/[.05]" : "border-amber-300/20 bg-amber-300/[.05]" : "border-sky-300/15 bg-sky-400/[.04]"}`} aria-label="Recent case intelligence transition">
+            <p className="text-[10px] font-bold uppercase tracking-[.14em] text-sky-300">Cycle {transition.simulation_cycle} intelligence change</p>
+            <h3 className="mt-2 text-lg font-semibold text-white">{transition.material ? transition.change_direction === "UNCHANGED" ? "Decision changed" : `Situation ${transition.change_direction.toLowerCase()}` : "No material decision change"}</h3>
+            <p className="mt-2 text-xs leading-5 text-slate-300">{transition.what_changed}</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Why intelligence changed</p><p className="mt-1 text-[11px] leading-5 text-slate-400">{transition.why_intelligence_changed}</p></div>
+              <div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Decision impact</p><p className="mt-1 text-[11px] leading-5 text-slate-400">{transition.decision_impact}</p></div>
+            </div>
+          </section>
+        )}
+        {affected && !transition && <p className="live-enter mt-5 border border-sky-300/15 bg-sky-400/[.05] p-3 text-xs text-sky-200">Portfolio update detected. Factual case data and recommendation refreshed.</p>}
         {!workspace && !error && <div className="mt-8 h-64 animate-pulse rounded-2xl bg-white/[.04]" />}
         {workspace && (
           <div className="mt-6 space-y-5">

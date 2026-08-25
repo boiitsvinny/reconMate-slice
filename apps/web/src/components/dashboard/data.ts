@@ -8,11 +8,36 @@ export type Recommendation = { case_id: string; recommended_action: string; prio
 export type SimState = { cycle: number; simulation_date: string; tick_interval_seconds: number };
 export type SimulationEvent = { id: string; cycle: number; type: string; customer_id: string | null; invoice_id: string | null; case_id: string | null; metadata: Record<string, string>; occurred_at: string };
 export type SimulationTickEvent = { id: string; type: string; customer_id: string | null; invoice_id: string | null; case_id: string | null; metadata: Record<string, string> };
+export type IntelligenceTransition = {
+  entity_type: "CUSTOMER" | "RECOVERY_CASE";
+  entity_id: string;
+  entity_name: string;
+  simulation_cycle: number;
+  related_event_id: string;
+  related_event_type: string;
+  previous_score: number | null;
+  current_score: number;
+  score_direction: "INCREASED" | "DECREASED" | "UNCHANGED";
+  previous_risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null;
+  current_risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  previous_recommendation: string | null;
+  current_recommendation: string;
+  signals_added: string[];
+  signals_removed: string[];
+  classifications: string[];
+  change_direction: "WORSENED" | "IMPROVED" | "UNCHANGED";
+  material: boolean;
+  what_changed: string;
+  why_intelligence_changed: string;
+  decision_impact: string;
+  operator_significance: string;
+};
 export type SimulationTickResult = {
   cycle: number;
   simulation_date: string;
   event_count: number;
   events: SimulationTickEvent[];
+  intelligence_transitions: IntelligenceTransition[];
   recovery_synchronization: { cases_evaluated: number; cases_changed: number };
 };
 export type Invoice = { id: string; invoice_number: string; customer_id: string; issue_date: string; due_date: string; original_amount: string; outstanding_amount: string; status: string };
