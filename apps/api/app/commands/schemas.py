@@ -31,6 +31,24 @@ class CommandScope(str, Enum):
     CASE = "CASE"
 
 
+class QueryEntity(str, Enum):
+    CUSTOMERS = "CUSTOMERS"
+    RECOVERY_CASES = "RECOVERY_CASES"
+
+
+class QuerySort(str, Enum):
+    RISK_SCORE = "RISK_SCORE"
+    TOTAL_EXPOSURE = "TOTAL_EXPOSURE"
+    OVERDUE_EXPOSURE = "OVERDUE_EXPOSURE"
+    DAYS_OVERDUE = "DAYS_OVERDUE"
+    LAST_PAYMENT = "LAST_PAYMENT"
+
+
+class QueryTimeScope(str, Enum):
+    CURRENT = "CURRENT"
+    LATEST_CYCLE = "LATEST_CYCLE"
+
+
 class ExecutionMode(str, Enum):
     READ_ONLY = "READ_ONLY"
     PREPARE = "PREPARE"
@@ -78,6 +96,34 @@ class CommandFilters(BaseModel):
     include_all: bool = False
 
 
+class StructuredQuery(BaseModel):
+    """Bounded operational query assembled by the deterministic interpreter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity: QueryEntity = QueryEntity.CUSTOMERS
+    risk_levels: list[PriorityLevel] = Field(default_factory=list)
+    overdue: bool | None = None
+    broken_promise: bool | None = None
+    active_promise: bool | None = None
+    active_dispute: bool | None = None
+    partial_payment: bool | None = None
+    recent_payment: bool | None = None
+    actionable: bool | None = None
+    blocked: bool | None = None
+    monitoring: bool | None = None
+    min_days_overdue: int | None = Field(default=None, ge=0)
+    max_days_overdue: int | None = Field(default=None, ge=0)
+    min_score: int | None = Field(default=None, ge=0, le=100)
+    max_score: int | None = Field(default=None, ge=0, le=100)
+    sort_by: QuerySort = QuerySort.RISK_SCORE
+    descending: bool = True
+    limit: int | None = Field(default=None, ge=1, le=50)
+    time_scope: QueryTimeScope = QueryTimeScope.CURRENT
+    count_only: bool = False
+    explanation_requested: bool = False
+
+
 class CommandIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -85,6 +131,7 @@ class CommandIntent(BaseModel):
     confidence: float = Field(ge=0, le=1)
     scope: CommandScope
     filters: CommandFilters = Field(default_factory=CommandFilters)
+    query: StructuredQuery = Field(default_factory=StructuredQuery)
     reasoning: list[str] = Field(default_factory=list)
     guidance: str | None = None
 
@@ -180,12 +227,70 @@ class CommandAudit(BaseModel):
     execution_status: ExecutionMode
 
 
+class InspectionScope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    customers: int = 0
+    invoices: int = 0
+    promises: int = 0
+    active_disputes: int = 0
+    recovery_cases: int = 0
+    latest_cycle_events: int = 0
+
+
+class ExclusionCount(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str
+    count: int
+
+
+class RankingEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    entity_id: str
+    rank: int
+    score: int
+    raw_score: int
+    severity: PriorityLevel
+    stored_workflow_priority: str | None = None
+    facts: list[str]
+    blocker: str | None = None
+    decision: str
+
+
+class LatestCycleEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cycle: int
+    event_count: int
+    customers_affected: int
+    material_customers: int
+    recommendations_changed: int
+    recommendations_unchanged: int
+    observations: list[str]
+
+
+class QueryEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    records_inspected: int = 0
+    records_matched: int = 0
+    records_excluded: int = 0
+    records_returned: int = 0
+    inspection_scope: InspectionScope = Field(default_factory=InspectionScope)
+    exclusions: list[ExclusionCount] = Field(default_factory=list)
+    ranking: list[RankingEvidence] = Field(default_factory=list)
+    latest_cycle: LatestCycleEvidence | None = None
+
+
 class CommandResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     plan_id: UUID
     interpreted_intent: CommandIntent
     understanding_summary: str
+    query_evidence: QueryEvidence = Field(default_factory=QueryEvidence)
     analyzed_entities: list[IntelligenceResult]
     plan: CommandPlan
     outcomes: list[ActionOutcome]

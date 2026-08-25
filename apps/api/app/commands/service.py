@@ -103,6 +103,7 @@ class CommandService:
             plan_id=planning.plan.plan_id,
             interpreted_intent=interpreted,
             understanding_summary=planning.understanding_summary,
+            query_evidence=planning.query_evidence,
             analyzed_entities=planning.analyzed_entities,
             plan=planning.plan,
             outcomes=outcomes,

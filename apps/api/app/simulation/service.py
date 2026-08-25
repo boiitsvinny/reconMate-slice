@@ -153,6 +153,33 @@ def _build_transitions(
     return transitions
 
 
+def _persist_transition_audits(
+    db: Session,
+    state: SimulationState,
+    cycle: int,
+    event_count: int,
+    transitions: list[dict[str, Any]],
+    summary: dict[str, int],
+) -> None:
+    """Append the already-computed Phase A decision changes for later inspection."""
+    when = _when(state) + timedelta(minutes=55)
+    db.add(AuditEvent(
+        id=uuid.uuid5(uuid.NAMESPACE_URL, f"reconmate.simulation/intelligence/{cycle}/summary"),
+        entity_type="SimulationState", entity_id=state.id,
+        event_type="SIMULATION_INTELLIGENCE_SUMMARY", actor_type="simulation",
+        payload={"cycle": cycle, "event_count": event_count, **summary}, occurred_at=when,
+    ))
+    for ordinal, transition in enumerate(transitions, start=1):
+        entity_id = uuid.UUID(transition["entity_id"])
+        db.add(AuditEvent(
+            id=uuid.uuid5(uuid.NAMESPACE_URL, f"reconmate.simulation/intelligence/{cycle}/{transition['entity_type']}/{entity_id}"),
+            entity_type=transition["entity_type"], entity_id=entity_id,
+            event_type="SIMULATION_INTELLIGENCE_TRANSITION", actor_type="simulation",
+            payload={"cycle": cycle, **transition}, occurred_at=when + timedelta(seconds=ordinal),
+        ))
+    db.commit()
+
+
 _EVENT_FAMILY = {
     "PARTIAL_PAYMENT": "PAYMENT", "FULL_PAYMENT": "PAYMENT",
     "PROMISE_CREATED": "PROMISE", "PROMISE_BROKEN": "PROMISE",
@@ -309,6 +336,7 @@ def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> di
     customer_transitions = [item for item in transitions if item["entity_type"] == "CUSTOMER"]
     families = sorted({item["metadata"]["family"] for item in events})
     summary = {"customers_affected": len({item["customer_id"] for item in events if item.get("customer_id")}), "material_customers": sum(bool(item["material"]) for item in customer_transitions), "recommendations_changed": sum("RECOMMENDATION_CHANGED" in item["classifications"] for item in customer_transitions), "recommendations_unchanged": sum("RECOMMENDATION_CHANGED" not in item["classifications"] for item in customer_transitions), "blockers_added": sum("NEW_BLOCKER" in item["classifications"] for item in customer_transitions), "blockers_removed": sum("BLOCKER_RESOLVED" in item["classifications"] for item in customer_transitions)}
+    _persist_transition_audits(db, state, cycle, len(events), transitions, summary)
     return {"previous_cycle": previous_cycle, "previous_simulation_date": previous_simulation_date, "cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "intelligence_transitions": transitions, "recovery_synchronization": synchronization, "generation": {"seed": selected_seed, "mode": "JUDGE" if judge else "NORMAL", "primary_event_id": primary["id"], "secondary_event_count": len(events) - 1, "families": families}, "change_summary": summary}
 
 

@@ -1,4 +1,4 @@
-"""Replaceable command interpretation boundary with deterministic Phase B rules."""
+"""Deterministic natural-language boundary for composable ReconMate queries."""
 
 from __future__ import annotations
 
@@ -6,11 +6,8 @@ from abc import ABC, abstractmethod
 import re
 
 from app.commands.schemas import (
-    CommandFilters,
-    CommandIntent,
-    CommandIntentType,
-    CommandRequest,
-    CommandScope,
+    CommandFilters, CommandIntent, CommandIntentType, CommandRequest, CommandScope,
+    QueryEntity, QuerySort, QueryTimeScope, StructuredQuery,
 )
 from app.intelligence.operational_schemas import PriorityLevel
 
@@ -22,158 +19,199 @@ class BaseCommandInterpreter(ABC):
 
 
 class FutureLLMCommandInterpreter(BaseCommandInterpreter):
-    """Explicit extension point; no external provider is configured in Phase B."""
-
     def interpret(self, request: CommandRequest) -> CommandIntent:
-        raise NotImplementedError("An LLM command interpreter is intentionally not implemented in Phase B.")
+        raise NotImplementedError("An external language-model interpreter is intentionally not configured.")
+
+
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "fifteen": 15, "twenty": 20, "twenty five": 25, "fifty": 50,
+}
+_QUERY_OPERATIONS = ("show", "list", "give", "which", "who", "find", "rank", "top", "count", "how many", "summarize", "summary", "explain")
+_PREDICTIVE = ("churn", "next quarter", "forecast", "predict", "likelihood", "probability", "will pay", "future revenue")
 
 
 class RuleBasedCommandInterpreter(BaseCommandInterpreter):
+    """Compose a query from normalized domain concepts instead of matching sentences."""
+
     def interpret(self, request: CommandRequest) -> CommandIntent:
         text = self._normalize(request.command)
-        filters = self._filters(text)
+        query = self._structured_query(text)
+        filters = self._legacy_filters(query, text)
 
-        explanation_words = ("why", "explain", "reason", "recommendation", "what makes")
-        case_words = ("case", "recovery")
-        customer_words = ("customer", "account")
-        broken_words = (
-            "broken promise", "broken promises", "promise is broken", "promises are broken",
-            "missed payment promise", "missed promises", "promise to pay but did not",
-            "promised to pay but did not", "promise was not kept", "did not keep promise",
-            "broken their promise", "broke their promise", "broke a promise",
-            "promised to pay but didn t", "promise to pay but didn t",
-        )
-        reminder_words = ("draft reminder", "draft reminders", "payment reminder", "payment reminders", "overdue reminder", "remind overdue")
-        recovery_prepare_words = (
-            "prepare recovery action", "prepare recovery actions", "prepare recovery plan", "critical recoveries",
-            "prepare recovery work", "prepare recovery", "recovery work for", "prepare escalation work",
-        )
-        follow_up_words = (
-            "follow up", "followups", "follow ups", "contact again", "chase", "chase up",
-            "waiting for a response", "waiting response", "needs a response", "need a response",
-        )
-        prioritize_words = (
-            "focus on", "should i focus", "prioritize", "priority", "highest risk",
-            "high-risk", "critical customer", "urgent case", "urgent customer", "top risk",
-            "needs my attention", "need my attention", "what needs attention", "risky customers",
-            "customers are risky", "worst cases", "worst case", "needs escalation", "need escalation",
-            "overdue customers need action", "overdue customer needs action",
-        )
+        if self._has(text, _PREDICTIVE):
+            return self._unknown(filters, query, "ReconMate cannot answer predictive requests from the current receivables model. Supported dimensions include current risk, exposure, invoices, promises, disputes, payments, and recovery state.")
+        if self._has(text, ("improved", "improvement", "worsened", "deteriorated")):
+            return self._unknown(filters, query, "ReconMate can show factual latest-cycle changes, but directional improvement or deterioration is not a supported query filter.")
 
-        if any(word in text for word in follow_up_words) and any(word in text for word in recovery_prepare_words):
-            return self._unknown(
-                filters,
-                "This request could mean reviewing who needs follow-up or preparing recovery workflow work. Ask for one of those supported operations explicitly.",
-            )
+        explanation = self._has(text, ("why", "explain", "reason", "what makes"))
+        if explanation and request.context_case_id is not None:
+            return self._intent(CommandIntentType.EXPLAIN_RECOMMENDATION, .97, CommandScope.CASE, filters, query, "The request asks for an explanation of the selected case's current recommendation.")
+        if (explanation or "analy" in text) and request.context_customer_id is not None:
+            return self._intent(CommandIntentType.CUSTOMER_ANALYSIS, .96, CommandScope.CUSTOMER, filters, query, "The request asks for analysis of the selected customer context.")
+        if "analy" in text and request.context_case_id is not None:
+            return self._intent(CommandIntentType.CASE_ANALYSIS, .96, CommandScope.CASE, filters, query, "The request asks for analysis of the selected recovery case.")
+        if (explanation or "analy" in text) and self._has(text, ("this customer", "customer", "account")) and request.context_customer_id is None and not self._has(text, _QUERY_OPERATIONS):
+            return self._unknown(filters, query, "Customer analysis requires context_customer_id.")
+        if (explanation or "analy" in text) and "case" in text and request.context_case_id is None and not self._has(text, _QUERY_OPERATIONS):
+            return self._unknown(filters, query, "Case analysis requires context_case_id.")
 
-        if any(word in text for word in explanation_words):
-            if request.context_case_id is not None and any(word in text for word in case_words):
-                return self._intent(CommandIntentType.EXPLAIN_RECOMMENDATION, .96, CommandScope.CASE, filters,
-                                    "Explanation wording and case context were both provided.")
-            if request.context_customer_id is not None and any(word in text for word in customer_words):
-                return self._intent(CommandIntentType.CUSTOMER_ANALYSIS, .93, CommandScope.CUSTOMER, filters,
-                                    "Explanation wording and customer context were both provided.")
-            return self._unknown(filters, "An explanation command needs a context_case_id or context_customer_id.")
+        reminder = "reminder" in text and self._has(text, ("draft", "prepare", "create"))
+        recovery_prepare = self._has(text, ("prepare recovery", "prepare escalation", "create recovery", "recovery action", "recovery work"))
+        follow_up = self._has(text, ("follow up", "contact again", "chase", "needs a response", "waiting for a response"))
+        if recovery_prepare and follow_up:
+            return self._unknown(filters, query, "This request could mean preparing recovery workflow work or preparing follow-ups. Ask for one controlled action explicitly.")
+        if reminder:
+            query = query.model_copy(update={"overdue": True})
+            filters = self._legacy_filters(query, text)
+            return self._intent(CommandIntentType.PREPARE_PAYMENT_REMINDERS, .98, CommandScope.PORTFOLIO, filters, query, "The operator explicitly requested prepared payment-reminder drafts.")
+        if recovery_prepare:
+            return self._intent(CommandIntentType.PREPARE_RECOVERY_ACTIONS, .97, CommandScope.PORTFOLIO, filters, query, "The operator explicitly requested preparation of controlled recovery workflow work.")
+        if follow_up:
+            if query.broken_promise is not True:
+                query = query.model_copy(update={"broken_promise": True})
+                filters = self._legacy_filters(query, text)
+            return self._intent(CommandIntentType.PREPARE_FOLLOW_UPS, .96, CommandScope.PORTFOLIO, filters, query, "The operator explicitly requested prepared follow-up work; execution guardrails remain separate.")
 
-        if any(word in text for word in reminder_words):
-            filters.overdue_only = True
-            return self._intent(CommandIntentType.PREPARE_PAYMENT_REMINDERS, .96, CommandScope.PORTFOLIO, filters,
-                                "The command explicitly asks to draft or prepare overdue payment reminders.")
+        if "portfolio" in text and self._has(text, ("analyze", "analysis", "overview", "health", "summarize", "summary")) and not self._has_query_condition(query):
+            return self._intent(CommandIntentType.PORTFOLIO_ANALYSIS, .93, CommandScope.PORTFOLIO, filters, query, "The request asks for a current portfolio-level summary.")
 
-        if any(word in text for word in broken_words):
-            filters.broken_promises_only = True
-            if any(word in text for word in follow_up_words):
-                return self._intent(CommandIntentType.PREPARE_FOLLOW_UPS, .97, CommandScope.PORTFOLIO, filters,
-                                    "The command combines broken-promise scope with follow-up preparation.")
-            return self._intent(CommandIntentType.REVIEW_BROKEN_PROMISES, .96, CommandScope.PORTFOLIO, filters,
-                                "The command explicitly requests accounts with broken payment promises.")
+        if self._direct_invoice_request(text):
+            return self._unknown(filters, query, "The command result contract currently returns customer or recovery-case intelligence, not standalone invoice rows. Ask for customers with the invoice condition instead.")
 
-        if any(word in text for word in recovery_prepare_words):
-            return self._intent(CommandIntentType.PREPARE_RECOVERY_ACTIONS, .97, CommandScope.PORTFOLIO, filters,
-                                "The command explicitly requests preparation of recovery work.")
+        recognized = self._has(text, _QUERY_OPERATIONS) or self._has_query_condition(query) or self._has(text, ("risk", "risky", "riskiest", "exposure", "priority", "attention", "escalation"))
+        if not recognized:
+            return self._unknown(filters, query, "ReconMate could not map this wording to current receivables, promise, dispute, payment, risk, or recovery dimensions.")
 
-        if any(word in text for word in follow_up_words):
-            return self._intent(CommandIntentType.PREPARE_FOLLOW_UPS, .94, CommandScope.PORTFOLIO, filters,
-                                "The command asks which customers require a controlled recovery follow-up.")
+        if query.broken_promise is True and query.entity is QueryEntity.CUSTOMERS:
+            intent = CommandIntentType.REVIEW_BROKEN_PROMISES
+            reason = "The query targets customers with factual broken-promise state and composes any additional filters or exclusions."
+        else:
+            intent = CommandIntentType.PRIORITIZE_CASES
+            reason = "The request was normalized into a bounded query over current operational intelligence and persisted receivables facts."
+        return self._intent(intent, .92, CommandScope.PORTFOLIO, filters, query, reason)
 
-        if "analy" in text and any(word in text for word in customer_words):
-            if request.context_customer_id is None:
-                return self._unknown(filters, "Customer analysis requires context_customer_id.")
-            return self._intent(CommandIntentType.CUSTOMER_ANALYSIS, .95, CommandScope.CUSTOMER, filters,
-                                "The command asks for customer analysis and includes customer context.")
+    def _structured_query(self, text: str) -> StructuredQuery:
+        case_target = self._has(text, ("case", "recovery case"))
+        entity = QueryEntity.RECOVERY_CASES if case_target else QueryEntity.CUSTOMERS
+        limit = self._limit(text)
+        risk_levels = self._risk_levels(text)
+        dispute_excluded = bool(re.search(r"\b(?:without|excluding|exclude|no) (?:active )?disputes?\b|\bundisputed\b", text))
+        promise_excluded = bool(re.search(r"\b(?:without|excluding|exclude|no) active (?:payment )?promises?\b", text))
+        no_recent_payment = bool(re.search(r"\b(?:no|without) recent payments?\b", text))
+        active_dispute = False if dispute_excluded else True if re.search(r"\b(?:active )?disput(?:e|ed|es)\b", text) else None
+        active_promise = False if promise_excluded else True if re.search(r"\bactive (?:payment )?promises?\b|\bvalid promises?\b", text) else None
+        recent_payment = False if no_recent_payment else True if re.search(r"\brecent (?:partial )?payments?\b|\blatest payment activity\b", text) else None
 
-        if "analy" in text and "case" in text:
-            if request.context_case_id is None:
-                return self._unknown(filters, "Case analysis requires context_case_id.")
-            return self._intent(CommandIntentType.CASE_ANALYSIS, .95, CommandScope.CASE, filters,
-                                "The command asks for case analysis and includes case context.")
+        if self._has(text, ("exposure", "balance", "amount")):
+            sort_by = QuerySort.OVERDUE_EXPOSURE if "overdue" in text else QuerySort.TOTAL_EXPOSURE
+        elif self._has(text, ("oldest", "longest overdue", "days overdue")):
+            sort_by = QuerySort.DAYS_OVERDUE
+        elif recent_payment is not None and self._has(text, ("most recent", "latest")):
+            sort_by = QuerySort.LAST_PAYMENT
+        else:
+            sort_by = QuerySort.RISK_SCORE
+        descending = not self._has(text, ("lowest", "least", "smallest", "ascending"))
+        if sort_by is QuerySort.LAST_PAYMENT and recent_payment is True:
+            descending = False
+        more_days = re.search(r"\b(?:more than|over) (\d{1,3}) days? overdue\b", text)
+        fewer_days = re.search(r"\b(?:less than|under) (\d{1,3}) days? overdue\b", text)
+        more_score = re.search(r"\b(?:risk )?score (?:more than|over) (\d{1,3})\b", text)
+        fewer_score = re.search(r"\b(?:risk )?score (?:less than|under) (\d{1,3})\b", text)
 
-        if any(word in text for word in prioritize_words):
-            return self._intent(CommandIntentType.PRIORITIZE_CASES, .92, CommandScope.PORTFOLIO, filters,
-                                "The command asks for ranked operational focus or risk prioritization.")
-
-        if "portfolio" in text and any(word in text for word in ("analyze", "analysis", "overview", "health")):
-            return self._intent(CommandIntentType.PORTFOLIO_ANALYSIS, .90, CommandScope.PORTFOLIO, filters,
-                                "The command requests a portfolio-level analysis.")
-
-        return self._unknown(
-            filters,
-            "Supported commands include portfolio prioritization, customer or case analysis, broken-promise review, recovery preparation, and reminder drafting.",
+        return StructuredQuery(
+            entity=entity,
+            risk_levels=risk_levels,
+            overdue=True if "overdue" in text else None,
+            broken_promise=True if re.search(r"\b(?:broken|missed|failed) (?:payment |their )?promises?\b|\bbroke (?:their |a )?promises?\b|\bpromises? (?:were|was|are|is) (?:broken|missed)\b|\bpromised to pay but did not\b|\bpromise to pay but did not\b", text) else None,
+            active_promise=active_promise,
+            active_dispute=active_dispute,
+            partial_payment=True if re.search(r"\bpartial(?:ly)? paid\b|\bpartial payments?\b", text) else None,
+            recent_payment=recent_payment,
+            actionable=True if "actionable" in text or self._has(text, ("needs action", "need action")) else None,
+            blocked=True if "blocked" in text and not re.search(r"\b(?:without|exclude|excluding) blocked\b", text) else False if re.search(r"\b(?:without|exclude|excluding) blocked\b", text) else None,
+            monitoring=True if "monitoring" in text or "monitor" in text else None,
+            min_days_overdue=int(more_days.group(1)) + 1 if more_days else None,
+            max_days_overdue=max(0, int(fewer_days.group(1)) - 1) if fewer_days else None,
+            min_score=min(100, int(more_score.group(1)) + 1) if more_score else None,
+            max_score=max(0, int(fewer_score.group(1)) - 1) if fewer_score else None,
+            sort_by=sort_by,
+            descending=descending,
+            limit=limit,
+            time_scope=QueryTimeScope.LATEST_CYCLE if self._has(text, ("after latest cycle", "latest cycle", "last cycle")) else QueryTimeScope.CURRENT,
+            count_only=self._has(text, ("count", "how many")),
+            explanation_requested=self._has(text, ("why", "explain", "reason")),
         )
 
     @staticmethod
-    def _filters(text: str) -> CommandFilters:
-        match = re.search(r"\btop\s+(\d{1,3})\b", text)
-        top_n = min(int(match.group(1)), 50) if match else None
-        risk_levels: list[PriorityLevel] = []
-        if "critical" in text:
-            risk_levels.append(PriorityLevel.CRITICAL)
-        if "high risk" in text or "high priority" in text or "risky" in text or "worst" in text:
-            risk_levels.append(PriorityLevel.HIGH)
-            if PriorityLevel.CRITICAL not in risk_levels:
-                risk_levels.append(PriorityLevel.CRITICAL)
+    def _risk_levels(text: str) -> list[PriorityLevel]:
+        levels = []
+        for word, level in (("critical", PriorityLevel.CRITICAL), ("medium", PriorityLevel.MEDIUM), ("low", PriorityLevel.LOW)):
+            if re.search(rf"\b{word}(?: risk| priority)?\b", text):
+                levels.append(level)
+        # Superlative risk wording means sort, not a hidden filter. Explicit
+        # "high only" or non-superlative high-risk wording remains a band filter.
+        if re.search(r"\bhigh(?: risk| priority)\b", text) and not any(word in text for word in ("highest", "riskiest", "top")):
+            levels.extend(level for level in (PriorityLevel.HIGH, PriorityLevel.CRITICAL) if level not in levels)
+        return levels
+
+    @staticmethod
+    def _limit(text: str) -> int | None:
+        digit = re.search(r"\b(?:top|first|limit)\s+(\d{1,3})\b|\b(\d{1,3})\s+(?:riskiest|highest|lowest|customers?|accounts?|cases?)\b", text)
+        if digit:
+            return min(int(digit.group(1) or digit.group(2)), 50)
+        for word, value in sorted(_NUMBER_WORDS.items(), key=lambda item: -len(item[0])):
+            if re.search(rf"\b(?:top\s+)?{re.escape(word)}\s+(?:riskiest|highest|lowest|customers?|accounts?|cases?)\b", text):
+                return value
+        return None
+
+    @staticmethod
+    def _legacy_filters(query: StructuredQuery, text: str) -> CommandFilters:
         return CommandFilters(
-            top_n=top_n,
-            risk_levels=risk_levels,
-            overdue_only="overdue" in text,
-            broken_promises_only=(
-                "broken promise" in text or "promise is broken" in text
-                or "promises are broken" in text or "missed promise" in text
-            ),
+            top_n=query.limit, risk_levels=query.risk_levels,
+            overdue_only=query.overdue is True, broken_promises_only=query.broken_promise is True,
             include_all=bool(re.search(r"\ball\b", text)),
         )
 
     @staticmethod
+    def _has_query_condition(query: StructuredQuery) -> bool:
+        return bool(query.risk_levels or any(value is not None for value in (
+            query.overdue, query.broken_promise, query.active_promise, query.active_dispute,
+            query.partial_payment, query.recent_payment, query.actionable, query.blocked, query.monitoring,
+        )) or query.min_days_overdue is not None or query.max_days_overdue is not None
+        or query.min_score is not None or query.max_score is not None
+        or query.limit or query.count_only or query.time_scope is QueryTimeScope.LATEST_CYCLE)
+
+    @staticmethod
+    def _direct_invoice_request(text: str) -> bool:
+        return bool(re.search(r"\binvoices?\b", text)) and not bool(re.search(r"\b(?:customers?|accounts?|cases?)\b", text))
+
+    @staticmethod
     def _normalize(command: str) -> str:
-        """Normalize common operator phrasing before deterministic intent matching."""
-        text = command.lower().replace("’", "'")
+        text = command.lower().replace("â€™", "'").replace("’", "'")
         text = re.sub(r"[^a-z0-9']+", " ", text)
-        text = re.sub(r"\banyone\b", "customers", text)
-        text = re.sub(r"\bpeople\b", "customers", text)
-        text = re.sub(r"\baccounts?\b", "account", text)
-        text = re.sub(r"\bcases?\b", "case", text)
-        text = re.sub(r"\bfollow\s*ups?\b", "follow up", text)
-        text = re.sub(r"\bpromised\s+to\s+pay\s+but\s+didn'?t\b", "promised to pay but did not", text)
-        text = re.sub(r"\bwho'?s\b", "who is", text)
+        replacements = (
+            (r"\banyone\b|\bpeople\b", "customers"),
+            (r"\baccounts?\b", "account"),
+            (r"\bcases?\b", "case"),
+            (r"\bfollow\s*ups?\b", "follow up"),
+            (r"\bwho'?s\b", "who is"),
+            (r"\bdidn'?t\b", "did not"),
+        )
+        for pattern, replacement in replacements:
+            text = re.sub(pattern, replacement, text)
         return " ".join(text.split())
 
     @staticmethod
-    def _intent(
-        intent: CommandIntentType,
-        confidence: float,
-        scope: CommandScope,
-        filters: CommandFilters,
-        reason: str,
-    ) -> CommandIntent:
-        return CommandIntent(intent=intent, confidence=confidence, scope=scope, filters=filters, reasoning=[reason])
+    def _has(text: str, concepts: tuple[str, ...]) -> bool:
+        return any(re.search(rf"\b{re.escape(concept)}\b", text) for concept in concepts)
 
     @staticmethod
-    def _unknown(filters: CommandFilters, guidance: str) -> CommandIntent:
-        return CommandIntent(
-            intent=CommandIntentType.UNKNOWN,
-            confidence=.20,
-            scope=CommandScope.PORTFOLIO,
-            filters=filters,
-            reasoning=["The wording did not map safely to one supported command intent."],
-            guidance=guidance,
-        )
+    def _intent(intent: CommandIntentType, confidence: float, scope: CommandScope, filters: CommandFilters, query: StructuredQuery, reason: str) -> CommandIntent:
+        return CommandIntent(intent=intent, confidence=confidence, scope=scope, filters=filters, query=query, reasoning=[reason])
+
+    @staticmethod
+    def _unknown(filters: CommandFilters, query: StructuredQuery, guidance: str) -> CommandIntent:
+        return CommandIntent(intent=CommandIntentType.UNKNOWN, confidence=.20, scope=CommandScope.PORTFOLIO, filters=filters, query=query,
+                             reasoning=["The request could not be mapped safely to supported current-state dimensions."], guidance=guidance)

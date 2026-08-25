@@ -14,9 +14,13 @@ from app.commands.schemas import (
     CommandRequest,
     EntityReference,
     ExecutionMode,
+    ExclusionCount,
+    InspectionScope,
     ProposalActionType,
+    QueryEvidence,
+    RankingEvidence,
 )
-from app.commands.tools import CaseCandidate, CommandTools
+from app.commands.tools import CaseCandidate, CommandTools, QueryExecution
 from app.intelligence.operational_schemas import IntelligenceResult, PriorityLevel
 from app.models.domain import RecoveryPriority
 from app.recommendations.schemas import RecommendedAction
@@ -32,6 +36,7 @@ class PlanningOutput:
     analyzed_entities: list[IntelligenceResult]
     understanding_summary: str
     warnings: list[str]
+    query_evidence: QueryEvidence
 
 
 class CommandPlanner:
@@ -46,6 +51,7 @@ class CommandPlanner:
         actions: list[ActionProposal] = []
         analyzed: list[IntelligenceResult] = []
         warnings: list[str] = []
+        evidence = QueryEvidence()
         summary = "The command could not be mapped safely to a supported operation."
         limit = interpreted.filters.top_n or DEFAULT_RESULT_LIMIT
         intent = interpreted.intent
@@ -58,11 +64,40 @@ class CommandPlanner:
             analyzed = portfolio.highest_priority[:limit]
             summary = f"Analyzed {portfolio.customer_count} customers and summarized the {len(analyzed)} highest-priority accounts."
             actions.append(self._portfolio_action(plan_id, portfolio.customer_count))
+            evidence = QueryEvidence(
+                records_inspected=portfolio.customer_count, records_matched=portfolio.customer_count,
+                records_excluded=0, records_returned=len(analyzed),
+                inspection_scope=InspectionScope(customers=portfolio.customer_count),
+                ranking=self._ranking_evidence(analyzed), latest_cycle=tools.latest_cycle_evidence(),
+            )
 
-        elif intent is CommandIntentType.PRIORITIZE_CASES:
-            analyzed = tools.get_priority_customers(interpreted.filters.risk_levels or None, limit)
-            summary = f"Selected {len(analyzed)} customers using current Phase A intelligence scores and requested risk filters."
-            actions.extend(self._customer_review(plan_id, item) for item in analyzed)
+        elif intent in {CommandIntentType.PRIORITIZE_CASES, CommandIntentType.REVIEW_BROKEN_PROMISES}:
+            query = interpreted.query
+            if intent is CommandIntentType.PRIORITIZE_CASES and not query.count_only and query.limit is None and not interpreted.filters.include_all:
+                query = query.model_copy(update={"limit": DEFAULT_RESULT_LIMIT})
+            if query.entity.value == "RECOVERY_CASES":
+                execution = tools.execute_case_query(query)
+                candidates = execution.records
+                analyzed = [item.intelligence for item in candidates]
+                summary = f"Found {len(candidates)} recovery cases matching the composed current-state query."
+                if query.count_only:
+                    actions.append(self._query_count_action(plan_id, len(candidates), "recovery cases"))
+                    analyzed = []
+                else:
+                    actions.extend(self._case_analysis_action(plan_id, item.intelligence, item.case) for item in candidates)
+                stored = {item.intelligence.entity_id: item.case.priority.value for item in candidates}
+                evidence = self._execution_evidence(execution, analyzed, tools, stored)
+            else:
+                execution = tools.execute_customer_query(query)
+                analyzed = execution.records
+                label = "customers with factually broken payment promises" if intent is CommandIntentType.REVIEW_BROKEN_PROMISES else "customers"
+                summary = f"Found {len(analyzed)} {label} matching the composed current-state query."
+                if query.count_only:
+                    actions.append(self._query_count_action(plan_id, len(analyzed), "customers"))
+                    analyzed = []
+                else:
+                    actions.extend(self._customer_review(plan_id, item) for item in analyzed)
+                evidence = self._execution_evidence(execution, analyzed, tools)
 
         elif intent is CommandIntentType.CUSTOMER_ANALYSIS:
             result = tools.get_customer_intelligence(request.context_customer_id) if request.context_customer_id else None
@@ -95,13 +130,9 @@ class CommandPlanner:
                         "These are reported separately rather than silently overwriting case state."
                     )
 
-        elif intent is CommandIntentType.REVIEW_BROKEN_PROMISES:
-            analyzed = tools.get_broken_promise_customers(interpreted.filters.top_n)
-            summary = f"Found {len(analyzed)} customers with factually broken payment promises."
-            actions.extend(self._customer_review(plan_id, item) for item in analyzed)
-
         elif intent is CommandIntentType.PREPARE_FOLLOW_UPS:
-            broken = tools.get_broken_promise_customers(interpreted.filters.top_n)
+            query = interpreted.query.model_copy(update={"broken_promise": True})
+            broken = tools.query_customer_intelligence(query)
             analyzed = broken
             customer_ids = {item.entity_id for item in broken}
             candidates = tools.get_recovery_candidates(customer_ids=customer_ids, top_n=interpreted.filters.top_n)
@@ -151,7 +182,63 @@ class CommandPlanner:
             requires_confirmation=requires_confirmation,
             execution_mode=mode,
         )
-        return PlanningOutput(plan=plan, analyzed_entities=analyzed, understanding_summary=summary, warnings=warnings)
+        if evidence.records_inspected == 0 and analyzed:
+            evidence = QueryEvidence(
+                records_inspected=len(analyzed), records_matched=len(analyzed), records_returned=len(analyzed),
+                ranking=self._ranking_evidence(analyzed), latest_cycle=tools.latest_cycle_evidence(),
+            )
+        return PlanningOutput(plan=plan, analyzed_entities=analyzed, understanding_summary=summary, warnings=warnings, query_evidence=evidence)
+
+    def _execution_evidence(
+        self,
+        execution: QueryExecution,
+        analyzed: list[IntelligenceResult],
+        tools: CommandTools,
+        stored_priorities: dict[str, str] | None = None,
+    ) -> QueryEvidence:
+        return QueryEvidence(
+            records_inspected=execution.inspected,
+            records_matched=execution.matched,
+            records_excluded=execution.inspected - execution.matched,
+            records_returned=len(analyzed),
+            inspection_scope=execution.scope,
+            exclusions=[ExclusionCount(reason=reason, count=count) for reason, count in execution.exclusions],
+            ranking=self._ranking_evidence(analyzed, stored_priorities),
+            latest_cycle=tools.latest_cycle_evidence(),
+        )
+
+    @staticmethod
+    def _ranking_evidence(results: list[IntelligenceResult], stored_priorities: dict[str, str] | None = None) -> list[RankingEvidence]:
+        rows = []
+        for rank, result in enumerate(results, start=1):
+            metrics = result.metrics
+            facts = []
+            if metrics.overdue_exposure > 0:
+                facts.append(f"INR {metrics.overdue_exposure} overdue across {metrics.overdue_invoice_count} invoice(s)")
+            if metrics.max_days_overdue:
+                facts.append(f"Oldest balance is {metrics.max_days_overdue} days overdue")
+            if metrics.broken_promise_count:
+                facts.append(f"{metrics.broken_promise_count} broken payment promise(s)")
+            if metrics.days_since_last_payment is None:
+                facts.append("No payment activity recorded")
+            elif metrics.days_since_last_payment < 30:
+                facts.append(f"Payment activity recorded {metrics.days_since_last_payment} days ago")
+            if metrics.active_promise_count:
+                facts.append(f"{metrics.active_promise_count} active payment promise(s)")
+            if metrics.active_dispute_count:
+                facts.append(f"{metrics.active_dispute_count} active dispute blocker(s)")
+            blocker = (
+                "High risk, but standard recovery is blocked by an active dispute."
+                if metrics.active_dispute_count else
+                "Exposure remains at risk, but the current payment promise is still being monitored."
+                if metrics.active_promise_count else None
+            )
+            rows.append(RankingEvidence(
+                entity_id=result.entity_id, rank=rank, score=result.score, raw_score=result.raw_score,
+                severity=result.level, stored_workflow_priority=(stored_priorities or {}).get(result.entity_id),
+                facts=facts[:5], blocker=blocker, decision=f"{result.recommendation.title}: {result.recommendation.explanation}",
+            ))
+        return rows
 
     @staticmethod
     def _proposal_id(plan_id: UUID, target_id: str, action: ProposalActionType) -> UUID:
@@ -163,6 +250,16 @@ class CommandPlanner:
             proposal_id=self._proposal_id(plan_id, "portfolio", action), action_type=action,
             target_type="PORTFOLIO", target_id="portfolio", title="Review portfolio intelligence",
             explanation=f"Phase A intelligence evaluated {customer_count} current customer portfolios.",
+            priority=PriorityLevel.MEDIUM, risk_level=PriorityLevel.MEDIUM,
+            execution_mode=ExecutionMode.READ_ONLY, executable=True, requires_confirmation=False,
+        )
+
+    def _query_count_action(self, plan_id: UUID, count: int, entity_label: str) -> ActionProposal:
+        action = ProposalActionType.ANALYZE_PORTFOLIO
+        return ActionProposal(
+            proposal_id=self._proposal_id(plan_id, f"count/{entity_label}", action), action_type=action,
+            target_type="PORTFOLIO", target_id="portfolio", title=f"{count} matching {entity_label}",
+            explanation=f"The count was calculated from current persisted records after applying every structured query condition.",
             priority=PriorityLevel.MEDIUM, risk_level=PriorityLevel.MEDIUM,
             execution_mode=ExecutionMode.READ_ONLY, executable=True, requires_confirmation=False,
         )

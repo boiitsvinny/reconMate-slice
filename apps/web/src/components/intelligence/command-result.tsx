@@ -52,18 +52,22 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
   if (isUnknown) {
     return (
       <Panel className="mt-6 border-amber-300/15">
-        <SectionHeader eyebrow="Command not mapped" title="ReconMate needs a supported operational request" detail={result.interpreted_intent.guidance ?? result.understanding_summary} prominent />
-        <p className="p-5 text-sm leading-6 text-slate-300">Try a portfolio prioritization, broken-promise review, recovery preparation, or reminder-drafting command.</p>
+        <SectionHeader eyebrow="Unsupported request" title="ReconMate cannot answer this from the current receivables model." detail={result.interpreted_intent.guidance ?? result.understanding_summary} prominent />
+        <div className="p-5"><AnalysisList title="Supported analysis dimensions" items={["Overdue exposure and invoice age", "Payments and payment activity", "Promises and broken commitments", "Disputes and action blockers", "Current risk and recovery state", "Latest operational changes"]} empty="" /></div>
       </Panel>
     );
   }
 
   return (
     <div className="mt-6 space-y-6" aria-live="polite">
-      {inspectionEnabled && <section className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,.92fr)]">
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,.92fr)]">
         <InterpretationPanel command={command} result={result} />
-        <AnalysisApproach result={result} />
-      </section>}
+        <InspectionPanel result={result} />
+      </section>
+
+      {result.query_evidence.latest_cycle && <LatestCyclePanel result={result} />}
+
+      <RankedEvidencePanel result={result} onOpenTarget={onOpenTarget ? openTarget : undefined} />
 
       {executedProposals.length > 0 && (
         <Panel className="overflow-hidden border-emerald-300/20 bg-emerald-300/[.035]">
@@ -136,14 +140,33 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
 }
 
 function InterpretationPanel({ command, result }: { command: string; result: CommandResult }) {
-  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Request interpretation" title="What ReconMate understood" detail="The structured objective returned by the command pipeline" prominent /><div className="space-y-4 p-5"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Your request</p><p className="mt-1.5 text-sm leading-6 text-slate-200">“{command}”</p></div><div className="rounded-xl border border-sky-300/12 bg-sky-300/[.035] p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-300">Primary objective</p><p className="mt-2 text-base font-semibold leading-6 text-white">{objectives[result.interpreted_intent.intent]}</p></div><p className="text-xs leading-5 text-slate-400">{result.understanding_summary}</p><div className="grid grid-cols-2 gap-3"><Metric label="Target records" value={targetLabel(result.interpreted_intent.intent)} /><Metric label="Detailed records" value={String(result.analyzed_entities.length)} /></div></div></Panel>;
+  const query = result.interpreted_intent.query;
+  const conditions = queryConditions(result);
+  const exclusions = queryExclusions(result);
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Query" title="What ReconMate understood" detail="The structured query produced by the command planner" prominent /><div className="space-y-4 p-5"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Your request</p><p className="mt-1.5 text-sm leading-6 text-slate-200">“{command}”</p></div><div className="rounded-xl border border-sky-300/12 bg-sky-300/[.035] p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-300">Primary objective</p><p className="mt-2 text-base font-semibold leading-6 text-white">{objectives[result.interpreted_intent.intent]}</p></div><dl className="grid gap-x-5 gap-y-3 text-xs sm:grid-cols-2"><QueryRow term="Looking for" value={query.entity === "RECOVERY_CASES" ? "Recovery cases" : "Customers"} /><QueryRow term="Conditions" value={conditions.join(" + ") || "Current portfolio state"} /><QueryRow term="Excluded" value={exclusions.join(" + ") || "No explicit exclusions"} /><QueryRow term="Order" value={queryOrder(result)} /><QueryRow term="Limit" value={query.count_only ? "Count only" : query.limit ? String(query.limit) : "All matches"} /><QueryRow term="Scope" value={query.time_scope === "LATEST_CYCLE" ? "Latest simulation cycle" : "Current portfolio"} /></dl></div></Panel>;
 }
 
-function AnalysisApproach({ result }: { result: CommandResult }) {
-  const filters = filterLabels(result);
-  const conditions = detectedConditions(result);
-  const factors = [...new Set(result.analyzed_entities.flatMap((entity) => entity.factors.map((factor) => factor.title)))];
-  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Analysis approach" title="What ReconMate inspected" detail={result.interpreted_intent.reasoning[0]} prominent /><div className="space-y-4 p-5"><p className="text-xs leading-5 text-slate-400">{analysisNarrative(result.interpreted_intent.intent)}</p><AnalysisList title="Explicit command filters" items={filters} empty="No additional filter was explicitly selected." /><AnalysisList title="Conditions found in returned records" items={conditions} empty="No material condition was found in the returned records." /><AnalysisList title="Intelligence factors considered" items={factors} empty="No scored intelligence factor was present in the returned records." /></div></Panel>;
+function InspectionPanel({ result }: { result: CommandResult }) {
+  const evidence = result.query_evidence;
+  const scope = evidence.inspection_scope;
+  const scopeItems = [[scope.customers, "customers"], [scope.invoices, "invoices"], [scope.promises, "promises"], [scope.active_disputes, "active disputes"], [scope.recovery_cases, "recovery cases"], [scope.latest_cycle_events, "latest-cycle events"]] as const;
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Grounded execution" title="What ReconMate inspected" detail={result.interpreted_intent.reasoning[0]} prominent /><div className="space-y-4 p-5"><div className="grid grid-cols-2 gap-3"><Metric label="Records inspected" value={String(evidence.records_inspected)} /><Metric label="Matched" value={String(evidence.records_matched)} /><Metric label="Excluded" value={String(evidence.records_excluded)} /><Metric label={result.interpreted_intent.query.count_only ? "Count result" : "Returned"} value={String(result.interpreted_intent.query.count_only ? evidence.records_matched : evidence.records_returned)} /></div><AnalysisList title="Operational scope considered" items={scopeItems.filter(([count]) => count > 0).map(([count, name]) => `${count} ${name}`)} empty="No operational records were available to inspect." /><AnalysisList title="Filtered from the inspected set" items={evidence.exclusions.map((item) => `${item.count} excluded: ${item.reason}`)} empty="No records were excluded by the applied conditions." /></div></Panel>;
+}
+
+function LatestCyclePanel({ result }: { result: CommandResult }) {
+  const cycle = result.query_evidence.latest_cycle!;
+  return <Panel className="overflow-hidden border-cyan-300/15"><SectionHeader eyebrow="Latest-cycle evidence" title="What ReconMate noticed" detail={`Cycle ${cycle.cycle} · ${cycle.event_count} event${cycle.event_count === 1 ? "" : "s"} across ${cycle.customers_affected} customer${cycle.customers_affected === 1 ? "" : "s"}`} prominent /><div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,.72fr)_minmax(0,1.28fr)]"><div className="grid grid-cols-2 gap-3"><Metric label="Material changes" value={String(cycle.material_customers)} /><Metric label="Decisions changed" value={String(cycle.recommendations_changed)} /><Metric label="Decisions held" value={String(cycle.recommendations_unchanged)} /><Metric label="Events observed" value={String(cycle.event_count)} /></div><AnalysisList title="Factual before/after observations" items={cycle.observations} empty="Events were observed, with no material decision change recorded." /></div></Panel>;
+}
+
+function RankedEvidencePanel({ result, onOpenTarget }: { result: CommandResult; onOpenTarget?: (targetType: string, targetId: string) => void }) {
+  const evidence = result.query_evidence;
+  const names = new Map(result.analyzed_entities.map((entity) => [entity.entity_id, entity.entity_name]));
+  if (!evidence.ranking.length) return <Panel className="overflow-hidden"><SectionHeader eyebrow="Query outcome" title={evidence.records_matched === 0 ? "No records matched the structured query" : `${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} counted`} detail={evidence.records_matched === 0 ? `ReconMate inspected ${evidence.records_inspected} records and applied every condition shown above.` : "This count comes from current operational records; no ranked rows were requested."} prominent /></Panel>;
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Grounded ranking" title="Why these results ranked here" detail={`${evidence.records_returned} of ${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} returned in query order`} prominent /><div className="divide-y divide-white/[.06]">{evidence.ranking.map((item) => <article key={item.entity_id} className="p-4 sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-300">Rank #{item.rank}</p><h3 className="mt-1 text-base font-semibold text-white">{names.get(item.entity_id) ?? item.entity_id}</h3></div><div className="flex flex-wrap items-center gap-2"><StatusPill tone={tone(item.severity)}>{item.severity}</StatusPill><span className="text-xs text-slate-400">Score {item.score}/100{item.raw_score !== item.score ? ` · raw ${item.raw_score}` : ""}</span></div></div><div className="mt-4 grid gap-4 lg:grid-cols-3"><AnalysisList title="Facts" items={item.facts} empty="No material factual factor was recorded." /><AnalysisList title="Interpretation" items={[...(item.blocker ? [item.blocker] : ["No current action blocker detected"]), ...(item.stored_workflow_priority ? [`Stored workflow priority: ${label(item.stored_workflow_priority)}`] : [])]} empty="" /><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Decision</p><p className="mt-2 text-xs leading-5 text-slate-300">{item.decision}</p>{onOpenTarget && <button type="button" onClick={() => onOpenTarget(result.interpreted_intent.query.entity === "RECOVERY_CASES" ? "RECOVERY_CASE" : "CUSTOMER", item.entity_id)} className="mt-3 text-xs font-semibold text-sky-300 hover:text-sky-200">Open supporting record →</button>}</div></div></article>)}</div></Panel>;
+}
+
+function QueryRow({ term, value }: { term: string; value: string }) {
+  return <div><dt className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">{term}</dt><dd className="mt-1 leading-5 text-slate-200">{value}</dd></div>;
 }
 
 function AnalysisList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
@@ -156,31 +179,22 @@ function FactorExplanation({ factor }: { factor: ContributingFactor | Intelligen
   return <article className="rounded-xl border border-white/[.07] bg-white/[.02] p-4"><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-sky-200">{factor.title}</p><StatusPill tone={tone(impact)}>{impact}</StatusPill></div><p className="mt-3 text-xs leading-5 text-slate-300"><span className="font-semibold text-slate-200">Condition found:</span> {factor.explanation}</p><p className="mt-2 text-[11px] leading-5 text-slate-500"><span className="font-semibold text-slate-400">Assessment influence:</span> {scored ? `${factor.points} points in the current priority score.` : "Included as factual evidence in the current recommendation evaluation."}</p></article>;
 }
 
-function filterLabels(result: CommandResult): string[] {
-  const filters = result.interpreted_intent.filters;
-  return [...filters.risk_levels.map((level) => `${label(level)} risk`), ...(filters.top_n ? [`Top ${filters.top_n} matching records`] : []), ...(filters.overdue_only ? ["Overdue receivables only"] : []), ...(filters.broken_promises_only ? ["Customers with broken promises"] : []), ...(filters.include_all ? ["All matching records"] : [])];
+function queryConditions(result: CommandResult): string[] {
+  const query = result.interpreted_intent.query;
+  const booleans = [[query.overdue, "Overdue"], [query.broken_promise, "Broken promise"], [query.active_promise, "Active promise"], [query.active_dispute, "Active dispute"], [query.partial_payment, "Partial payment"], [query.recent_payment, "Recent payment"], [query.actionable, "Actionable"], [query.blocked, "Blocked"], [query.monitoring, "Monitoring"]] as const;
+  return [...query.risk_levels.map((level) => `${label(level)} risk`), ...booleans.filter(([value]) => value === true).map(([, text]) => text), ...(query.min_days_overdue !== null ? [`At least ${query.min_days_overdue} days overdue`] : []), ...(query.max_days_overdue !== null ? [`At most ${query.max_days_overdue} days overdue`] : []), ...(query.min_score !== null ? [`Score at least ${query.min_score}`] : []), ...(query.max_score !== null ? [`Score at most ${query.max_score}`] : [])];
 }
 
-function detectedConditions(result: CommandResult): string[] {
-  const entities = result.analyzed_entities;
-  const count = (test: (entity: CommandResult["analyzed_entities"][number]) => boolean) => entities.filter(test).length;
-  const conditions = [[count((item) => Number(item.metrics.overdue_exposure) > 0), "with overdue exposure"], [count((item) => item.metrics.broken_promise_count > 0), "with broken payment promises"], [count((item) => item.metrics.active_promise_count > 0), "with active payment promises"], [count((item) => item.metrics.active_dispute_count > 0), "with active disputes"], [count((item) => item.metrics.stalled_recovery_case_count > 0), "with stalled recovery work"]] as const;
-  return conditions.filter(([value]) => value > 0).map(([value, text]) => `${value} returned record${value === 1 ? "" : "s"} ${text}`);
+function queryExclusions(result: CommandResult): string[] {
+  const query = result.interpreted_intent.query;
+  const booleans = [[query.overdue, "No overdue exposure"], [query.broken_promise, "Broken promises"], [query.active_promise, "Active promises"], [query.active_dispute, "Active disputes"], [query.partial_payment, "Partial payments"], [query.recent_payment, "Recent payments"], [query.actionable, "Actionable records"], [query.blocked, "Blocked records"], [query.monitoring, "Monitoring records"]] as const;
+  return booleans.filter(([value]) => value === false).map(([, text]) => text);
 }
 
-function targetLabel(intent: CommandIntentType) {
-  if (intent === "CASE_ANALYSIS" || intent === "EXPLAIN_RECOMMENDATION" || intent === "PREPARE_FOLLOW_UPS" || intent === "PREPARE_RECOVERY_ACTIONS") return "Recovery cases";
-  if (intent === "PORTFOLIO_ANALYSIS") return "Portfolio + priority accounts";
-  return "Customer accounts";
-}
-
-function analysisNarrative(intent: CommandIntentType) {
-  if (intent === "PREPARE_PAYMENT_REMINDERS") return "ReconMate reviewed current overdue customer records and their payment, promise, dispute, and recovery conditions before preparing reminder drafts.";
-  if (intent === "PREPARE_RECOVERY_ACTIONS" || intent === "PREPARE_FOLLOW_UPS") return "ReconMate reviewed matching recovery cases, applied current intelligence priority, and respected factual blockers before preparing controlled workflow proposals.";
-  if (intent === "REVIEW_BROKEN_PROMISES") return "ReconMate selected customers carrying a current broken-promise signal and evaluated their live operational intelligence.";
-  if (intent === "CASE_ANALYSIS" || intent === "EXPLAIN_RECOMMENDATION") return "ReconMate inspected the selected case, its customer, invoice, payments, promises, communications, and recorded recovery work.";
-  if (intent === "CUSTOMER_ANALYSIS") return "ReconMate inspected the selected customer's invoices, payments, promises, disputes, and recovery cases.";
-  return "ReconMate evaluated current portfolio intelligence and returned the records that best match the interpreted objective and filters.";
+function queryOrder(result: CommandResult): string {
+  const query = result.interpreted_intent.query;
+  const names = { RISK_SCORE: "current intelligence score", TOTAL_EXPOSURE: "total exposure", OVERDUE_EXPOSURE: "overdue exposure", DAYS_OVERDUE: "oldest invoice age", LAST_PAYMENT: "latest payment activity" };
+  return `${query.descending ? "Highest" : "Lowest"} ${names[query.sort_by]}`;
 }
 
 function Metric({ label: metricLabel, value }: { label: string; value: string }) {

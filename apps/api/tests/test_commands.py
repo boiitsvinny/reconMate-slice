@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.api.routes import commands as commands_route
 from app.commands.interpreter import RuleBasedCommandInterpreter
-from app.commands.schemas import CommandIntentType, CommandRequest, ExecutionMode, ProposalStatus
-from app.commands.tools import CaseCandidate
+from app.commands.schemas import CommandIntentType, CommandRequest, ExecutionMode, InspectionScope, ProposalStatus, QueryEntity, QuerySort, QueryTimeScope, StructuredQuery
+from app.commands.tools import CaseCandidate, CommandTools, QueryExecution
 from app.db.session import get_db
 from app.intelligence.operational_schemas import (
     ContributingFactor,
@@ -167,6 +167,35 @@ class FakeCommandTools:
         results = [CUSTOMER_RESULT]
         return results[:top_n] if top_n is not None else results
 
+    def query_customer_intelligence(self, query):
+        result = CUSTOMER_RESULT
+        metrics = result.metrics
+        matches = (
+            (not query.risk_levels or result.level in query.risk_levels)
+            and (query.overdue is not True or metrics.overdue_exposure > 0)
+            and (query.broken_promise is not True or metrics.broken_promise_count > 0)
+            and (query.active_promise is not True or metrics.active_promise_count > 0)
+            and (query.active_dispute is not True or metrics.active_dispute_count > 0)
+            and (query.active_dispute is not False or metrics.active_dispute_count == 0)
+        )
+        results = [result] if matches else []
+        return results if query.count_only or query.limit is None else results[:query.limit]
+
+    def query_recovery_candidates(self, query):
+        results = self.get_recovery_candidates(levels=query.risk_levels or None, top_n=None)
+        return results if query.count_only or query.limit is None else results[:query.limit]
+
+    def execute_customer_query(self, query):
+        records = self.query_customer_intelligence(query)
+        return QueryExecution(records=records, inspected=1, matched=len(records), exclusions=[], scope=InspectionScope(customers=1, invoices=1, promises=1, recovery_cases=1))
+
+    def execute_case_query(self, query):
+        records = self.query_recovery_candidates(query)
+        return QueryExecution(records=records, inspected=1, matched=len(records), exclusions=[], scope=InspectionScope(customers=1, invoices=1, promises=1, recovery_cases=1))
+
+    def latest_cycle_evidence(self):
+        return None
+
     def get_recovery_candidates(self, levels=None, customer_ids=None, top_n=None):
         results = [self.candidate]
         if levels and self.candidate.risk_level not in levels:
@@ -190,6 +219,12 @@ class EmptyCommandTools(FakeCommandTools):
         return []
 
     def get_recovery_candidates(self, levels=None, customer_ids=None, top_n=None):
+        return []
+
+    def query_customer_intelligence(self, query):
+        return []
+
+    def query_recovery_candidates(self, query):
         return []
 
 
@@ -241,6 +276,63 @@ def test_interpreter_handles_competing_operational_intents_safely() -> None:
     assert result.guidance and "could mean" in result.guidance
 
 
+def test_risk_ranking_paraphrases_produce_equivalent_structured_queries() -> None:
+    interpreter = RuleBasedCommandInterpreter()
+    commands = (
+        "Show top 5 high-risk customers",
+        "Give me the five riskiest accounts",
+        "Which 5 customers have the highest current risk?",
+    )
+    queries = [interpreter.interpret(CommandRequest(command=command)).query for command in commands]
+    assert all(query.entity is QueryEntity.CUSTOMERS for query in queries)
+    assert all(query.limit == 5 and query.sort_by is QuerySort.RISK_SCORE and query.descending for query in queries)
+    assert queries[0] == queries[1] == queries[2]
+
+
+@pytest.mark.parametrize(("command", "expected"), [
+    ("Broken promises excluding disputes", {"broken_promise": True, "active_dispute": False}),
+    ("Show overdue customers with active promises", {"overdue": True, "active_promise": True}),
+    ("Highest exposure accounts", {"sort_by": QuerySort.TOTAL_EXPOSURE, "descending": True}),
+    ("Customers with recent payment activity", {"recent_payment": True}),
+    ("Actionable critical cases", {"entity": QueryEntity.RECOVERY_CASES, "actionable": True, "risk_levels": [PriorityLevel.CRITICAL]}),
+    ("Top 10 overdue customers without active disputes", {"limit": 10, "overdue": True, "active_dispute": False}),
+    ("Customers over 30 days overdue", {"min_days_overdue": 31, "overdue": True}),
+    ("Customers with risk score over 80", {"min_score": 81}),
+    ("Customers changed after latest cycle", {"time_scope": QueryTimeScope.LATEST_CYCLE}),
+    ("Count customers with broken promises", {"count_only": True, "broken_promise": True}),
+])
+def test_interpreter_composes_independent_query_dimensions(command: str, expected: dict) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is not CommandIntentType.UNKNOWN
+    for field, value in expected.items():
+        assert getattr(result.query, field) == value
+
+
+@pytest.mark.parametrize("command", [
+    "Which customers will churn next quarter?",
+    "Predict who will pay next month",
+    "Who improved after the latest cycle?",
+    "Purple bananas dance quickly",
+    "Show overdue invoices",
+])
+def test_interpreter_rejects_unsupported_or_ungrounded_requests(command: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is CommandIntentType.UNKNOWN
+    assert result.guidance
+
+
+def test_composed_predicates_all_apply_to_the_same_grounded_result() -> None:
+    query = StructuredQuery(broken_promise=True, active_dispute=False, recent_payment=True, min_days_overdue=30)
+    assert CommandTools._matches(
+        query, CUSTOMER_RESULT, partial=False, recent=True, blocked=False, monitoring=False, actionable=True,
+    )
+    disputed_metrics = CUSTOMER_RESULT.metrics.model_copy(update={"active_dispute_count": 1})
+    disputed = CUSTOMER_RESULT.model_copy(update={"metrics": disputed_metrics})
+    assert not CommandTools._matches(
+        query, disputed, partial=False, recent=True, blocked=True, monitoring=False, actionable=False,
+    )
+
+
 def test_prioritization_command_runs_through_api(monkeypatch) -> None:
     client = _client(monkeypatch)
     response = client.post("/commands", json={"command": "Who should I focus on today?"})
@@ -251,6 +343,41 @@ def test_prioritization_command_runs_through_api(monkeypatch) -> None:
     assert len(body["analyzed_entities"]) == 1
     assert body["outcomes"][0]["status"] == "ANALYZED"
     assert body["plan"]["execution_mode"] == "READ_ONLY"
+
+
+def test_prioritization_exposes_grounded_query_and_ranking_evidence(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    response = client.post("/commands", json={"command": "Show top 5 high-risk customers"})
+    app.dependency_overrides.clear()
+    body = response.json()
+    evidence = body["query_evidence"]
+    assert response.status_code == 200
+    assert body["interpreted_intent"]["query"]["limit"] == 5
+    assert evidence["records_inspected"] == 1
+    assert evidence["records_matched"] == 1
+    assert evidence["records_returned"] == 1
+    assert evidence["inspection_scope"] == {
+        "customers": 1, "invoices": 1, "promises": 1,
+        "active_disputes": 0, "recovery_cases": 1, "latest_cycle_events": 0,
+    }
+    assert evidence["ranking"][0]["rank"] == 1
+    assert evidence["ranking"][0]["score"] == 88
+    assert evidence["ranking"][0]["raw_score"] == CUSTOMER_RESULT.raw_score
+    assert "INR 450000 overdue" in evidence["ranking"][0]["facts"][0]
+    assert evidence["ranking"][0]["decision"] == CUSTOMER_RESULT.recommendation.title + ": " + CUSTOMER_RESULT.recommendation.explanation
+
+
+def test_zero_result_query_keeps_truthful_inspection_counts(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    response = client.post("/commands", json={"command": "Overdue customers with active promises"})
+    app.dependency_overrides.clear()
+    evidence = response.json()["query_evidence"]
+    assert response.status_code == 200
+    assert evidence["records_inspected"] == 1
+    assert evidence["records_matched"] == 0
+    assert evidence["records_excluded"] == 1
+    assert evidence["records_returned"] == 0
+    assert evidence["ranking"] == []
 
 
 def test_customer_case_and_explanation_context_commands(monkeypatch) -> None:

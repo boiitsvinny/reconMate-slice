@@ -87,6 +87,66 @@ export type CommandFilters = {
   include_all: boolean;
 };
 
+export type StructuredQuery = {
+  entity: "CUSTOMERS" | "RECOVERY_CASES";
+  risk_levels: PriorityLevel[];
+  overdue: boolean | null;
+  broken_promise: boolean | null;
+  active_promise: boolean | null;
+  active_dispute: boolean | null;
+  partial_payment: boolean | null;
+  recent_payment: boolean | null;
+  actionable: boolean | null;
+  blocked: boolean | null;
+  monitoring: boolean | null;
+  min_days_overdue: number | null;
+  max_days_overdue: number | null;
+  min_score: number | null;
+  max_score: number | null;
+  sort_by: "RISK_SCORE" | "TOTAL_EXPOSURE" | "OVERDUE_EXPOSURE" | "DAYS_OVERDUE" | "LAST_PAYMENT";
+  descending: boolean;
+  limit: number | null;
+  time_scope: "CURRENT" | "LATEST_CYCLE";
+  count_only: boolean;
+  explanation_requested: boolean;
+};
+
+export type QueryEvidence = {
+  records_inspected: number;
+  records_matched: number;
+  records_excluded: number;
+  records_returned: number;
+  inspection_scope: {
+    customers: number;
+    invoices: number;
+    promises: number;
+    active_disputes: number;
+    recovery_cases: number;
+    latest_cycle_events: number;
+  };
+  exclusions: { reason: string; count: number }[];
+  ranking: {
+    entity_id: string;
+    rank: number;
+    score: number;
+    raw_score: number;
+    severity: PriorityLevel;
+    stored_workflow_priority: string | null;
+    facts: string[];
+    blocker: string | null;
+    decision: string;
+  }[];
+  latest_cycle: {
+    cycle: number;
+    event_count: number;
+    customers_affected: number;
+    material_customers: number;
+    recommendations_changed: number;
+    recommendations_unchanged: number;
+    observations: string[];
+  } | null;
+};
+
 export type ActionProposal = {
   proposal_id: string;
   action_type: string;
@@ -137,10 +197,12 @@ export type CommandResult = {
     confidence: number;
     scope: "PORTFOLIO" | "CUSTOMER" | "CASE";
     filters: CommandFilters;
+    query: StructuredQuery;
     reasoning: string[];
     guidance: string | null;
   };
   understanding_summary: string;
+  query_evidence: QueryEvidence;
   analyzed_entities: IntelligenceResult[];
   plan: {
     plan_id: string;

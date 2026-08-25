@@ -2,6 +2,7 @@
 from datetime import date
 from decimal import Decimal
 import random
+from types import SimpleNamespace
 from uuid import uuid4
 
 from app.models.domain import Customer, Invoice, InvoiceStatus, PromiseStatus, PromiseToPay, RecoveryCase, RecoveryPriority, RecoveryState
@@ -78,6 +79,38 @@ def test_seed_reset_deletes_simulation_events_with_domain_records() -> None:
     reset_database(session)  # type: ignore[arg-type]
     assert session.tables[0] == "simulation_events"
     assert "simulation_states" in session.tables
+
+
+def test_material_transition_evidence_is_persisted_append_only() -> None:
+    class RecordingSession:
+        def __init__(self) -> None:
+            self.records = []
+            self.commits = 0
+
+        def add(self, record) -> None:
+            self.records.append(record)
+
+        def commit(self) -> None:
+            self.commits += 1
+
+    db = RecordingSession()
+    entity_id = uuid4()
+    state = SimpleNamespace(id=uuid4(), simulation_date=date(2026, 8, 2))
+    transition = {
+        "entity_type": "CUSTOMER", "entity_id": str(entity_id), "entity_name": "Evidence Account",
+        "previous_score": 74, "current_score": 83, "previous_recommendation": "MONITOR",
+        "current_recommendation": "PRIORITIZE", "classifications": ["RECOMMENDATION_CHANGED"],
+        "material": True,
+    }
+    simulation_service._persist_transition_audits(  # type: ignore[arg-type]
+        db, state, 4, 3, [transition],
+        {"customers_affected": 2, "material_customers": 1, "recommendations_changed": 1, "recommendations_unchanged": 0},
+    )
+    assert [record.event_type for record in db.records] == ["SIMULATION_INTELLIGENCE_SUMMARY", "SIMULATION_INTELLIGENCE_TRANSITION"]
+    assert db.records[0].payload["event_count"] == 3
+    assert db.records[1].payload["previous_score"] == 74
+    assert db.records[1].payload["current_recommendation"] == "PRIORITIZE"
+    assert db.commits == 1
 
 
 def test_simulation_reset_reseeds_and_clears_command_plans(monkeypatch) -> None:
