@@ -82,6 +82,9 @@ class CommandExecutor:
                     status=ProposalStatus.EXECUTED,
                     message="Created an internal approval-controlled recovery workflow action; no customer contact occurred.",
                     recovery_action_id=str(action.id),
+                    recovery_action_status=getattr(getattr(action, "status", None), "value", None),
+                    recovery_action_created_at=getattr(action, "created_at", None),
+                    workflow_effect=(getattr(action, "recommendation_context", None) or {}).get("workflow_effect"),
                 ))
             except (HTTPException, ValueError) as exc:
                 message = str(exc.detail) if isinstance(exc, HTTPException) else str(exc)

@@ -52,6 +52,7 @@ class ContributingFactor(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     type: SignalType
+    title: str
     impact: PriorityLevel
     points: int = Field(ge=0, le=100)
     explanation: str

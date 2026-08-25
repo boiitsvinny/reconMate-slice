@@ -36,6 +36,11 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
   }, [result.plan_id, confirmationIds]);
 
   const outcomes = new Map(result.outcomes.map((item) => [item.proposal_id, item]));
+  const entityNames = new Map(result.plan.entities.map((entity) => [entity.entity_id, entity.display_name]));
+  const executedProposals = result.plan.proposed_actions.flatMap((proposal) => {
+    const outcome = outcomes.get(proposal.proposal_id);
+    return outcome?.status === "EXECUTED" ? [{ proposal, outcome }] : [];
+  });
   const isUnknown = result.interpreted_intent.intent === "UNKNOWN";
   const selectedCount = selected.size;
   if (isUnknown) {
@@ -54,6 +59,26 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
         <AnalysisApproach result={result} />
       </section>
 
+      {executedProposals.length > 0 && (
+        <Panel className="overflow-hidden border-emerald-300/20 bg-emerald-300/[.035]">
+          <SectionHeader eyebrow="Confirmed outcome" title={`${executedProposals.length} internal workflow action${executedProposals.length === 1 ? "" : "s"} recorded`} detail="Confirmation created controlled RecoveryAction records from the selected proposals." prominent />
+          <div className="divide-y divide-emerald-200/[.08]">
+            {executedProposals.map(({ proposal, outcome }) => (
+              <article key={proposal.proposal_id} className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-emerald-50">{proposal.title}</p>
+                  <p className="mt-1 text-xs text-emerald-100/75">Affected case: {entityNames.get(proposal.target_id) ?? proposal.target_type}</p>
+                  <p className="mt-2 text-xs leading-5 text-emerald-100/75">{outcome.message}</p>
+                  <p className="mt-1 text-[11px] text-emerald-100/60">{outcome.recovery_action_status ? `Workflow status: ${label(outcome.recovery_action_status)}.` : "Workflow record created."}{outcome.recovery_action_created_at ? ` Recorded ${new Date(outcome.recovery_action_created_at).toLocaleString()}.` : ""}</p>
+                  {outcome.workflow_effect && <p className="mt-1 text-[11px] leading-4 text-emerald-100/60">{outcome.workflow_effect}</p>}
+                </div>
+                {onOpenTarget && <button type="button" onClick={() => onOpenTarget(proposal.target_type, proposal.target_id)} className={`${buttonStyles.success} w-full sm:w-auto`}>Open affected case</button>}
+              </article>
+            ))}
+          </div>
+        </Panel>
+      )}
+
       <Panel className="overflow-hidden border-sky-300/15">
         <SectionHeader eyebrow="Prioritized operational plan" title={`Action plan · ${result.plan.proposed_actions.length} proposal${result.plan.proposed_actions.length === 1 ? "" : "s"}`} detail={result.plan.proposed_actions.length > 4 ? "Ordered results are bounded inside this panel; scroll to review every proposal." : `Plan ${result.plan.plan_id.slice(0, 8)} / ${label(result.plan.execution_mode)}`} prominent action={confirmationIds.length > 0 && !reviewing ? <button type="button" onClick={() => setReviewing(true)} className={buttonStyles.warning}>Review {confirmationIds.length} action{confirmationIds.length === 1 ? "" : "s"}</button> : undefined} />
         {!result.plan.proposed_actions.length ? (
@@ -62,7 +87,7 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
           <div className="operational-scrollbar max-h-[42rem] overflow-y-auto overscroll-contain p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-300/35 lg:p-5" role="region" aria-label={`${result.plan.proposed_actions.length} operational proposals`} tabIndex={0}>
             <div className="grid gap-4 lg:grid-cols-2">
               {result.plan.proposed_actions.map((proposal) => (
-                <ActionProposalCard key={proposal.proposal_id} proposal={proposal} outcome={outcomes.get(proposal.proposal_id)} selected={selected.has(proposal.proposal_id)} onSelectedChange={reviewing && proposal.requires_confirmation ? (checked) => setSelected((current) => {
+                <ActionProposalCard key={proposal.proposal_id} proposal={proposal} outcome={outcomes.get(proposal.proposal_id)} targetName={entityNames.get(proposal.target_id)} selected={selected.has(proposal.proposal_id)} onSelectedChange={reviewing && proposal.requires_confirmation ? (checked) => setSelected((current) => {
                   const next = new Set(current);
                   if (checked) next.add(proposal.proposal_id); else next.delete(proposal.proposal_id);
                   return next;
@@ -111,7 +136,7 @@ function InterpretationPanel({ command, result }: { command: string; result: Com
 function AnalysisApproach({ result }: { result: CommandResult }) {
   const filters = filterLabels(result);
   const conditions = detectedConditions(result);
-  const factors = [...new Set(result.analyzed_entities.flatMap((entity) => entity.factors.map((factor) => label(factor.type))))];
+  const factors = [...new Set(result.analyzed_entities.flatMap((entity) => entity.factors.map((factor) => factor.title)))];
   return <Panel className="overflow-hidden"><SectionHeader eyebrow="Analysis approach" title="What ReconMate inspected" detail={result.interpreted_intent.reasoning[0]} prominent /><div className="space-y-4 p-5"><p className="text-xs leading-5 text-slate-400">{analysisNarrative(result.interpreted_intent.intent)}</p><AnalysisList title="Explicit command filters" items={filters} empty="No additional filter was explicitly selected." /><AnalysisList title="Conditions found in returned records" items={conditions} empty="No material condition was found in the returned records." /><AnalysisList title="Intelligence factors considered" items={factors} empty="No scored intelligence factor was present in the returned records." /></div></Panel>;
 }
 
@@ -122,7 +147,7 @@ function AnalysisList({ title, items, empty }: { title: string; items: string[];
 function FactorExplanation({ factor }: { factor: ContributingFactor | IntelligenceSignal }) {
   const scored = "points" in factor;
   const impact = scored ? factor.impact : factor.severity;
-  return <article className="rounded-xl border border-white/[.07] bg-white/[.02] p-4"><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-sky-200">{scored ? label(factor.type) : factor.title}</p><StatusPill tone={tone(impact)}>{impact}</StatusPill></div><p className="mt-3 text-xs leading-5 text-slate-300"><span className="font-semibold text-slate-200">What happened:</span> {factor.explanation}</p><p className="mt-2 text-[11px] leading-5 text-slate-500"><span className="font-semibold text-slate-400">Why it matters:</span> The current intelligence rules classify this as {impact.toLowerCase()} operational impact.</p><p className="mt-2 text-[11px] leading-5 text-slate-500"><span className="font-semibold text-slate-400">Influence:</span> {scored ? `Contributed ${factor.points} points to the current priority score.` : "Contributed a factual signal to the recommendation evaluation."}</p></article>;
+  return <article className="rounded-xl border border-white/[.07] bg-white/[.02] p-4"><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-sky-200">{factor.title}</p><StatusPill tone={tone(impact)}>{impact}</StatusPill></div><p className="mt-3 text-xs leading-5 text-slate-300"><span className="font-semibold text-slate-200">Condition found:</span> {factor.explanation}</p><p className="mt-2 text-[11px] leading-5 text-slate-500"><span className="font-semibold text-slate-400">Assessment influence:</span> {scored ? `${factor.points} points in the current priority score.` : "Included as factual evidence in the current recommendation evaluation."}</p></article>;
 }
 
 function filterLabels(result: CommandResult): string[] {

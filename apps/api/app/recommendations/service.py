@@ -65,6 +65,25 @@ def _priority_for_escalation(case: RecoveryCase, evaluation: CaseEvaluation) -> 
     return RecommendationPriority.HIGH
 
 
+def _operator_next_step(action: RecommendedAction) -> str:
+    return {
+        RecommendedAction.SEND_PAYMENT_REMINDER: "Review the case evidence and create the reminder workflow only if operator-approved outreach is appropriate.",
+        RecommendedAction.MONITOR_ACTIVE_PROMISE: "Monitor the recorded promise through its due date and verify payment evidence before taking further recovery action.",
+        RecommendedAction.REQUEST_PAYMENT_DATE: "Review the account and create a controlled follow-up requesting a confirmed payment date.",
+        RecommendedAction.REVIEW_PAYMENT_CLAIM: "Verify the payment claim against recorded payment evidence before changing the recovery response.",
+        RecommendedAction.HOLD_FOR_DISPUTE: "Keep recovery work on hold while an operator reviews the active dispute and its resolution evidence.",
+        RecommendedAction.ESCALATE_TO_HUMAN: "Route the case for human recovery review before any further action is approved.",
+        RecommendedAction.PREPARE_ESCALATION: "Create an internal escalation workflow for senior recovery review.",
+        RecommendedAction.NO_ACTION_REQUIRED: "Continue monitoring the live case facts; no recovery workflow needs to be created now.",
+    }[action]
+
+
+def _workflow_effect(action: RecommendedAction) -> str:
+    if action is RecommendedAction.NO_ACTION_REQUIRED:
+        return "This remains an advisory decision. No workflow record is created and no operational fact is changed."
+    return "Proceeding creates an internal controlled recovery workflow record for operator review. It does not contact the customer or change invoices, payments, promises, disputes, or case state."
+
+
 def recommend_case(case: RecoveryCase, simulation_date: date) -> RecoveryRecommendation:
     """Compute one advisory recommendation without mutating any domain record."""
     evaluation = evaluate_case(case, simulation_date)
@@ -129,6 +148,7 @@ def recommend_case(case: RecoveryCase, simulation_date: date) -> RecoveryRecomme
         factual_reasons=factual_reasons, communication_signals=signals, blockers=blockers,
         relevant_exposure=exposure, relevant_days_overdue=days_overdue,
         recovery_state=evaluation.derived_state, operator_explanation=explanation,
+        operator_next_step=_operator_next_step(action), workflow_effect=_workflow_effect(action),
     )
 
 

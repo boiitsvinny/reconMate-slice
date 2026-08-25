@@ -89,22 +89,31 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
 }
 
 export function CommandActivityPanel() {
-  const { history } = useCommandSession();
+  const { history, openActivity } = useCommandSession();
   return (
     <Panel className="overflow-hidden">
       <SectionHeader eyebrow="Today's command activity" title="Current browser session" detail={`${history.length} command${history.length === 1 ? "" : "s"} retained in this browser session`} prominent />
       <div className="operational-scrollbar max-h-72 divide-y divide-white/[.055] overflow-y-auto overscroll-contain" role="region" aria-label="Current command activity" tabIndex={0}>
         {history.map((item) => (
-          <article key={item.planId} className="flex items-center justify-between gap-4 p-4">
+          <article key={item.planId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-slate-200">{item.command}</p>
-              <p className="mt-1 text-[11px] text-slate-500">{item.analyzedCount} detailed records / {item.proposalCount} proposals / {new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+              <p className="mt-1 text-[11px] leading-4 text-slate-500">{activityDescription(item.status)} {item.analyzedCount} records inspected / {item.proposalCount} proposals / {new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+              <p className="mt-1 line-clamp-1 text-[11px] text-slate-400">{item.summary}</p>
             </div>
-            <StatusPill tone={item.status === "FAILED" ? "rose" : item.status === "AWAITING_CONFIRMATION" ? "amber" : item.status === "EXECUTED" ? "emerald" : "sky"}>{item.status === "AWAITING_CONFIRMATION" ? "Decision required" : item.status.replaceAll("_", " ")}</StatusPill>
+            <div className="flex items-center gap-2 self-end sm:self-auto"><StatusPill tone={item.status === "FAILED" ? "rose" : item.status === "AWAITING_CONFIRMATION" ? "amber" : item.status === "EXECUTED" ? "emerald" : "sky"}>{activityStatus(item.status)}</StatusPill>{item.resultSnapshot && <button type="button" onClick={() => openActivity(item.planId)} className={buttonStyles.secondary}>Open result</button>}</div>
           </article>
         ))}
         {!history.length && <p className="p-8 text-center text-xs text-slate-500">No commands have been run in this browser session.</p>}
       </div>
     </Panel>
   );
+}
+
+function activityStatus(status: "COMPLETED" | "PREPARED" | "AWAITING_CONFIRMATION" | "EXECUTED" | "FAILED") {
+  return status === "AWAITING_CONFIRMATION" ? "Decision required" : status === "EXECUTED" ? "Action recorded" : status === "COMPLETED" ? "Analysis complete" : status.replaceAll("_", " ");
+}
+
+function activityDescription(status: "COMPLETED" | "PREPARED" | "AWAITING_CONFIRMATION" | "EXECUTED" | "FAILED") {
+  return status === "AWAITING_CONFIRMATION" ? "Plan prepared; waiting for operator confirmation." : status === "EXECUTED" ? "Internal workflow action recorded." : status === "PREPARED" ? "Preparation completed; nothing was sent." : status === "COMPLETED" ? "Read-only analysis completed." : "Command did not create workflow work.";
 }

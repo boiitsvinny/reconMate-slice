@@ -47,6 +47,10 @@ class IntelligenceTransition(BaseModel):
     current_risk_level: PriorityLevel
     previous_recommendation: str | None = None
     current_recommendation: str
+    current_recommendation_title: str
+    current_recommendation_explanation: str
+    operator_next_step: str | None = None
+    workflow_effect: str | None = None
     signals_added: list[SignalType]
     signals_removed: list[SignalType]
     classifications: list[TransitionClassification]
@@ -80,6 +84,11 @@ def compare_intelligence(
     cycle: int,
     event_id: str,
     event_type: str,
+    previous_recommendation_title: str | None = None,
+    current_recommendation_title: str | None = None,
+    current_recommendation_explanation: str | None = None,
+    operator_next_step: str | None = None,
+    workflow_effect: str | None = None,
 ) -> IntelligenceTransition:
     """Compare material decision state; score-only movement inside one band is non-material."""
     # A newly created entity has no comparable baseline. Its existing signals
@@ -118,12 +127,15 @@ def compare_intelligence(
     direction = _change_direction(classifications, score_direction)
     fact = _EVENT_FACTS.get(event_type, f"The simulation recorded {event_type.replace('_', ' ').lower()}.")
     why = _why_changed(before, after, added, removed, material)
+    current_title = current_recommendation_title or after.recommendation.title
+    current_explanation = current_recommendation_explanation or after.recommendation.explanation
+    previous_title = previous_recommendation_title or previous_recommendation
     decision = (
-        f"The current recommended next step is {current_recommendation}; no prior intelligence state was available for comparison."
+        f"The current recommended next step is {current_title}; no prior intelligence state was available for comparison."
         if previous_recommendation is None
-        else f"ReconMate changed the recommended next step from {previous_recommendation} to {current_recommendation}."
+        else f"ReconMate changed the recommended next step from {previous_title} to {current_title}."
         if previous_recommendation != current_recommendation
-        else f"The recommended next step remains {current_recommendation}."
+        else f"The recommended next step remains {current_title}."
     )
 
     return IntelligenceTransition(
@@ -140,6 +152,10 @@ def compare_intelligence(
         current_risk_level=after.level,
         previous_recommendation=previous_recommendation,
         current_recommendation=current_recommendation,
+        current_recommendation_title=current_title,
+        current_recommendation_explanation=current_explanation,
+        operator_next_step=operator_next_step,
+        workflow_effect=workflow_effect,
         signals_added=added,
         signals_removed=removed,
         classifications=classifications,
@@ -148,7 +164,7 @@ def compare_intelligence(
         what_changed=fact,
         why_intelligence_changed=why,
         decision_impact=decision,
-        operator_significance=_operator_significance(direction, classifications, current_recommendation),
+        operator_significance=_operator_significance(direction, classifications, current_title),
     )
 
 
@@ -163,9 +179,9 @@ def _why_changed(
         return "No comparable prior intelligence state existed for this newly created recovery entity."
     parts: list[str] = []
     if added:
-        parts.append(f"New intelligence signals: {', '.join(item.value for item in added)}.")
+        parts.append(f"New intelligence findings: {', '.join(_signal_titles(after, added))}.")
     if removed:
-        parts.append(f"Resolved intelligence signals: {', '.join(item.value for item in removed)}.")
+        parts.append(f"Resolved intelligence findings: {', '.join(_signal_titles(before, removed))}.")
     if before and before.level != after.level:
         parts.append(f"The score moved from {before.score} ({before.level.value}) to {after.score} ({after.level.value}).")
     elif before and before.score != after.score:
@@ -173,6 +189,11 @@ def _why_changed(
     if not material:
         parts.append("The risk band, recommendation, and material signal set remained unchanged after re-evaluation.")
     return " ".join(parts)
+
+
+def _signal_titles(result: IntelligenceResult, signal_types: list[SignalType]) -> list[str]:
+    titles = {signal.type: signal.title for signal in result.signals}
+    return [titles.get(signal_type, signal_type.value.replace("_", " ").title()) for signal_type in signal_types]
 
 
 def _change_direction(classifications: list[TransitionClassification], score_direction: ScoreDirection) -> ChangeDirection:

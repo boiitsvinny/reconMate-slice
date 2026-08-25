@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
+from app.intelligence.operational_service import evaluate_case_intelligence
 from app.models.domain import AuditEvent, Communication, Customer, Invoice, PromiseToPay, RecoveryAction, RecoveryCase, SimulationState
 from app.recommendations.service import recommend_case
 from app.workflow.schemas import CreateActionRequest, OperatorDecisionRequest, RecoveryActionResponse
@@ -120,10 +121,12 @@ def execute_recovery_action(action_id: UUID, payload: OperatorDecisionRequest, d
 def case_workspace(case_id: UUID, db: Session = Depends(get_db)) -> dict[str, Any]:
     case = db.scalar(_case_query().where(RecoveryCase.id == case_id))
     if case is None: raise HTTPException(status_code=404, detail="Recovery case not found.")
+    simulation_date = _simulation_date(db)
     events = db.scalars(select(AuditEvent).where((AuditEvent.entity_type == "RecoveryCase") & (AuditEvent.entity_id == case.id)).order_by(AuditEvent.occurred_at.desc())).all()
     return {
         "case_id": str(case.id), "customer": {"id": str(case.customer.id), "name": case.customer.name, "strategic": bool(case.customer.is_strategic_account)},
-        "recommendation": recommend_case(case, _simulation_date(db)).model_dump(mode="json"),
+        "recommendation": recommend_case(case, simulation_date).model_dump(mode="json"),
+        "intelligence": evaluate_case_intelligence(case, simulation_date).model_dump(mode="json"),
         "invoice": None if case.invoice is None else {"id": str(case.invoice.id), "number": case.invoice.invoice_number, "status": case.invoice.status.value, "outstanding_amount": case.invoice.outstanding_amount, "due_date": case.invoice.due_date},
         "promises": [{"id": str(item.id), "status": item.status.value, "promised_amount": item.promised_amount, "promised_date": item.promised_date} for item in case.invoice.promises_to_pay] if case.invoice else [],
         "communications": [{"id": str(item.id), "direction": item.direction.value, "content": item.content, "occurred_at": item.occurred_at, "analyses": [analysis.result for analysis in item.analyses]} for item in sorted(case.customer.communications, key=lambda item: item.occurred_at, reverse=True)],

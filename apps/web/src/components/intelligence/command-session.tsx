@@ -30,6 +30,7 @@ export type CommandActivity = {
   analyzedCount: number;
   proposalCount: number;
   status: "COMPLETED" | "PREPARED" | "AWAITING_CONFIRMATION" | "EXECUTED" | "FAILED";
+  resultSnapshot?: CommandResult;
 };
 
 type CommandSession = {
@@ -42,6 +43,7 @@ type CommandSession = {
   history: CommandActivity[];
   runCommand: (request: CommandRequest) => Promise<CommandResult | null>;
   confirmPlan: (proposalIds: string[]) => Promise<ConfirmationResult | null>;
+  openActivity: (planId: string) => void;
   clearError: () => void;
   clearSession: () => void;
 };
@@ -90,6 +92,7 @@ export function CommandSessionProvider({ children }: { children: ReactNode }) {
         analyzedCount: next.analyzed_entities.length,
         proposalCount: next.plan.proposed_actions.length,
         status: confirmationCount ? "AWAITING_CONFIRMATION" : preparedCount ? "PREPARED" : "COMPLETED",
+        resultSnapshot: next,
       };
       setHistory((items) => [activity, ...items].slice(0, 12));
       return next;
@@ -117,10 +120,10 @@ export function CommandSessionProvider({ children }: { children: ReactNode }) {
     try {
       const confirmation = await confirmationMutation.mutateAsync({ planId: result.plan_id, proposalIds });
       const returned = new Map(confirmation.outcomes.map((item) => [item.proposal_id, item]));
-      setResult((current) => current ? {
-        ...current,
-        plan: { ...current.plan, requires_confirmation: false, execution_mode: confirmation.execution_mode },
-        outcomes: current.outcomes.map((item): ActionOutcome => {
+      const updatedResult: CommandResult = {
+        ...result,
+        plan: { ...result.plan, requires_confirmation: false, execution_mode: confirmation.execution_mode },
+        outcomes: result.outcomes.map((item): ActionOutcome => {
           const updated = returned.get(item.proposal_id);
           if (updated) return updated;
           if (item.status === "AWAITING_CONFIRMATION") {
@@ -128,13 +131,15 @@ export function CommandSessionProvider({ children }: { children: ReactNode }) {
           }
           return item;
         }),
-        warnings: [...current.warnings, ...confirmation.warnings],
-      } : current);
+        warnings: [...result.warnings, ...confirmation.warnings],
+      };
+      setResult(updatedResult);
       const executed = confirmation.outcomes.filter((item) => item.status === "EXECUTED").length;
       setHistory((items) => items.map((item) => item.planId === result.plan_id ? {
         ...item,
         status: executed ? "EXECUTED" : "FAILED",
         summary: executed ? `${executed} internal workflow action${executed === 1 ? "" : "s"} created after confirmation.` : "No workflow action was created.",
+        resultSnapshot: updatedResult,
       } : item));
       await queryClient.invalidateQueries({ queryKey: ["reconmate"] });
       return confirmation;
@@ -156,6 +161,14 @@ export function CommandSessionProvider({ children }: { children: ReactNode }) {
     }
   }, [confirmationMutation, queryClient, result]);
 
+  const openActivity = useCallback((planId: string) => {
+    const item = history.find((entry) => entry.planId === planId);
+    if (!item?.resultSnapshot) return;
+    setActiveCommand(item.command);
+    setResult(item.resultSnapshot);
+    setError(null);
+  }, [history]);
+
   const clearSession = useCallback(() => {
     setActiveCommand("");
     setResult(null);
@@ -176,9 +189,10 @@ export function CommandSessionProvider({ children }: { children: ReactNode }) {
     history,
     runCommand,
     confirmPlan,
+    openActivity,
     clearError: () => setError(null),
     clearSession,
-  }), [activeCommand, commandMutation.isPending, confirmationMutation.isPending, processingStage, error, history, result, runCommand, confirmPlan, clearSession]);
+  }), [activeCommand, commandMutation.isPending, confirmationMutation.isPending, processingStage, error, history, result, runCommand, confirmPlan, openActivity, clearSession]);
 
   return <CommandSessionContext.Provider value={value}>{children}</CommandSessionContext.Provider>;
 }

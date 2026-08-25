@@ -158,6 +158,7 @@ def _signal(
         ),
         ContributingFactor(
             type=signal_type,
+            title=title,
             impact=impact,
             points=points,
             explanation=explanation,

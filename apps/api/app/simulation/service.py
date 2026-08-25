@@ -73,6 +73,7 @@ def _communication(db: Session, state: SimulationState, customer: Customer, invo
 class _IntelligenceSnapshot:
     result: IntelligenceResult
     recommendation: str
+    recommendation_title: str
 
 
 def _capture_intelligence(db: Session) -> dict[tuple[str, str], _IntelligenceSnapshot]:
@@ -80,12 +81,16 @@ def _capture_intelligence(db: Session) -> dict[tuple[str, str], _IntelligenceSna
     tools = CommandTools(db)
     snapshots: dict[tuple[str, str], _IntelligenceSnapshot] = {}
     for result in tools.get_portfolio_intelligence().customers:
-        snapshots[("CUSTOMER", result.entity_id)] = _IntelligenceSnapshot(result, result.recommendation.action.value)
+        snapshots[("CUSTOMER", result.entity_id)] = _IntelligenceSnapshot(
+            result, result.recommendation.action.value, result.recommendation.title,
+        )
     for case in tools.cases():
         result = evaluate_case_intelligence(case, tools.simulation_date)
+        recommendation = recommend_case(case, tools.simulation_date)
         snapshots[("RECOVERY_CASE", str(case.id))] = _IntelligenceSnapshot(
             result,
-            recommend_case(case, tools.simulation_date).recommended_action.value,
+            recommendation.recommended_action.value,
+            recommendation.recommended_action.value.replace("_", " ").title(),
         )
     return snapshots
 
@@ -106,10 +111,19 @@ def _build_transitions(
             if entity_type == "CUSTOMER":
                 result = tools.get_customer_intelligence(uuid.UUID(entity_id))
                 current_recommendation = result.recommendation.action.value if result else None
+                current_title = result.recommendation.title if result else None
+                current_explanation = result.recommendation.explanation if result else None
+                operator_next_step = None
+                workflow_effect = None
             else:
                 case = tools.get_case(entity_id)
                 result = tools.get_case_intelligence(uuid.UUID(entity_id)) if case else None
-                current_recommendation = recommend_case(case, tools.simulation_date).recommended_action.value if case else None
+                recommendation = recommend_case(case, tools.simulation_date) if case else None
+                current_recommendation = recommendation.recommended_action.value if recommendation else None
+                current_title = recommendation.recommended_action.value.replace("_", " ").title() if recommendation else None
+                current_explanation = recommendation.operator_explanation if recommendation else None
+                operator_next_step = recommendation.operator_next_step if recommendation else None
+                workflow_effect = recommendation.workflow_effect if recommendation else None
             if result is None or current_recommendation is None:
                 continue
             previous = before.get((entity_type, entity_id))
@@ -121,6 +135,11 @@ def _build_transitions(
                 cycle=cycle,
                 event_id=event["id"],
                 event_type=event["type"],
+                previous_recommendation_title=previous.recommendation_title if previous else None,
+                current_recommendation_title=current_title,
+                current_recommendation_explanation=current_explanation,
+                operator_next_step=operator_next_step,
+                workflow_effect=workflow_effect,
             )
             transitions.append(transition.model_dump(mode="json"))
     return transitions

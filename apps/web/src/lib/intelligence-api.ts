@@ -26,6 +26,7 @@ export type IntelligenceSignal = {
 
 export type ContributingFactor = {
   type: string;
+  title: string;
   impact: PriorityLevel;
   points: number;
   explanation: string;
@@ -106,6 +107,9 @@ export type ActionOutcome = {
   status: ProposalStatus;
   message: string;
   recovery_action_id: string | null;
+  recovery_action_status: string | null;
+  recovery_action_created_at: string | null;
+  workflow_effect: string | null;
 };
 
 export type CommandResult = {

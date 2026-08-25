@@ -94,11 +94,18 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
           <p className={cx("mt-2 text-[11px] font-medium leading-4", feedback.status === "MATERIAL_CHANGE" ? "text-sky-200" : feedback.status === "REFRESH_FAILED" ? "text-amber-100/80" : "text-slate-300")}>{feedback.summary}</p>
           {feedback.transition && (
             <div className="mt-3 space-y-3 rounded-xl border border-white/[.07] bg-black/10 p-3">
+              <div>
+                <p className="text-[9px] font-bold uppercase tracking-[.11em] text-slate-500">{feedback.transition.entity_type === "CUSTOMER" ? "Customer portfolio assessment" : "Recovery case assessment"} / {feedback.transition.entity_name}</p>
+                <p className="mt-1.5 text-sm font-semibold text-white">{feedback.transition.current_recommendation_title}</p>
+                <p className="mt-1 text-[10px] leading-4 text-slate-400">{feedback.transition.current_recommendation_explanation}</p>
+              </div>
               <div className="flex flex-wrap gap-2 text-[9px] font-bold uppercase tracking-[.1em]"><span className="rounded-full bg-white/[.05] px-2 py-1 text-slate-300">{feedback.transition.previous_risk_level ?? "New"} → {feedback.transition.current_risk_level}</span><span className="rounded-full bg-white/[.05] px-2 py-1 text-slate-300">Score {feedback.transition.previous_score ?? "-"} → {feedback.transition.current_score}</span></div>
               <TransitionDetail label="What changed" value={feedback.transition.what_changed} />
               <TransitionDetail label="Why intelligence changed" value={feedback.transition.why_intelligence_changed} />
               <TransitionDetail label="Decision impact" value={feedback.transition.decision_impact} />
               <TransitionDetail label="Why it matters" value={feedback.transition.operator_significance} />
+              {feedback.transition.operator_next_step && <TransitionDetail label="Operator next step" value={feedback.transition.operator_next_step} />}
+              {feedback.transition.workflow_effect && <TransitionDetail label="If the operator proceeds" value={feedback.transition.workflow_effect} />}
             </div>
           )}
           {feedback.changes.length > 0 && <ul className="mt-2 space-y-1 text-[10px] leading-4 text-slate-400">{feedback.changes.map((change) => <li key={change}>• {change}</li>)}</ul>}

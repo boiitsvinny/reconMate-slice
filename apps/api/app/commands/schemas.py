@@ -136,6 +136,9 @@ class ActionOutcome(BaseModel):
     status: ProposalStatus
     message: str
     recovery_action_id: str | None = None
+    recovery_action_status: str | None = None
+    recovery_action_created_at: datetime | None = None
+    workflow_effect: str | None = None
 
 
 class CommandAudit(BaseModel):

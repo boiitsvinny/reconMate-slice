@@ -56,3 +56,5 @@ class RecoveryRecommendation(BaseModel):
     relevant_days_overdue: int
     recovery_state: str
     operator_explanation: str
+    operator_next_step: str
+    workflow_effect: str

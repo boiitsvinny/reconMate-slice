@@ -18,9 +18,9 @@ def _result(*, score: int, level: PriorityLevel, signals: list[SignalType], reco
     return IntelligenceResult(
         entity_type="CUSTOMER", entity_id="customer-1", entity_name="Test Account",
         calculated_at=date(2026, 8, 2), score=score, level=level, metrics=metrics,
-        signals=[IntelligenceSignal(type=item, severity=PriorityLevel.HIGH, title=item.value, explanation=item.value, calculated_at=date(2026, 8, 2)) for item in signals],
+        signals=[IntelligenceSignal(type=item, severity=PriorityLevel.HIGH, title=item.value.replace("_", " ").title(), explanation=item.value.replace("_", " ").lower(), calculated_at=date(2026, 8, 2)) for item in signals],
         factors=[],
-        recommendation=IntelligenceRecommendation(action=recommendation, title=recommendation.value, explanation=recommendation.value, priority_level=level, operator_confirmation_required=False),
+        recommendation=IntelligenceRecommendation(action=recommendation, title=recommendation.value.replace("_", " ").title(), explanation=recommendation.value.replace("_", " ").lower(), priority_level=level, operator_confirmation_required=False),
     )
 
 
@@ -28,6 +28,9 @@ def _compare(before: IntelligenceResult, after: IntelligenceResult, event_type: 
     return compare_intelligence(
         before=before, after=after, previous_recommendation=before.recommendation.action.value,
         current_recommendation=after.recommendation.action.value, cycle=2, event_id="event-1", event_type=event_type,
+        previous_recommendation_title=before.recommendation.title,
+        current_recommendation_title=after.recommendation.title,
+        current_recommendation_explanation=after.recommendation.explanation,
     )
 
 
@@ -40,7 +43,9 @@ def test_broken_promise_explains_material_risk_and_recommendation_change() -> No
     assert transition.signals_added == [SignalType.BROKEN_PROMISE]
     assert TransitionClassification.RISK_INCREASED in transition.classifications
     assert TransitionClassification.RECOMMENDATION_CHANGED in transition.classifications
-    assert "WAIT_FOR_PROMISE" in transition.decision_impact
+    assert "Wait For Promise" in transition.decision_impact
+    assert "BROKEN_PROMISE" not in transition.why_intelligence_changed
+    assert "Broken Promise" in transition.why_intelligence_changed
 
 
 def test_dispute_opened_is_a_new_blocker() -> None:

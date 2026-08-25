@@ -12,31 +12,15 @@ import { buttonStyles, cx, StatusPill } from "./ui";
 function label(value: string) { return value.replaceAll("_", " "); }
 function money(value: string) { return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(value)); }
 
-const operatorSteps: Record<string, string> = {
-  SEND_PAYMENT_REMINDER: "Review the account and decide whether to advance a payment reminder through the approved recovery process.",
-  MONITOR_ACTIVE_PROMISE: "Monitor the active promise through its due date and verify recorded payment evidence before taking further recovery action.",
-  REQUEST_PAYMENT_DATE: "Review the account and prepare a follow-up requesting a confirmed payment date through the approved recovery process.",
-  REVIEW_PAYMENT_CLAIM: "Verify the customer’s payment claim against recorded payment evidence before changing the recovery response.",
-  HOLD_FOR_DISPUTE: "Keep recovery outreach on hold while the active dispute is reviewed and resolved by an operator.",
-  ESCALATE_TO_HUMAN: "Route the case to an operator for review because its current signals require human judgment.",
-  PREPARE_ESCALATION: "Prepare the case for senior recovery review because its current exposure and risk signals warrant escalation.",
-  NO_ACTION_REQUIRED: "Continue monitoring the case; the current facts do not support creating recovery work.",
-};
-
-function recommendationEffect(action: string) {
-  if (action === "NO_ACTION_REQUIRED") return "ReconMate keeps this as an advisory recommendation. No workflow action is created, and the operator continues monitoring the live case facts.";
-  return "ReconMate creates an internal controlled workflow record for operator review. It does not contact the customer or change invoices, payments, promises, disputes, or case state.";
-}
-
 function actionName(action: { action_type: string; recommended_action: string | null }) {
   return label(action.recommended_action ?? action.action_type);
 }
 
-function executedActionExplanation(action: { action_type: string; recommended_action: string | null; executed_at: string | null }) {
-  const workflowName = actionName(action).toLowerCase();
+function executedActionExplanation(action: { executed_at: string | null; recommendation_context: { workflow_effect?: string } | null }) {
   const executedAt = action.executed_at;
   const timestamp = executedAt ? ` at ${new Date(executedAt).toLocaleString()}` : "";
-  return `The internal ${workflowName} workflow step was marked executed${timestamp}. Its status and execution time were recorded; the simulated execution did not contact the customer or change invoices, payments, promises, disputes, or case state.`;
+  const boundary = action.recommendation_context?.workflow_effect;
+  return `ReconMate recorded this internal workflow step as executed${timestamp}.${boundary ? ` ${boundary}` : ""}`;
 }
 
 export function CaseWorkspace({ item, onClose, liveVersion, affected, transition }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean; transition?: IntelligenceTransition }) {
@@ -145,15 +129,26 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                 <h3 className="text-xl font-semibold tracking-[-.025em] text-white">{label(workspace.recommendation.recommended_action)}</h3>
                 <StatusPill tone="sky">{workspace.recommendation.priority}</StatusPill>
               </div>
+              <div className="mt-4 rounded-xl border border-white/[.07] bg-black/10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Current case risk assessment</p>
+                  <p className="text-xs font-semibold text-white">{workspace.intelligence.level} / {workspace.intelligence.score} of 100</p>
+                </div>
+                {(workspace.intelligence.factors.length > 0 || workspace.intelligence.signals.length > 0) ? (
+                  <ul className="mt-3 space-y-2">
+                    {(workspace.intelligence.factors.length ? workspace.intelligence.factors : workspace.intelligence.signals).slice(0, 2).map((factor) => <li key={`${factor.title}-${factor.explanation}`} className="text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-200">{factor.title}:</span> {factor.explanation}</li>)}
+                  </ul>
+                ) : <p className="mt-3 text-xs leading-5 text-slate-400">No material risk factor is present in the current case facts.</p>}
+              </div>
               <p className="mt-3 text-sm leading-6 text-slate-300">{workspace.recommendation.operator_explanation}</p>
               <div className="mt-4 grid gap-3 border-t border-sky-200/10 pt-4 sm:grid-cols-2">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-200/70">Operator step</p>
-                  <p className="mt-1.5 text-xs leading-5 text-slate-300">{operatorSteps[workspace.recommendation.recommended_action] ?? "Review the recommendation and current case evidence before deciding whether to create controlled recovery work."}</p>
+                  <p className="mt-1.5 text-xs leading-5 text-slate-300">{workspace.recommendation.operator_next_step}</p>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-200/70">If you proceed</p>
-                  <p className="mt-1.5 text-xs leading-5 text-slate-300">{recommendationEffect(workspace.recommendation.recommended_action)}</p>
+                  <p className="mt-1.5 text-xs leading-5 text-slate-300">{workspace.recommendation.workflow_effect}</p>
                 </div>
               </div>
               <div className="mt-4 border-t border-sky-200/10 pt-3">

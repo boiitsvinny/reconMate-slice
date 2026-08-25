@@ -22,6 +22,10 @@ export type IntelligenceTransition = {
   current_risk_level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
   previous_recommendation: string | null;
   current_recommendation: string;
+  current_recommendation_title: string;
+  current_recommendation_explanation: string;
+  operator_next_step: string | null;
+  workflow_effect: string | null;
   signals_added: string[];
   signals_removed: string[];
   classifications: string[];
@@ -45,10 +49,11 @@ export type PriorityCase = { id: string; customerId: string; customerName: strin
 export type Workspace = {
   customer: { name: string; strategic: boolean };
   invoice: { number: string; status: string; outstanding_amount: string; due_date: string } | null;
-  recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; operator_explanation: string; communication_signals: { intent: string; confidence: string | null }[] };
+  recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; operator_explanation: string; operator_next_step: string; workflow_effect: string; communication_signals: { intent: string; confidence: string | null }[] };
+  intelligence: { score: number; level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; signals: { title: string; explanation: string; severity: string }[]; factors: { title: string; explanation: string; points: number; impact: string }[] };
   promises: { status: string; promised_amount: string; promised_date: string }[];
   communications: { id: string; direction: string; content: string; occurred_at: string; analyses: { intent?: string }[] }[];
-  actions: { id: string; action_type: string; status: string; recommended_action: string | null; human_approval_required: boolean; decision_reason: string | null; executed_at: string | null; created_at: string | null }[];
+  actions: { id: string; action_type: string; status: string; recommended_action: string | null; human_approval_required: boolean; recommendation_context: { workflow_effect?: string } | null; decision_reason: string | null; executed_at: string | null; created_at: string | null }[];
   audit_events: { id: string; event_type: string; occurred_at: string }[];
 };
 

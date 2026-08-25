@@ -21,7 +21,7 @@ from app.intelligence.operational_schemas import (
     SignalType,
 )
 from app.main import app
-from app.models.domain import Customer, Invoice, InvoiceStatus, RecoveryCase, RecoveryPriority, RecoveryState
+from app.models.domain import Customer, Invoice, InvoiceStatus, RecoveryActionStatus, RecoveryCase, RecoveryPriority, RecoveryState
 from app.recommendations.schemas import RecommendedAction, RecommendationPriority, RecoveryRecommendation
 
 
@@ -51,6 +51,7 @@ def _intelligence(
     )
     factor = ContributingFactor(
         type=SignalType.BROKEN_PROMISE,
+        title=signal.title,
         impact=PriorityLevel.HIGH,
         points=20,
         explanation=signal.explanation,
@@ -125,6 +126,8 @@ def _case_candidate() -> CaseCandidate:
         relevant_exposure=Decimal("450000"), relevant_days_overdue=100,
         recovery_state=RecoveryState.ESCALATED.value,
         operator_explanation="Prepare this severe overdue case for human escalation approval.",
+        operator_next_step="Create an internal escalation workflow for senior recovery review.",
+        workflow_effect="Proceeding creates an internal controlled recovery workflow record for operator review.",
     )
     return CaseCandidate(case=case, intelligence=CASE_RESULT, recommendation=recommendation, risk_level=PriorityLevel.CRITICAL)
 
@@ -284,6 +287,9 @@ def test_unknown_missing_context_and_empty_results_are_honest(monkeypatch) -> No
 def test_confirmation_creates_only_internal_workflow_action_and_is_single_use(monkeypatch) -> None:
     class CreatedAction:
         id = uuid4()
+        status = RecoveryActionStatus.PENDING_APPROVAL
+        created_at = datetime(2026, 8, 1, tzinfo=UTC)
+        recommendation_context = {"workflow_effect": "Proceeding creates an internal controlled recovery workflow record for operator review."}
 
     calls = []
 
@@ -301,6 +307,9 @@ def test_confirmation_creates_only_internal_workflow_action_and_is_single_use(mo
     assert confirmed.status_code == 200
     assert confirmed.json()["execution_mode"] == "EXECUTED"
     assert confirmed.json()["outcomes"][0]["status"] == "EXECUTED"
+    assert confirmed.json()["outcomes"][0]["recovery_action_id"] == str(CreatedAction.id)
+    assert confirmed.json()["outcomes"][0]["recovery_action_status"] == "PENDING_APPROVAL"
+    assert confirmed.json()["outcomes"][0]["workflow_effect"] == CreatedAction.recommendation_context["workflow_effect"]
     assert len(calls) == 1
     assert calls[0][3] is RecommendedAction.PREPARE_ESCALATION
     assert repeated.status_code == 404
