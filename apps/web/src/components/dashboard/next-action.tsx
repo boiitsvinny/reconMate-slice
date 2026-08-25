@@ -9,14 +9,15 @@ export function NextAction({ item, onSelect }: { item?: PriorityCase; onSelect: 
     <Panel className="flex min-h-[258px] flex-col border-sky-300/15">
       <div className="flex items-center justify-between gap-3 border-b border-white/[.07] px-5 py-4">
         <div>
-          <SectionEyebrow>Recommended next action</SectionEyebrow>
-          <p className="mt-2 text-xs text-slate-500">Highest-priority live recommendation</p>
+          <SectionEyebrow>Live decision guidance</SectionEyebrow>
+          <h2 className="mt-2 text-xl font-semibold tracking-[-.025em] text-white sm:text-2xl">Recommended next action</h2>
+          <p className="mt-1.5 text-xs text-slate-500">Highest-priority live recommendation</p>
         </div>
         {item && <StatusPill tone={priorityTone(item.recommendationPriority)}>{item.recommendationPriority}</StatusPill>}
       </div>
       {item ? (
         <div className="flex flex-1 flex-col p-5">
-          <h2 className="text-xl font-semibold tracking-[-.025em] text-white">{label(item.recommendedAction)}</h2>
+          <h3 className="text-xl font-semibold tracking-[-.025em] text-white">{label(item.recommendedAction)}</h3>
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
             <span className="font-medium text-slate-200">{item.customerName}</span>
             <span>{item.amount}</span>

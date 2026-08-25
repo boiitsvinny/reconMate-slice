@@ -2,25 +2,23 @@
 
 import { useState } from "react";
 import { AppHeader } from "@/components/layout/app-header";
-import { CommandCenter } from "@/components/intelligence/command-center";
+import { CommandActivityPanel, CommandCenter } from "@/components/intelligence/command-center";
 import { PortfolioIntelligenceSnapshot } from "@/components/intelligence/portfolio-intelligence-snapshot";
 import { CaseWorkspace } from "./case-workspace";
-import { formatMoney, PriorityCase, Recommendation } from "./data";
+import { PriorityCase, Recommendation } from "./data";
 import { IntelligenceBoundary } from "./intelligence-boundary";
 import { NextAction } from "./next-action";
-import { PortfolioMetricCard } from "./portfolio-metric-card";
-import { usePortfolio, useRecovery, useRecoveryQueue } from "./queries";
+import { useRecoveryQueue } from "./queries";
 import { Panel, SectionHeader, StatusPill, buttonStyles } from "./ui";
 
 const label = (value: string) => value.replaceAll("_", " ");
 const priorityTone = (priority: Recommendation["priority"]) => priority === "CRITICAL" ? "rose" : priority === "HIGH" ? "amber" : priority === "MEDIUM" ? "sky" : "slate";
+const queueState = (action: string) => action === "ESCALATE_TO_HUMAN" ? "Decision required" : action === "HOLD_FOR_DISPUTE" ? "Review required" : action === "MONITOR_ACTIVE_PROMISE" ? "Waiting / blocked" : action === "NO_ACTION_REQUIRED" ? "Monitoring" : "Follow-up recommended";
 
 export function AnalyticsPage() {
   const [selected, setSelected] = useState<PriorityCase | null>(null);
   const { customers, cases, recommendations, queue } = useRecoveryQueue();
-  const portfolio = usePortfolio();
-  const recovery = useRecovery();
-  const queries = [customers, cases, recommendations, portfolio, recovery];
+  const queries = [customers, cases, recommendations];
   const ready = queries.every((query) => Boolean(query.data));
   const error = queries.find((query) => query.isError)?.error;
   const errorMessage = error instanceof Error ? error.message : error ? "Unable to load recovery intelligence." : null;
@@ -50,34 +48,25 @@ export function AnalyticsPage() {
         {ready && errorMessage && <p className="mt-5 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 text-xs text-amber-100">Live refresh is delayed. Showing cached recommendations.</p>}
         {ready && (
           <>
-            <section className="mt-7"><PortfolioIntelligenceSnapshot /></section>
-            <section className="mt-7 grid gap-6 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,.75fr)]">
+            <section className="mt-7 grid gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,.85fr)]" aria-label="Current operational context">
               <NextAction item={queue[0]} onSelect={setSelected} />
-              <IntelligenceBoundary />
+              <PortfolioIntelligenceSnapshot />
             </section>
-            {portfolio.data && recovery.data && (
-              <section className="mt-7">
-                <p className="mb-3 px-1 text-[10px] font-bold uppercase tracking-[.16em] text-slate-400">Portfolio overview</p>
-                <div className="hide-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0">
-                  <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Total exposure" value={formatMoney(portfolio.data.total_outstanding_amount)} detail="Current outstanding receivables" tone="blue" />
-                  <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Overdue exposure" value={formatMoney(recovery.data.overdue_exposure)} detail="Past-due factual exposure" tone="red" />
-                  <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Attention required" value={String(recovery.data.cases_requiring_attention ?? recovery.data.cases_eligible_for_recovery)} detail="Cases with an active attention condition" tone="amber" />
-                </div>
-              </section>
-            )}
-            <Panel className="mt-7">
-              <SectionHeader eyebrow="Recommendation queue" title="Suggested operator actions" detail={`${actionable.length} live suggestions, ordered by backend priority`} />
-              <div className="divide-y divide-white/[.055]">
+            <section className="mt-7"><CommandActivityPanel /></section>
+            <Panel className="mt-7 overflow-hidden">
+              <SectionHeader eyebrow="Ongoing operational work" title="Recommended queue" detail={`${actionable.length} live recommendations, ordered by backend priority`} prominent />
+              <div className="operational-scrollbar max-h-[34rem] divide-y divide-white/[.055] overflow-y-auto overscroll-contain" role="region" aria-label="Recommended operator queue" tabIndex={0}>
                 {actionable.map((item) => (
                   <article key={item.id} className="grid gap-4 p-4 transition active:scale-[.99] sm:p-5 md:grid-cols-[minmax(180px,1fr)_minmax(220px,1.4fr)_auto] md:items-center md:hover:bg-white/[.025]">
-                    <div><div className="flex items-center gap-2"><p className="font-medium text-white">{item.customerName}</p><StatusPill tone={priorityTone(item.recommendationPriority)}>{item.recommendationPriority}</StatusPill></div><p className="mt-1 text-xs text-slate-500">{item.amount} / {item.daysOverdue} days overdue</p></div>
+                    <div><div className="flex flex-wrap items-center gap-2"><p className="font-medium text-white">{item.customerName}</p><StatusPill tone={priorityTone(item.recommendationPriority)}>{item.recommendationPriority}</StatusPill><StatusPill tone={item.recommendedAction === "ESCALATE_TO_HUMAN" ? "rose" : item.recommendedAction === "HOLD_FOR_DISPUTE" ? "amber" : "sky"}>{queueState(item.recommendedAction)}</StatusPill></div><p className="mt-1 text-xs text-slate-500">{item.amount} / {item.daysOverdue} days overdue</p></div>
                     <div><p className="text-xs font-semibold text-sky-200">{label(item.recommendedAction)}</p><p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-400">{item.recommendationReason}</p></div>
-                    <button type="button" onClick={() => setSelected(item)} className={`${buttonStyles.secondary} w-full md:w-auto`}>Review</button>
+                    <button type="button" onClick={() => setSelected(item)} className={`${buttonStyles.primary} w-full md:w-auto`}>Open case workspace</button>
                   </article>
                 ))}
                 {!actionable.length && <p className="p-10 text-center text-sm text-slate-500">No operator action is currently recommended.</p>}
               </div>
             </Panel>
+            <section className="mt-7"><IntelligenceBoundary /></section>
           </>
         )}
       </div>

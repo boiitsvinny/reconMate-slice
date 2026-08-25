@@ -3,7 +3,7 @@ import { Panel, SectionHeader, StatusPill } from "./ui";
 export function IntelligenceBoundary() {
   return (
     <Panel>
-      <SectionHeader eyebrow="Decision guardrails" title="How recommendations are used" />
+      <SectionHeader eyebrow="Controlled operations" title="Decision guardrails" detail="How recommendations are reviewed and acted on" prominent />
       <div className="p-5 pt-0">
         <p className="text-xs leading-5 text-slate-400">
           Recommendations combine factual recovery conditions with interpreted communication signals. They never change payments, disputes, case state, or execute workflows automatically.

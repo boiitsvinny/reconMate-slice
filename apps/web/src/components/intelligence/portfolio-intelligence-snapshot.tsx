@@ -12,7 +12,7 @@ export function PortfolioIntelligenceSnapshot({ compact = false }: { compact?: b
 
   return (
     <Panel>
-      <SectionHeader eyebrow="Portfolio intelligence" title="Live operational risk" detail={data ? `${data.customer_count} accounts evaluated / average score ${data.average_score}` : "Loading current intelligence evaluation"} />
+      <SectionHeader eyebrow="Portfolio intelligence" title="Live operational risk" detail={data ? `${data.customer_count} accounts evaluated / average score ${data.average_score}` : "Loading current intelligence evaluation"} prominent />
       {!data && !error && <div className="h-28 animate-pulse bg-white/[.025]" role="status"><span className="sr-only">Loading portfolio intelligence</span></div>}
       {!data && error && <p className="p-5 text-xs leading-5 text-rose-200">{error}</p>}
       {data && (

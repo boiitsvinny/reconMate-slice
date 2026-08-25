@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type AppHeaderProps = { connected: boolean; updating?: boolean };
 
@@ -16,6 +16,8 @@ const navigation = [
 export function AppHeader({ connected, updating = false }: AppHeaderProps) {
   const pathname = usePathname();
   const [today, setToday] = useState("");
+  const [navigationVisible, setNavigationVisible] = useState(true);
+  const lastScrollY = useRef(0);
 
   useEffect(() => {
     const update = () => setToday(new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date()));
@@ -24,11 +26,32 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    let frame = 0;
+    const updateNavigation = () => {
+      const current = Math.max(0, window.scrollY);
+      const change = current - lastScrollY.current;
+      if (current < 72) setNavigationVisible(true);
+      else if (Math.abs(change) >= 6) setNavigationVisible(change < 0);
+      lastScrollY.current = current;
+      frame = 0;
+    };
+    const onScroll = () => {
+      if (!frame) frame = window.requestAnimationFrame(updateNavigation);
+    };
+    lastScrollY.current = window.scrollY;
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
   const systemLabel = updating ? "Synchronizing" : connected ? "System optimal" : "Connection degraded";
 
   return (
     <>
-    <header className="sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b border-white/[0.09] bg-[#07111f]/95 px-4 shadow-lg shadow-black/10 backdrop-blur-xl sm:px-6 lg:px-10">
+    <header className={`sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b border-white/[0.09] bg-[#07111f]/95 px-4 shadow-lg shadow-black/10 backdrop-blur-xl transition-transform duration-300 ease-out sm:px-6 lg:px-10 ${navigationVisible ? "translate-y-0" : "-translate-y-full"}`}>
       <Link href="/" aria-label="ReconMate home" className="group flex min-w-0 items-center gap-3">
         <div className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-sky-200/25 bg-gradient-to-br from-sky-300/20 to-blue-500/10 shadow-[0_0_24px_rgba(56,189,248,.12)] transition group-hover:border-sky-200/45">
           <svg aria-hidden="true" viewBox="0 0 32 32" className="h-7 w-7 fill-none stroke-sky-200" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -57,7 +80,7 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
         <span className={`h-2 w-2 rounded-full ${updating ? "animate-pulse bg-sky-300" : connected ? "bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,.8)]" : "bg-rose-400"}`} aria-label={updating ? "Refreshing live data" : connected ? "API connected" : "API unavailable"} />
       </div>
     </header>
-    <nav aria-label="Mobile navigation" className="fixed inset-x-0 bottom-0 z-50 border-t border-white/[.09] bg-[#07111f]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl sm:hidden">
+    <nav aria-label="Mobile navigation" className={`fixed inset-x-0 bottom-0 z-50 border-t border-white/[.09] bg-[#07111f]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl transition-transform duration-300 ease-out sm:hidden ${navigationVisible ? "translate-y-0" : "translate-y-full"}`}>
       <div className="grid h-16 grid-cols-4">
         {navigation.map(([href, label]) => {
           const active = href === "/" ? pathname === href : pathname.startsWith(href);

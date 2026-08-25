@@ -20,11 +20,25 @@ export function ActionProposalCard({
   onSelectedChange?: (selected: boolean) => void;
   onOpenTarget?: () => void;
 }) {
+  const openTarget = () => onOpenTarget?.();
+
   return (
-    <article className={cx(
+    <article
+      className={cx(
       "rounded-2xl border p-4 transition sm:p-5",
+      onOpenTarget && "cursor-pointer hover:border-sky-300/35 hover:bg-sky-300/[.045] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/45 active:scale-[.99]",
       proposal.risk_level === "CRITICAL" ? "border-rose-300/20 bg-rose-300/[.035]" : "border-white/[.08] bg-white/[.025]",
-    )}>
+      )}
+      role={onOpenTarget ? "button" : undefined}
+      tabIndex={onOpenTarget ? 0 : undefined}
+      onClick={openTarget}
+      onKeyDown={onOpenTarget ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openTarget();
+        }
+      } : undefined}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -49,12 +63,12 @@ export function ActionProposalCard({
         </ul>
       )}
       {onOpenTarget && (
-        <button type="button" onClick={onOpenTarget} className={`${buttonStyles.secondary} mt-4 w-full sm:w-auto`}>
-          {proposal.target_type === "CUSTOMER" ? "Open customer workspace" : "Open case workspace"}
+        <button type="button" onClick={(event) => { event.stopPropagation(); openTarget(); }} className={`${buttonStyles.primary} mt-4 w-full sm:w-auto`}>
+          {proposal.target_type === "CUSTOMER" ? "Open customer recovery workspace" : "Open case workspace"}
         </button>
       )}
       {proposal.requires_confirmation && outcome?.status === "AWAITING_CONFIRMATION" && onSelectedChange && (
-        <label className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.045] p-3 text-xs font-semibold text-amber-100">
+        <label onClick={(event) => event.stopPropagation()} className="mt-4 flex cursor-pointer items-center gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.045] p-3 text-xs font-semibold text-amber-100">
           <input
             type="checkbox"
             checked={selected}

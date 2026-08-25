@@ -8,12 +8,15 @@ import { buttonStyles, cx, Panel, SectionEyebrow, SectionHeader, StatusPill } fr
 const examples = [
   "Who should I focus on today?",
   "Show me customers with broken promises",
+  "Show top 5 high-risk customers",
   "Prepare recovery actions for critical cases",
   "Draft payment reminders for overdue customers",
+  "Prepare follow ups for customers with broken promises",
+  "Analyze portfolio health",
 ];
 
 export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: string, targetId: string) => boolean }) {
-  const { activeCommand, result, processing, processingStage, error, history, runCommand, clearError } = useCommandSession();
+  const { activeCommand, result, processing, processingStage, error, runCommand, clearError } = useCommandSession();
   const [command, setCommand] = useState(activeCommand);
   const responseRef = useRef<HTMLDivElement>(null);
 
@@ -41,7 +44,7 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
           <div className="relative">
             <SectionEyebrow>Intelligence command center</SectionEyebrow>
             <h2 className="mt-3 text-xl font-semibold tracking-[-.03em] text-white sm:text-2xl">What do you want ReconMate to work on?</h2>
-            <p className="mt-2 max-w-3xl text-xs leading-5 text-slate-400">Issue a bounded operational command. ReconMate will interpret it, inspect current portfolio facts, and return an explainable plan—not a chatbot response.</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Each command runs a structured analysis of the current portfolio, then returns an explainable operational plan for review.</p>
             <form onSubmit={submit} className="mt-5 flex flex-col gap-3 sm:flex-row">
               <label htmlFor="reconmate-command" className="sr-only">Operational command</label>
               <input
@@ -66,7 +69,7 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
             <div className="mt-3 grid grid-cols-5 gap-1.5" aria-hidden="true">
               {PROCESSING_STAGES.map((stage, index) => <span key={stage} className={cx("h-1 rounded-full transition", index <= processingStage ? "bg-sky-300" : "bg-white/[.07]")} />)}
             </div>
-            <p className="mt-2 text-[10px] text-slate-500">Lifecycle feedback only; the backend returns one complete, factual command result.</p>
+            <p className="mt-2 text-[10px] text-slate-500">ReconMate is evaluating current operational records and building a bounded result.</p>
           </div>
         )}
       </Panel>
@@ -79,21 +82,29 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
         </div>
       )}
 
-      {!processing && result && <CommandResultView result={result} onOpenTarget={onOpenTarget} />}
+      {!processing && result && <CommandResultView command={activeCommand} result={result} onOpenTarget={onOpenTarget} />}
       </div>
-
-      <Panel className="mt-6">
-        <SectionHeader eyebrow="Today's command activity" title="Current browser session" detail="Operational activity only; this is not persisted as chat history." />
-        <div className="divide-y divide-white/[.055]">
-          {history.map((item) => (
-            <article key={item.planId} className="flex flex-col justify-between gap-3 p-4 sm:flex-row sm:items-center sm:p-5">
-              <div className="min-w-0"><p className="truncate text-sm font-medium text-slate-200">{item.command}</p><p className="mt-1 text-xs text-slate-500">{item.analyzedCount} analyzed / {item.proposalCount} proposals</p></div>
-              <StatusPill tone={item.status === "FAILED" ? "rose" : item.status === "AWAITING_CONFIRMATION" ? "amber" : item.status === "EXECUTED" ? "emerald" : "sky"}>{item.status.replaceAll("_", " ")}</StatusPill>
-            </article>
-          ))}
-          {!history.length && <p className="p-8 text-center text-xs text-slate-500">No commands have been run in this browser session.</p>}
-        </div>
-      </Panel>
     </section>
+  );
+}
+
+export function CommandActivityPanel() {
+  const { history } = useCommandSession();
+  return (
+    <Panel className="overflow-hidden">
+      <SectionHeader eyebrow="Today's command activity" title="Current browser session" detail={`${history.length} command${history.length === 1 ? "" : "s"} retained in this browser session`} prominent />
+      <div className="operational-scrollbar max-h-72 divide-y divide-white/[.055] overflow-y-auto overscroll-contain" role="region" aria-label="Current command activity" tabIndex={0}>
+        {history.map((item) => (
+          <article key={item.planId} className="flex items-center justify-between gap-4 p-4">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-slate-200">{item.command}</p>
+              <p className="mt-1 text-[11px] text-slate-500">{item.analyzedCount} detailed records / {item.proposalCount} proposals / {new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+            </div>
+            <StatusPill tone={item.status === "FAILED" ? "rose" : item.status === "AWAITING_CONFIRMATION" ? "amber" : item.status === "EXECUTED" ? "emerald" : "sky"}>{item.status === "AWAITING_CONFIRMATION" ? "Decision required" : item.status.replaceAll("_", " ")}</StatusPill>
+          </article>
+        ))}
+        {!history.length && <p className="p-8 text-center text-xs text-slate-500">No commands have been run in this browser session.</p>}
+      </div>
+    </Panel>
   );
 }
