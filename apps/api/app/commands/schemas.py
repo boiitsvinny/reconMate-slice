@@ -112,6 +112,8 @@ class StructuredQuery(BaseModel):
     actionable: bool | None = None
     blocked: bool | None = None
     monitoring: bool | None = None
+    decision_changed: bool | None = None
+    decision_held: bool | None = None
     min_days_overdue: int | None = Field(default=None, ge=0)
     max_days_overdue: int | None = Field(default=None, ge=0)
     min_score: int | None = Field(default=None, ge=0, le=100)

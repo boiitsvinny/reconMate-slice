@@ -339,6 +339,45 @@ def test_interpreter_composes_independent_query_dimensions(command: str, expecte
         assert getattr(result.query, field) == value
 
 
+@pytest.mark.parametrize(("command", "expected"), [
+    ("Show customers >90 days overdue", {"overdue": True, "min_days_overdue": 91}),
+    ("Show customers with partial payments and no recent payments", {"partial_payment": True, "recent_payment": False}),
+    ("Show blocked critical cases", {"entity": QueryEntity.RECOVERY_CASES, "blocked": True, "risk_levels": [PriorityLevel.CRITICAL]}),
+    ("Show changed decisions", {"decision_changed": True, "time_scope": QueryTimeScope.LATEST_CYCLE}),
+    ("Show decisions held after fact change", {"decision_held": True, "time_scope": QueryTimeScope.LATEST_CYCLE}),
+])
+def test_interpreter_preserves_hardening_query_semantics(command: str, expected: dict) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is not CommandIntentType.UNKNOWN
+    for field, value in expected.items():
+        assert getattr(result.query, field) == value
+
+
+@pytest.mark.parametrize("command", [
+    "Show customers with disputes and without disputes",
+    "Show actionable blocked critical cases",
+    "Show changed decisions and decisions held after fact change",
+    "Show customers over many days overdue",
+    "Show customers over 90 days overdue and under 30 days overdue",
+])
+def test_contradictory_or_malformed_queries_fail_without_weakening(command: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is CommandIntentType.UNKNOWN
+    assert result.guidance
+
+
+@pytest.mark.parametrize("command", [
+    "Show the highest exposure investments",
+    "Rank the riskiest stocks",
+    "Show critical cryptocurrency positions",
+    "List recent sports results",
+])
+def test_unrelated_domain_terms_override_accidental_financial_word_matches(command: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is CommandIntentType.UNKNOWN
+    assert result.guidance and "unsupported domain" in result.guidance
+
+
 @pytest.mark.parametrize("command", [
     "Which customers will churn next quarter?",
     "Predict who will pay next month",
@@ -392,6 +431,35 @@ def test_composed_predicates_all_apply_to_the_same_grounded_result() -> None:
     assert not CommandTools._matches(
         query, disputed, partial=False, recent=True, blocked=True, monitoring=False, actionable=False,
     )
+
+
+def test_decision_transition_filters_are_independent_facts() -> None:
+    changed = StructuredQuery(decision_changed=True, time_scope=QueryTimeScope.LATEST_CYCLE)
+    held = StructuredQuery(decision_held=True, time_scope=QueryTimeScope.LATEST_CYCLE)
+    common = {"partial": False, "recent": False, "blocked": False, "monitoring": False, "actionable": True}
+    assert CommandTools._matches(changed, CUSTOMER_RESULT, decision_changed=True, decision_held=False, **common)
+    assert not CommandTools._matches(changed, CUSTOMER_RESULT, decision_changed=False, decision_held=True, **common)
+    assert CommandTools._matches(held, CUSTOMER_RESULT, decision_changed=False, decision_held=True, **common)
+
+
+def test_latest_cycle_decision_sets_separate_changed_from_held() -> None:
+    changed_id, held_id, new_id = map(str, (uuid4(), uuid4(), uuid4()))
+    rows = [
+        SimpleNamespace(payload={"cycle": 12, "entity_type": "CUSTOMER", "entity_id": changed_id, "previous_recommendation": "MONITOR", "classifications": ["RECOMMENDATION_CHANGED"]}),
+        SimpleNamespace(payload={"cycle": 12, "entity_type": "CUSTOMER", "entity_id": held_id, "previous_recommendation": "FOLLOW_UP", "classifications": ["NO_MATERIAL_CHANGE"]}),
+        SimpleNamespace(payload={"cycle": 12, "entity_type": "CUSTOMER", "entity_id": new_id, "previous_recommendation": None, "classifications": ["NO_MATERIAL_CHANGE"]}),
+        SimpleNamespace(payload={"cycle": 11, "entity_type": "CUSTOMER", "entity_id": str(uuid4()), "previous_recommendation": "MONITOR", "classifications": ["RECOMMENDATION_CHANGED"]}),
+    ]
+
+    class DecisionSession:
+        def scalar(self, _statement): return 12
+        def scalars(self, _statement): return rows
+
+    tools = object.__new__(CommandTools)
+    tools.db = DecisionSession()
+    changed_ids, held_ids = tools._latest_cycle_decision_ids("CUSTOMER")
+    assert changed_ids == {changed_id}
+    assert held_ids == {held_id}
 
 
 def test_prioritization_command_runs_through_api(monkeypatch) -> None:

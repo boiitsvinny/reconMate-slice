@@ -31,6 +31,7 @@ class ArchetypeSpec:
     amount_range: tuple[int, int]
     overdue_range: tuple[int, int]
     balance_range: tuple[int, int] = (100, 100)
+    current_open_invoices: int = 0
     dispute_count: int = 0
     active_promises: int = 0
     broken_promises: int = 0
@@ -50,21 +51,21 @@ class CustomerBlueprint:
 
 
 ARCHETYPES: dict[str, ArchetypeSpec] = {
-    "HEALTHY_LOW_RISK": ArchetypeSpec((2, 6), (0, 1), (18000, 115000), (-18, 7), (70, 100), fulfilled_promises=1),
-    "TEMPORARILY_LATE": ArchetypeSpec((3, 7), (1, 2), (32000, 165000), (4, 28), (75, 100), active_promises=1, recent_partial_payment=True, case_state=RecoveryState.PROMISE_MONITORING),
-    "CHRONIC_LATE": ArchetypeSpec((5, 9), (2, 4), (28000, 135000), (42, 115), broken_promises=1, case_state=RecoveryState.IN_PROGRESS, case_priority=RecoveryPriority.HIGH, stale_case=True),
-    "ACTIVE_PROMISE": ArchetypeSpec((2, 6), (1, 3), (45000, 225000), (12, 62), (80, 100), active_promises=1, case_state=RecoveryState.PROMISE_MONITORING),
-    "DISPUTE_BLOCKED": ArchetypeSpec((3, 7), (2, 3), (65000, 220000), (31, 105), dispute_count=1, case_state=RecoveryState.AWAITING_CUSTOMER),
-    "BROKEN_PROMISE": ArchetypeSpec((3, 7), (1, 3), (40000, 170000), (35, 100), broken_promises=2, case_state=RecoveryState.ESCALATED, case_priority=RecoveryPriority.HIGH, stale_case=True),
-    "PARTIAL_PAYMENT": ArchetypeSpec((3, 8), (2, 4), (38000, 245000), (18, 88), (25, 68), recent_partial_payment=True, case_state=RecoveryState.IN_PROGRESS),
-    "STRATEGIC_HIGH_VALUE": ArchetypeSpec((4, 8), (2, 4), (210000, 780000), (22, 76), (65, 100), active_promises=1, case_state=RecoveryState.PROMISE_MONITORING, case_priority=RecoveryPriority.HIGH),
-    "MIXED_STATE": ArchetypeSpec((6, 10), (3, 6), (65000, 330000), (27, 105), (35, 100), dispute_count=1, active_promises=1, broken_promises=1, recent_partial_payment=True, case_state=RecoveryState.AWAITING_CUSTOMER, case_priority=RecoveryPriority.HIGH),
-    "RECOVERING": ArchetypeSpec((4, 8), (2, 4), (75000, 310000), (38, 102), (18, 52), fulfilled_promises=1, recent_partial_payment=True, case_state=RecoveryState.IN_PROGRESS, case_priority=RecoveryPriority.HIGH),
-    "DETERIORATING": ArchetypeSpec((3, 7), (2, 4), (55000, 260000), (21, 79), (80, 100), broken_promises=1, case_state=RecoveryState.IN_PROGRESS, case_priority=RecoveryPriority.HIGH),
-    "LOW_VALUE_BEHAVIOR_RISK": ArchetypeSpec((3, 6), (1, 3), (12000, 52000), (29, 83), broken_promises=2, case_state=RecoveryState.ESCALATED, case_priority=RecoveryPriority.HIGH, stale_case=True),
-    "STALE_NO_RESPONSE": ArchetypeSpec((4, 8), (2, 5), (42000, 180000), (76, 146), case_state=RecoveryState.ESCALATED, case_priority=RecoveryPriority.CRITICAL, stale_case=True),
-    "DISPUTE_RESOLVED": ArchetypeSpec((4, 7), (2, 3), (65000, 240000), (39, 97), case_state=RecoveryState.IN_PROGRESS, case_priority=RecoveryPriority.HIGH),
-    "HIGH_VALUE_LOW_URGENCY": ArchetypeSpec((3, 5), (1, 2), (420000, 920000), (5, 13), (85, 100), active_promises=1, case_state=RecoveryState.PROMISE_MONITORING, case_priority=RecoveryPriority.HIGH),
+    "HEALTHY_LOW_RISK": ArchetypeSpec((2, 6), (0, 1), (18000, 115000), (1, 7), (70, 100), current_open_invoices=1, fulfilled_promises=1),
+    "TEMPORARILY_LATE": ArchetypeSpec((3, 7), (1, 2), (32000, 165000), (4, 28), (75, 100), current_open_invoices=1, active_promises=1, recent_partial_payment=True, case_state=RecoveryState.PROMISE_MONITORING),
+    "CHRONIC_LATE": ArchetypeSpec((5, 9), (2, 4), (28000, 135000), (42, 115), current_open_invoices=1, broken_promises=1, case_state=RecoveryState.IN_PROGRESS, case_priority=RecoveryPriority.HIGH, stale_case=True),
+    "ACTIVE_PROMISE": ArchetypeSpec((2, 6), (1, 3), (45000, 225000), (12, 62), (80, 100), current_open_invoices=1, active_promises=1, case_state=RecoveryState.PROMISE_MONITORING),
+    "DISPUTE_BLOCKED": ArchetypeSpec((3, 7), (2, 3), (65000, 220000), (31, 105), current_open_invoices=1, dispute_count=1, case_state=RecoveryState.AWAITING_CUSTOMER),
+    "BROKEN_PROMISE": ArchetypeSpec((3, 7), (1, 3), (40000, 170000), (35, 100), current_open_invoices=1, broken_promises=2, case_state=RecoveryState.ESCALATED, case_priority=RecoveryPriority.HIGH, stale_case=True),
+    "PARTIAL_PAYMENT": ArchetypeSpec((3, 8), (2, 4), (38000, 245000), (18, 88), (25, 68), current_open_invoices=1, recent_partial_payment=True, case_state=RecoveryState.IN_PROGRESS),
+    "STRATEGIC_HIGH_VALUE": ArchetypeSpec((4, 8), (2, 4), (210000, 780000), (22, 76), (65, 100), current_open_invoices=1, active_promises=1, case_state=RecoveryState.PROMISE_MONITORING, case_priority=RecoveryPriority.HIGH),
+    "MIXED_STATE": ArchetypeSpec((6, 10), (3, 6), (65000, 330000), (27, 105), (35, 100), current_open_invoices=2, dispute_count=1, active_promises=1, broken_promises=1, recent_partial_payment=True, case_state=RecoveryState.AWAITING_CUSTOMER, case_priority=RecoveryPriority.HIGH),
+    "RECOVERING": ArchetypeSpec((4, 8), (2, 4), (75000, 310000), (38, 102), (18, 52), current_open_invoices=1, fulfilled_promises=1, recent_partial_payment=True, case_state=RecoveryState.IN_PROGRESS, case_priority=RecoveryPriority.HIGH),
+    "DETERIORATING": ArchetypeSpec((3, 7), (2, 4), (55000, 260000), (21, 79), (80, 100), current_open_invoices=1, broken_promises=1, case_state=RecoveryState.IN_PROGRESS, case_priority=RecoveryPriority.HIGH),
+    "LOW_VALUE_BEHAVIOR_RISK": ArchetypeSpec((3, 6), (1, 3), (12000, 52000), (29, 83), current_open_invoices=1, broken_promises=2, case_state=RecoveryState.ESCALATED, case_priority=RecoveryPriority.HIGH, stale_case=True),
+    "STALE_NO_RESPONSE": ArchetypeSpec((4, 8), (2, 5), (42000, 180000), (76, 146), current_open_invoices=1, case_state=RecoveryState.ESCALATED, case_priority=RecoveryPriority.CRITICAL, stale_case=True),
+    "DISPUTE_RESOLVED": ArchetypeSpec((4, 7), (2, 3), (65000, 240000), (39, 97), current_open_invoices=1, case_state=RecoveryState.IN_PROGRESS, case_priority=RecoveryPriority.HIGH),
+    "HIGH_VALUE_LOW_URGENCY": ArchetypeSpec((3, 5), (1, 2), (420000, 920000), (5, 13), (85, 100), current_open_invoices=1, active_promises=1, case_state=RecoveryState.PROMISE_MONITORING, case_priority=RecoveryPriority.HIGH),
     "CLOSED_RESOLVED": ArchetypeSpec((2, 5), (0, 0), (30000, 185000), (0, 0), fulfilled_promises=1, case_state=RecoveryState.CLOSED, case_priority=RecoveryPriority.LOW),
 }
 
@@ -239,13 +240,18 @@ def _seed_invoices(session: Session, customer: Customer, blueprint: CustomerBlue
     count = _invoice_count(customer_index)
     open_count = rng.randint(*spec.open_range)
     paid_count = count - open_count
+    current_open_count = min(spec.current_open_invoices, open_count if blueprint.archetype == "HEALTHY_LOW_RISK" else max(0, open_count - 1))
     invoices: list[Invoice] = []
     for invoice_index in range(count):
         amount = _invoice_amount(rng, *spec.amount_range)
         is_open = invoice_index >= paid_count
         if is_open:
-            age = rng.randint(*spec.overdue_range)
-            due = SIMULATION_DATE - timedelta(days=age)
+            open_index = invoice_index - paid_count
+            due = (
+                SIMULATION_DATE + timedelta(days=rng.randint(7, 45))
+                if open_index < current_open_count
+                else SIMULATION_DATE - timedelta(days=rng.randint(*spec.overdue_range))
+            )
             # Keep one untouched receivable for factual broken-promise history;
             # later partial payments on other invoices must not fulfil it retroactively.
             fraction = Decimal("1") if spec.broken_promises and invoice_index == paid_count else Decimal(rng.randint(*spec.balance_range)) / Decimal("100")
@@ -298,8 +304,9 @@ def _seed_context(session: Session, customer: Customer, blueprint: CustomerBluep
     elif blueprint.archetype in {"ACTIVE_PROMISE", "TEMPORARILY_LATE", "STRATEGIC_HIGH_VALUE", "HIGH_VALUE_LOW_URGENCY"}:
         _communication(session, customer, "timing", SIMULATION_DATE - timedelta(days=rng.randint(2, 9)), CommunicationDirection.INBOUND, "The payment is included in an approved near-term release run; please monitor the committed date.")
 
-    promise_invoice = _invoice_for_promise(invoices, -1) if unpaid else None
-    broken_invoice = unpaid[0] if unpaid else None
+    overdue_unpaid = [invoice for invoice in unpaid if invoice.due_date < SIMULATION_DATE]
+    promise_invoice = _invoice_for_promise(overdue_unpaid, -1) if overdue_unpaid else None
+    broken_invoice = overdue_unpaid[0] if overdue_unpaid else None
     account_number = int(customer.account_reference.removeprefix("RM-"))
     broken_count = spec.broken_promises
     if blueprint.archetype == "BROKEN_PROMISE" and account_number % 2:

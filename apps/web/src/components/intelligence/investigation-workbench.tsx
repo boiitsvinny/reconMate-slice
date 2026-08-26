@@ -105,7 +105,7 @@ function comparisonExplanation(left: IntelligenceResult, right: IntelligenceResu
   }
   const leftAction = actionabilityFor(left);
   const rightAction = actionabilityFor(right);
-  const actionability = `${left.entity_name} is ${leftAction.label.toLowerCase()}${leftAction.blocker ? ` because ${leftAction.blocker.toLowerCase()}` : " with no current blocker"}; ${right.entity_name} is ${rightAction.label.toLowerCase()}${rightAction.blocker ? ` because ${rightAction.blocker.toLowerCase()}` : " with no current blocker"}.`;
+  const actionability = `${left.entity_name} recommends ${left.recommendation.title} and is ${leftAction.label.toLowerCase()}${leftAction.blocker ? ` because ${leftAction.blocker.toLowerCase()}` : " with no current blocker"}; ${right.entity_name} recommends ${right.recommendation.title} and is ${rightAction.label.toLowerCase()}${rightAction.blocker ? ` because ${rightAction.blocker.toLowerCase()}` : " with no current blocker"}. Recommendation differences come from these blocker and actionability facts, independently of ranking order.`;
   return { ranking, actionability };
 }
 

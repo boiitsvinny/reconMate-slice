@@ -44,10 +44,10 @@ class FailedProvider(DemoProvider):
     def create_payment_request(self, **_kwargs): raise PaymentProviderError("Provider unavailable.")
 
 
-def case(*, disputed=False, outstanding="500"):
+def case(*, disputed=False, outstanding="500", state: RecoveryState | None = None):
     customer = Customer(id=uuid4(), name="Provider Test", account_reference=f"PAY-{uuid4()}")
     invoice = Invoice(id=uuid4(), customer=customer, invoice_number="PAY-1", issue_date=OPERATING_DATE - timedelta(days=45), due_date=OPERATING_DATE - timedelta(days=15), original_amount=Decimal("500"), outstanding_amount=Decimal(outstanding), status=InvoiceStatus.DISPUTED if disputed else InvoiceStatus.OVERDUE)
-    return RecoveryCase(id=uuid4(), customer=customer, invoice=invoice, current_state=RecoveryState.AWAITING_CUSTOMER if disputed else RecoveryState.IN_PROGRESS, priority=RecoveryPriority.NORMAL)
+    return RecoveryCase(id=uuid4(), customer=customer, invoice=invoice, current_state=state or (RecoveryState.AWAITING_CUSTOMER if disputed else RecoveryState.IN_PROGRESS), priority=RecoveryPriority.NORMAL)
 
 
 def create_payload(amount="500"):
@@ -70,15 +70,31 @@ def test_external_action_requires_explicit_operator_confirmation() -> None:
 
 def test_blocked_recommendation_cannot_create_payment_request() -> None:
     with pytest.raises(HTTPException, match="does not support"):
-        create_external_payment_request(FakeSession(), case(disputed=True), OPERATING_DATE, create_payload(), DemoProvider())
+        create_external_payment_request(FakeSession(), case(disputed=True, state=RecoveryState.IN_PROGRESS), OPERATING_DATE, create_payload(), DemoProvider())
+
+
+@pytest.mark.parametrize("state", [RecoveryState.AWAITING_CUSTOMER, RecoveryState.PROMISE_MONITORING, RecoveryState.RESOLVED, RecoveryState.CLOSED])
+def test_blocked_monitoring_resolved_or_closed_case_cannot_create_payment_request(state: RecoveryState) -> None:
+    with pytest.raises(HTTPException, match="cannot create"):
+        create_external_payment_request(FakeSession(), case(state=state), OPERATING_DATE, create_payload(), DemoProvider())
+
+
+def test_paid_invoice_cannot_create_payment_request() -> None:
+    item = case(outstanding="0")
+    item.invoice.status = InvoiceStatus.PAID
+    with pytest.raises(HTTPException, match="positive invoice outstanding"):
+        create_external_payment_request(FakeSession(), item, OPERATING_DATE, create_payload(), DemoProvider())
 
 
 def test_provider_reference_and_demo_provenance_persist() -> None:
     db = FakeSession()
-    request = create_external_payment_request(db, case(), OPERATING_DATE, create_payload(), DemoProvider())
+    item = case()
+    before = (item.invoice.outstanding_amount, item.invoice.status, len(item.invoice.payments))
+    request = create_external_payment_request(db, item, OPERATING_DATE, create_payload(), DemoProvider())
     assert request.provider_reference.startswith("demo_payreq_")
     assert request.provider == "PROVIDER_DEMO" and request.provider_mode == "DEMO"
     assert request.status == "ACTIVE" and db.commits == 1
+    assert (item.invoice.outstanding_amount, item.invoice.status, len(item.invoice.payments)) == before
 
 
 def test_provider_failure_is_persisted_safely() -> None:
@@ -100,10 +116,36 @@ def test_unknown_provider_reference_is_rejected() -> None:
         apply_demo_payment_event(event(), FakeSession())
 
 
+def test_cancelled_request_fails_without_financial_change() -> None:
+    item = case()
+    request = external_request(item)
+    request.status = "CANCELLED"
+    with pytest.raises(HTTPException, match="CANCELLED"):
+        ingest_demo_payment_event(FakeSession(), request, item, OPERATING_DATE, event())
+    assert item.invoice.outstanding_amount == Decimal("500") and not item.invoice.payments
+
+
+def test_event_reference_and_domain_identity_must_match() -> None:
+    item = case()
+    request = external_request(item)
+    mismatched_reference = event().model_copy(update={"provider_reference": "another-request"})
+    with pytest.raises(HTTPException, match="does not match"):
+        ingest_demo_payment_event(FakeSession(), request, item, OPERATING_DATE, mismatched_reference)
+    request.customer_id = uuid4()
+    with pytest.raises(HTTPException, match="recovery case and customer"):
+        ingest_demo_payment_event(FakeSession(), request, item, OPERATING_DATE, event())
+
+
 def test_payment_cannot_exceed_outstanding(monkeypatch) -> None:
     item = case(outstanding="500")
     with pytest.raises(HTTPException, match="cannot exceed"):
         ingest_demo_payment_event(FakeSession(), external_request(item, "600"), item, OPERATING_DATE, event("600"),)
+
+
+def test_payment_cannot_exceed_remaining_request_amount() -> None:
+    item = case(outstanding="500")
+    with pytest.raises(HTTPException, match="cannot exceed"):
+        ingest_demo_payment_event(FakeSession(), external_request(item, "300"), item, OPERATING_DATE, event("400"))
 
 
 def test_successful_event_uses_payment_model_updates_financial_state_and_evidence(monkeypatch) -> None:
@@ -120,6 +162,12 @@ def test_successful_event_uses_payment_model_updates_financial_state_and_evidenc
     assert result.evidence["outstanding_after"] == "0"
     assert result.evidence["score_before"] > result.evidence["score_after"]
     assert result.evidence["recommendation_after"] == "NO_ACTION_REQUIRED"
+    assert result.evidence["customer_id"] == str(request.customer_id)
+    assert result.evidence["case_id"] == str(item.id)
+    assert result.evidence["invoice_id"] == str(item.invoice.id)
+    assert result.evidence["payment_request_id"] == str(request.id)
+    assert result.evidence["payment_id"] == str(payment.id)
+    assert result.evidence["provider_event_id"] == "evt-1"
     assert provider_event.provider == "PROVIDER_DEMO" and result.duplicate is False
 
 

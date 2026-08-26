@@ -157,6 +157,7 @@ class CommandTools:
         """Execute independently composable predicates and retain factual diagnostics."""
         results = list(self.get_portfolio_intelligence().customers)
         latest_ids = self._latest_cycle_customer_ids() if query.time_scope is QueryTimeScope.LATEST_CYCLE else None
+        changed_ids, held_ids = self._latest_cycle_decision_ids("CUSTOMER") if query.decision_changed is not None or query.decision_held is not None else (set(), set())
         contexts = []
         for result in results:
             customer = self.get_customer(result.entity_id)
@@ -170,7 +171,7 @@ class CommandTools:
             blocked = metrics.active_dispute_count > 0 or metrics.active_promise_count > 0
             monitoring = result.recommendation.action in {RecommendationAction.MONITOR, RecommendationAction.WAIT_FOR_PROMISE}
             actionable = metrics.overdue_exposure > 0 and not blocked and result.recommendation.action is not RecommendationAction.MONITOR
-            contexts.append((result, partial, recent, blocked, monitoring, actionable, latest_ids is None or result.entity_id in latest_ids))
+            contexts.append((result, partial, recent, blocked, monitoring, actionable, latest_ids is None or result.entity_id in latest_ids, result.entity_id in changed_ids, result.entity_id in held_ids))
         remaining, exclusions = self._apply_predicates(query, contexts)
         matched = [item[0] for item in remaining]
         matched.sort(key=lambda item: self._ranking_key(item, query))
@@ -190,6 +191,7 @@ class CommandTools:
     def execute_case_query(self, query: StructuredQuery) -> QueryExecution:
         """Apply the same structured semantics to real recovery-case recommendations."""
         latest_ids = self._latest_cycle_customer_ids() if query.time_scope is QueryTimeScope.LATEST_CYCLE else None
+        changed_ids, held_ids = self._latest_cycle_decision_ids("RECOVERY_CASE") if query.decision_changed is not None or query.decision_held is not None else (set(), set())
         candidates = self.get_recovery_candidates(top_n=None)
         contexts = []
         candidate_by_entity: dict[str, CaseCandidate] = {}
@@ -209,7 +211,7 @@ class CommandTools:
                 RecommendedAction.HOLD_FOR_DISPUTE,
             }
             effective_result = result.model_copy(update={"level": candidate.risk_level})
-            contexts.append((effective_result, partial, recent, blocked, monitoring, actionable, latest_ids is None or str(candidate.case.customer_id) in latest_ids))
+            contexts.append((effective_result, partial, recent, blocked, monitoring, actionable, latest_ids is None or str(candidate.case.customer_id) in latest_ids, effective_result.entity_id in changed_ids, effective_result.entity_id in held_ids))
             candidate_by_entity[effective_result.entity_id] = candidate
         remaining, exclusions = self._apply_predicates(query, contexts)
         matched = [candidate_by_entity[item[0].entity_id] for item in remaining]
@@ -301,6 +303,27 @@ class CommandTools:
             return 0
         return int(self.db.scalar(select(func.count(SimulationEvent.id)).where(SimulationEvent.cycle == latest_cycle)) or 0)
 
+    def _latest_cycle_decision_ids(self, entity_type: str) -> tuple[set[str], set[str]]:
+        """Separate changed decisions from decisions retained after a latest-cycle fact event."""
+        latest_cycle = self.db.scalar(select(func.max(SimulationEvent.cycle)))
+        if latest_cycle is None:
+            return set(), set()
+        changed: set[str] = set()
+        held: set[str] = set()
+        audits = self.db.scalars(select(AuditEvent).where(AuditEvent.event_type == "SIMULATION_INTELLIGENCE_TRANSITION"))
+        for audit in audits:
+            payload = audit.payload or {}
+            if payload.get("cycle") != latest_cycle or payload.get("entity_type") != entity_type:
+                continue
+            entity_id = str(payload.get("entity_id", ""))
+            if not entity_id:
+                continue
+            if "RECOMMENDATION_CHANGED" in payload.get("classifications", []):
+                changed.add(entity_id)
+            elif payload.get("previous_recommendation") is not None:
+                held.add(entity_id)
+        return changed, held
+
     @classmethod
     def _apply_predicates(cls, query: StructuredQuery, contexts: list[tuple]) -> tuple[list[tuple], list[tuple[str, int]]]:
         predicates: list[tuple[str, Any]] = []
@@ -318,6 +341,8 @@ class CommandTools:
             (query.actionable, "actionable recovery state", lambda item: item[5]),
             (query.blocked, "blocked recovery state", lambda item: item[3]),
             (query.monitoring, "monitoring state", lambda item: item[4]),
+            (query.decision_changed, "latest-cycle decision changed", lambda item: item[7]),
+            (query.decision_held, "latest-cycle decision held", lambda item: item[8]),
         )
         for expected, label, predicate in boolean_fields:
             if expected is not None:
@@ -340,7 +365,7 @@ class CommandTools:
         return remaining, exclusions
 
     @staticmethod
-    def _matches(query: StructuredQuery, result: IntelligenceResult, *, partial: bool, recent: bool, blocked: bool, monitoring: bool, actionable: bool) -> bool:
+    def _matches(query: StructuredQuery, result: IntelligenceResult, *, partial: bool, recent: bool, blocked: bool, monitoring: bool, actionable: bool, decision_changed: bool = False, decision_held: bool = False) -> bool:
         metrics = result.metrics
         checks = (
             (query.overdue, metrics.overdue_exposure > 0),
@@ -352,6 +377,8 @@ class CommandTools:
             (query.actionable, actionable),
             (query.blocked, blocked),
             (query.monitoring, monitoring),
+            (query.decision_changed, decision_changed),
+            (query.decision_held, decision_held),
         )
         return (
             (not query.risk_levels or result.level in query.risk_levels)

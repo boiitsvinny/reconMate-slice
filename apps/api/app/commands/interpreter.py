@@ -30,6 +30,7 @@ _NUMBER_WORDS = {
 }
 _QUERY_OPERATIONS = ("show", "list", "give", "which", "who", "find", "rank", "top", "count", "how many", "summarize", "summary", "explain")
 _PREDICTIVE = ("churn", "next quarter", "forecast", "predict", "likelihood", "probability", "will pay", "future revenue")
+_UNSUPPORTED_DOMAINS = ("weather", "sport", "sports", "football", "cricket", "investment", "investments", "stock", "stocks", "crypto", "cryptocurrency")
 _DOMAIN_CONCEPTS = (
     "customer", "customers", "account", "invoice", "invoices", "receivable", "receivables",
     "collection", "collections", "overdue", "exposure", "payment", "payments", "promise", "promises",
@@ -51,10 +52,15 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         query = self._structured_query(text)
         filters = self._legacy_filters(query, text)
 
+        if self._has(text, _UNSUPPORTED_DOMAINS):
+            return self._unknown(filters, query, "ReconMate only queries persisted receivables and recovery facts; this request belongs to an unsupported domain.")
         if self._has(text, _PREDICTIVE):
             return self._unknown(filters, query, "ReconMate cannot answer predictive requests from the current receivables model. Supported dimensions include current risk, exposure, invoices, promises, disputes, payments, and recovery state.")
         if self._has(text, ("improved", "improvement", "worsened", "deteriorated")):
             return self._unknown(filters, query, "ReconMate can show factual latest-cycle changes, but directional improvement or deterioration is not a supported query filter.")
+        conflict = self._query_conflict(text, query)
+        if conflict:
+            return self._unknown(filters, query, conflict)
 
         explanation = self._has(text, ("why", "explain", "reason", "what makes"))
         if explanation and request.context_case_id is not None:
@@ -122,6 +128,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         active_dispute = False if dispute_excluded else True if re.search(r"\b(?:active )?disput(?:e|ed|es)\b", text) else None
         active_promise = False if promise_excluded else True if re.search(r"\bactive (?:payment )?promises?\b|\bvalid promises?\b", text) else None
         recent_payment = False if no_recent_payment else True if re.search(r"\brecent (?:partial )?payments?\b|\blatest payment activity\b", text) else None
+        decision_changed = True if re.search(r"\b(?:decision|recommendation)s? changed\b|\bchanged (?:decision|recommendation)s?\b", text) else None
+        decision_held = True if re.search(r"\b(?:decision|recommendation)s? (?:held|unchanged|remained)\b|\bheld after (?:a )?fact change\b", text) else None
 
         if self._has(text, ("exposure", "balance", "amount")):
             sort_by = QuerySort.OVERDUE_EXPOSURE if "overdue" in text else QuerySort.TOTAL_EXPOSURE
@@ -151,6 +159,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             actionable=True if "actionable" in text or self._has(text, ("needs action", "need action")) else None,
             blocked=True if "blocked" in text and not re.search(r"\b(?:without|exclude|excluding) blocked\b", text) else False if re.search(r"\b(?:without|exclude|excluding) blocked\b", text) else None,
             monitoring=True if "monitoring" in text or "monitor" in text else None,
+            decision_changed=decision_changed,
+            decision_held=decision_held,
             min_days_overdue=int(more_days.group(1)) + 1 if more_days else None,
             max_days_overdue=max(0, int(fewer_days.group(1)) - 1) if fewer_days else None,
             min_score=min(100, int(more_score.group(1)) + 1) if more_score else None,
@@ -158,7 +168,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             sort_by=sort_by,
             descending=descending,
             limit=limit,
-            time_scope=QueryTimeScope.LATEST_CYCLE if self._has(text, ("after latest cycle", "latest cycle", "last cycle")) else QueryTimeScope.CURRENT,
+            time_scope=QueryTimeScope.LATEST_CYCLE if decision_changed or decision_held or self._has(text, ("after latest cycle", "latest cycle", "last cycle", "after fact change")) else QueryTimeScope.CURRENT,
             count_only=self._has(text, ("count", "how many")),
             explanation_requested=self._has(text, ("why", "explain", "reason")),
         )
@@ -198,6 +208,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         return bool(query.risk_levels or any(value is not None for value in (
             query.overdue, query.broken_promise, query.active_promise, query.active_dispute,
             query.partial_payment, query.recent_payment, query.actionable, query.blocked, query.monitoring,
+            query.decision_changed, query.decision_held,
         )) or query.min_days_overdue is not None or query.max_days_overdue is not None
         or query.min_score is not None or query.max_score is not None
         or query.limit or query.count_only or query.time_scope is QueryTimeScope.LATEST_CYCLE)
@@ -211,6 +222,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             or any(value is not None for value in (
                 query.overdue, query.broken_promise, query.active_promise, query.active_dispute,
                 query.partial_payment, query.recent_payment, query.actionable, query.blocked, query.monitoring,
+                query.decision_changed, query.decision_held,
                 query.min_days_overdue, query.max_days_overdue, query.min_score, query.max_score,
             ))
         )
@@ -221,6 +233,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
 
     @staticmethod
     def _normalize(command: str) -> str:
+        command = command.replace(">", " more than ").replace("<", " less than ")
         text = command.lower().replace("â€™", "'").replace("’", "'")
         text = re.sub(r"[^a-z0-9']+", " ", text)
         replacements = (
@@ -234,6 +247,32 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         for pattern, replacement in replacements:
             text = re.sub(pattern, replacement, text)
         return " ".join(text.split())
+
+    @staticmethod
+    def _query_conflict(text: str, query: StructuredQuery) -> str | None:
+        if re.search(r"\b(?:more than|over|less than|under)\s+[a-z]+\s+days? overdue\b", text):
+            return "The overdue-day filter is malformed. Use a numeric value such as 'over 90 days overdue'."
+        dispute_excluded = bool(re.search(r"\b(?:without|excluding|exclude|no) (?:active )?disputes?\b|\bundisputed\b", text))
+        dispute_included = bool(re.search(r"\bwith (?:active )?disputes?\b|\bhaving (?:active )?disputes?\b", text))
+        promise_excluded = bool(re.search(r"\b(?:without|excluding|exclude|no) active (?:payment )?promises?\b", text))
+        promise_included = bool(re.search(r"\bwith active (?:payment )?promises?\b|\bhaving active (?:payment )?promises?\b", text))
+        recent_excluded = bool(re.search(r"\b(?:no|without) recent payments?\b", text))
+        recent_included = bool(re.search(r"\bwith recent (?:partial )?payments?\b|\bhaving recent (?:partial )?payments?\b", text))
+        if dispute_excluded and dispute_included:
+            return "The query both includes and excludes active disputes. Choose one condition; no filter was weakened."
+        if promise_excluded and promise_included:
+            return "The query both includes and excludes active promises. Choose one condition; no filter was weakened."
+        if recent_excluded and recent_included:
+            return "The query both includes and excludes recent payments. Choose one condition; no filter was weakened."
+        if query.actionable is True and query.blocked is True:
+            return "A recovery record cannot be both actionable and blocked under the current decision rules. Choose one state."
+        if query.decision_changed is True and query.decision_held is True:
+            return "A latest-cycle decision cannot be both changed and held. Choose one transition condition."
+        if query.min_days_overdue is not None and query.max_days_overdue is not None and query.min_days_overdue > query.max_days_overdue:
+            return "The minimum overdue-day filter exceeds the maximum. Correct the numeric range; no filter was weakened."
+        if query.min_score is not None and query.max_score is not None and query.min_score > query.max_score:
+            return "The minimum score filter exceeds the maximum. Correct the numeric range; no filter was weakened."
+        return None
 
     @staticmethod
     def _has(text: str, concepts: tuple[str, ...]) -> bool:

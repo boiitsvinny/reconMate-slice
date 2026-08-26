@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.intelligence.operational_service import evaluate_case_intelligence
 from app.models.domain import (
-    AuditEvent, ExternalPaymentRequest, InvoiceStatus, Payment, ProviderEvent, RecoveryCase,
+    AuditEvent, ExternalPaymentRequest, InvoiceStatus, Payment, ProviderEvent, RecoveryCase, RecoveryState,
 )
 from app.payments.provider import PaymentProviderError, PaymentRequestProvider
 from app.payments.schemas import CreatePaymentRequestInput, DemoPaymentEventInput, ProviderEventResponse
@@ -32,6 +32,10 @@ def create_external_payment_request(db: Session, case: RecoveryCase, operating_d
         _fail("Explicit operator confirmation is required.", status.HTTP_422_UNPROCESSABLE_CONTENT)
     if case.invoice is None:
         _fail("A payment request requires a related invoice.")
+    if case.current_state in {RecoveryState.AWAITING_CUSTOMER, RecoveryState.PROMISE_MONITORING, RecoveryState.RESOLVED, RecoveryState.CLOSED}:
+        _fail(f"A recovery case in {case.current_state.value} state cannot create a payment request.")
+    if case.invoice.outstanding_amount <= 0 or case.invoice.status is InvoiceStatus.PAID:
+        _fail("A payment request requires a positive invoice outstanding amount.")
     recommendation = recommend_case(case, operating_date)
     evaluation = evaluate_case(case, operating_date)
     if recommendation.recommended_action not in SUPPORTED_PAYMENT_REQUEST_ACTIONS:
@@ -93,12 +97,18 @@ def ingest_demo_payment_event(db: Session, request: ExternalPaymentRequest, case
         )
     if request.status not in {"ACTIVE", "PARTIALLY_PAID"}:
         _fail(f"A payment event cannot be applied to a request in {request.status} state.")
+    if payload.provider_reference != request.provider_reference:
+        _fail("The provider event does not match the payment-request reference.", status.HTTP_422_UNPROCESSABLE_CONTENT)
+    if request.recovery_case_id != case.id or request.customer_id != case.customer.id:
+        _fail("The payment request no longer maps to its recovery case and customer.")
     invoice = case.invoice
     if invoice is None or invoice.id != request.invoice_id:
         _fail("The payment request no longer maps to its invoice.")
     if payload.payment_date > operating_date:
         _fail("Payment date cannot be after the current operating date.", status.HTTP_422_UNPROCESSABLE_CONTENT)
     remaining_request_amount = request.requested_amount - request.paid_amount
+    if invoice.outstanding_amount <= 0 or remaining_request_amount <= 0:
+        _fail("The payment request has no remaining payable amount.")
     if payload.amount > invoice.outstanding_amount or payload.amount > remaining_request_amount:
         _fail("Payment amount cannot exceed the valid outstanding or requested amount.", status.HTTP_422_UNPROCESSABLE_CONTENT)
     if payload.event_type == "payment_request.paid" and payload.amount != remaining_request_amount:
@@ -120,6 +130,9 @@ def ingest_demo_payment_event(db: Session, request: ExternalPaymentRequest, case
     after_recommendation = recommend_case(case, operating_date)
     evidence = {
         "chronology": "Provider payment event received after payment request creation; processing order does not prove causation.",
+        "customer_id": str(request.customer_id), "case_id": str(request.recovery_case_id),
+        "invoice_id": str(request.invoice_id), "payment_request_id": str(request.id),
+        "payment_id": str(payment.id), "provider_event_id": payload.event_id,
         "outstanding_before": str(before_outstanding), "outstanding_after": str(invoice.outstanding_amount),
         "score_before": before_intelligence.score, "score_after": after_intelligence.score,
         "recommendation_before": before_recommendation.recommended_action.value,
