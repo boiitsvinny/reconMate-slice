@@ -321,7 +321,7 @@ def persist_receivables(
             db.add(AuditEvent(
                 entity_type="Invoice", entity_id=invoice.id, event_type="RECEIVABLE_IMPORTED",
                 actor_type="operator", actor_id="csv-import",
-                payload={"source": "CSV_IMPORT", "invoice_number": invoice.invoice_number},
+                payload={"source": "CSV Import", "invoice_number": invoice.invoice_number},
                 occurred_at=occurred_at,
             ))
         synchronize_recovery_states(db, operating_date)

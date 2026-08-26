@@ -7,8 +7,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.api.routes import commands as commands_route
+from app.api.routes.workflow import _current_workspace_intelligence
 from app.commands.interpreter import RuleBasedCommandInterpreter
-from app.commands.schemas import CommandIntentType, CommandRequest, ExecutionMode, InspectionScope, ProposalStatus, QueryEntity, QuerySort, QueryTimeScope, StructuredQuery
+from app.commands.planner import CommandPlanner
+from app.commands.schemas import CommandIntentType, CommandRequest, ConfirmCommandRequest, ExecutionMode, InspectionScope, ProposalStatus, QueryEntity, QuerySort, QueryTimeScope, StructuredQuery
+from app.commands.service import CommandService, EphemeralPlanRegistry
 from app.commands.tools import CaseCandidate, CommandTools, QueryExecution
 from app.db.session import get_db
 from app.intelligence.operational_schemas import (
@@ -22,8 +25,9 @@ from app.intelligence.operational_schemas import (
     RecommendationAction,
     SignalType,
 )
+from app.intelligence.operational_service import evaluate_customer_intelligence
 from app.main import app
-from app.models.domain import Customer, Invoice, InvoiceStatus, RecoveryActionStatus, RecoveryCase, RecoveryPriority, RecoveryState
+from app.models.domain import AuditEvent, Customer, Invoice, InvoiceStatus, RecoveryAction, RecoveryActionStatus, RecoveryCase, RecoveryPriority, RecoveryState
 from app.recommendations.schemas import RecommendedAction, RecommendationPriority, RecoveryRecommendation
 
 
@@ -398,6 +402,26 @@ def test_interpreter_rejects_unsupported_or_ungrounded_requests(command: str) ->
     assert result.guidance
 
 
+@pytest.mark.parametrize(("command", "constraint"), [
+    ("Show critical customers in California", "geography"),
+    ("Show overdue customers with credit score over 700", "credit score"),
+])
+def test_interpreter_rejects_unsupported_business_constraints_without_dropping_them(command: str, constraint: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is CommandIntentType.UNKNOWN
+    assert result.guidance and constraint in result.guidance
+    assert "silently dropped" in result.guidance
+
+
+def test_interpreter_reports_every_unsupported_constraint_in_a_compound_request() -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(
+        command="Show customers in California with credit scores under 500",
+    ))
+    assert result.intent is CommandIntentType.UNKNOWN
+    assert result.guidance and "geography (california)" in result.guidance
+    assert "credit score" in result.guidance
+
+
 @pytest.mark.parametrize("command", [
     "Who should I focus on today?",
     "Which accounts need attention?",
@@ -632,6 +656,96 @@ def test_recovery_preparation_requires_confirmation_and_does_not_auto_execute(mo
     assert body["plan"]["execution_mode"] == "CONFIRMATION_REQUIRED"
     assert body["outcomes"][0]["status"] == "AWAITING_CONFIRMATION"
     assert "does not contact the customer" in body["plan"]["proposed_actions"][0]["limitations"][0]
+    proposal = body["plan"]["proposed_actions"][0]
+    current = body["analyzed_entities"][0]
+    assert proposal["risk_level"] == current["level"]
+    assert proposal["current_intelligence_score"] == current["score"]
+    assert proposal["current_intelligence_action"] == current["recommendation"]["action"]
+    assert proposal["workflow_recommendation_action"] == RecommendedAction.PREPARE_ESCALATION.value
+    assert body["query_evidence"]["records_returned"] == len(body["plan"]["proposed_actions"])
+
+
+def test_recovery_preparation_never_relabels_medium_intelligence_as_critical(monkeypatch) -> None:
+    class MediumTools(FakeCommandTools):
+        def __init__(self, db=None):
+            super().__init__(db)
+            medium = self.candidate.intelligence.model_copy(update={"score": 38, "level": PriorityLevel.MEDIUM})
+            self.candidate = CaseCandidate(
+                case=self.candidate.case,
+                intelligence=medium,
+                recommendation=self.candidate.recommendation,
+                risk_level=PriorityLevel.MEDIUM,
+            )
+
+    client = _client(monkeypatch, MediumTools)
+    response = client.post("/commands", json={"command": "Prepare recovery actions for critical cases"})
+    app.dependency_overrides.clear()
+    body = response.json()
+    assert body["query_evidence"]["records_inspected"] == 1
+    assert body["query_evidence"]["records_matched"] == 0
+    assert body["plan"]["proposed_actions"] == []
+    assert body["analyzed_entities"] == []
+
+
+def test_case_scoped_current_intelligence_uses_the_portfolio_customer_score() -> None:
+    candidate = _case_candidate()
+    tools = object.__new__(CommandTools)
+    tools.simulation_date = TODAY
+    expected = evaluate_customer_intelligence(candidate.case.customer, TODAY)
+    scoped = tools._case_scoped_customer_intelligence(candidate.case)
+    assert scoped.entity_type == "RECOVERY_CASE"
+    assert scoped.entity_id == str(candidate.case.id)
+    assert scoped.score == expected.score
+    assert scoped.level is expected.level
+    assert scoped.recommendation == expected.recommendation
+    workspace = _current_workspace_intelligence(candidate.case, TODAY)
+    assert workspace.model_dump() == expected.model_dump()
+    assert candidate.case.priority is RecoveryPriority.CRITICAL
+
+
+def test_actionable_case_query_excludes_blocked_case_before_proposal_planning() -> None:
+    candidate = _case_candidate()
+    candidate = CaseCandidate(
+        case=candidate.case,
+        intelligence=candidate.intelligence,
+        recommendation=candidate.recommendation.model_copy(update={"blockers": ["ACTIVE_DISPUTE"]}),
+        risk_level=candidate.risk_level,
+    )
+    tools = object.__new__(CommandTools)
+    tools.simulation_date = TODAY
+    tools.get_recovery_candidates = lambda top_n=None: [candidate]
+    tools._latest_cycle_event_count = lambda: 0
+    execution = tools.execute_case_query(StructuredQuery(entity=QueryEntity.RECOVERY_CASES, actionable=True))
+    assert execution.inspected == 1
+    assert execution.matched == 0
+    assert execution.records == []
+    assert execution.exclusions == [("Did not satisfy actionable recovery state = true", 1)]
+
+
+def test_equivalent_active_workflow_suppresses_duplicate_proposal(monkeypatch) -> None:
+    class ExistingActionTools(FakeCommandTools):
+        def __init__(self, db=None):
+            super().__init__(db)
+            self.candidate.case.actions.append(RecoveryAction(
+                id=uuid4(), status=RecoveryActionStatus.PENDING_APPROVAL,
+                recommendation_action=RecommendedAction.PREPARE_ESCALATION.value,
+            ))
+
+    client = _client(monkeypatch, ExistingActionTools)
+    body = client.post("/commands", json={"command": "Prepare recovery actions for critical cases"}).json()
+    app.dependency_overrides.clear()
+    assert body["plan"]["proposed_actions"] == []
+    assert any("Existing action already pending approval" in warning for warning in body["warnings"])
+    assert body["query_evidence"]["records_returned"] == 0
+
+
+def test_changed_recommendation_allows_a_new_action_proposal() -> None:
+    candidate = _case_candidate()
+    candidate.case.actions.append(RecoveryAction(
+        id=uuid4(), status=RecoveryActionStatus.PENDING_APPROVAL,
+        recommendation_action=RecommendedAction.SEND_PAYMENT_REMINDER.value,
+    ))
+    assert CommandPlanner._active_equivalent_action(candidate) is None
 
 
 def test_reminder_command_prepares_draft_without_sending(monkeypatch) -> None:
@@ -691,7 +805,7 @@ def test_unknown_missing_context_and_empty_results_are_honest(monkeypatch) -> No
     assert empty.json()["warnings"]
 
 
-def test_confirmation_creates_only_internal_workflow_action_and_is_single_use(monkeypatch) -> None:
+def test_confirmation_creates_only_one_internal_workflow_action_and_retries_are_idempotent(monkeypatch) -> None:
     class CreatedAction:
         id = uuid4()
         status = RecoveryActionStatus.PENDING_APPROVAL
@@ -700,8 +814,8 @@ def test_confirmation_creates_only_internal_workflow_action_and_is_single_use(mo
 
     calls = []
 
-    def fake_create_action(db, case, simulation_date, expected_action, operator_note=None):
-        calls.append((db, case.id, simulation_date, expected_action, operator_note))
+    def fake_create_action(db, case, simulation_date, expected_action, operator_note=None, idempotency_id=None):
+        calls.append((db, case.id, simulation_date, expected_action, operator_note, idempotency_id))
         return CreatedAction()
 
     monkeypatch.setattr("app.commands.executor.create_action", fake_create_action)
@@ -719,4 +833,42 @@ def test_confirmation_creates_only_internal_workflow_action_and_is_single_use(mo
     assert confirmed.json()["outcomes"][0]["workflow_effect"] == CreatedAction.recommendation_context["workflow_effect"]
     assert len(calls) == 1
     assert calls[0][3] is RecommendedAction.PREPARE_ESCALATION
-    assert repeated.status_code == 404
+    assert calls[0][5] is not None
+    assert repeated.status_code == 200
+    assert repeated.json() == confirmed.json()
+    assert len(calls) == 1
+
+
+def test_confirmation_result_survives_a_new_service_registry(monkeypatch) -> None:
+    class DurableAuditDb:
+        def __init__(self): self.records = {}
+        def get(self, model, identity): return self.records.get((model, identity))
+        def add(self, value): self.records[(type(value), value.id)] = value
+        def commit(self): pass
+        def scalar(self, _query): return None
+
+    class CreatedAction:
+        id = uuid4()
+        status = RecoveryActionStatus.PENDING_APPROVAL
+        created_at = datetime(2026, 8, 1, tzinfo=UTC)
+        recommendation_context = {"workflow_effect": "Internal workflow only."}
+
+    calls = []
+    def fake_create_action(*args, **kwargs):
+        calls.append(kwargs["idempotency_id"])
+        return CreatedAction()
+
+    monkeypatch.setattr("app.commands.executor.create_action", fake_create_action)
+    db = DurableAuditDb()
+    tools = FakeCommandTools(db)
+    first_service = CommandService(registry=EphemeralPlanRegistry())
+    planned = first_service.run(CommandRequest(command="Prepare recovery actions for critical cases"), tools)
+    restarted_service = CommandService(registry=EphemeralPlanRegistry())
+    confirmed = restarted_service.confirm(planned.plan_id, ConfirmCommandRequest(operator_id="operator-1"), tools)
+
+    second_restart = CommandService(registry=EphemeralPlanRegistry())
+    replayed = second_restart.confirm(planned.plan_id, ConfirmCommandRequest(operator_id="operator-1", note="different replay payload"), tools)
+
+    assert replayed == confirmed
+    assert len(calls) == 1
+    assert db.get(AuditEvent, second_restart._audit_id(planned.plan_id, "confirmation-result")) is not None

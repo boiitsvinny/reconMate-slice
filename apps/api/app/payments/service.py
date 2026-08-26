@@ -66,8 +66,12 @@ def create_external_payment_request(db: Session, case: RecoveryCase, operating_d
         db.add(AuditEvent(
             entity_type="ExternalPaymentRequest", entity_id=record.id, event_type="EXTERNAL_PAYMENT_REQUEST_CREATED",
             actor_type="operator", actor_id=payload.operator_id,
-            payload={"provider": provider.name, "provider_mode": provider.mode, "provider_reference": created.reference,
-                     "case_id": str(case.id), "invoice_id": str(case.invoice.id), "requested_amount": str(payload.requested_amount)},
+            payload={"source": "Provider Demo Mode" if provider.mode == "DEMO" else "Razorpay Test Mode",
+                     "provider": provider.name, "provider_mode": provider.mode, "provider_reference": created.reference,
+                     "customer_id": str(case.customer.id), "case_id": str(case.id), "invoice_id": str(case.invoice.id),
+                     "requested_amount": str(payload.requested_amount),
+                     "financial_mutation": "NONE", "outstanding_before": str(case.invoice.outstanding_amount),
+                     "outstanding_after": str(case.invoice.outstanding_amount)},
             occurred_at=datetime.now(UTC),
         ))
         db.commit(); db.refresh(record)
@@ -91,9 +95,10 @@ def ingest_demo_payment_event(db: Session, request: ExternalPaymentRequest, case
         (ProviderEvent.provider == request.provider) & (ProviderEvent.provider_payment_reference == payload.payment_reference),
     )))
     if existing is not None:
+        duplicate_evidence = _record_duplicate_event(db, request, existing, payload, case)
         return ProviderEventResponse(
             duplicate=True, provider_event_id=existing.provider_event_id, payment_id=str(existing.payment_id),
-            payment_request_id=str(existing.payment_request_id), evidence=existing.evidence,
+            payment_request_id=str(existing.payment_request_id), evidence=duplicate_evidence,
         )
     if request.status not in {"ACTIVE", "PARTIALLY_PAID"}:
         _fail(f"A payment event cannot be applied to a request in {request.status} state.")
@@ -129,10 +134,13 @@ def ingest_demo_payment_event(db: Session, request: ExternalPaymentRequest, case
     after_intelligence = evaluate_case_intelligence(case, operating_date)
     after_recommendation = recommend_case(case, operating_date)
     evidence = {
+        "source": "Provider Demo Mode", "provider": request.provider, "provider_mode": request.provider_mode,
         "chronology": "Provider payment event received after payment request creation; processing order does not prove causation.",
         "customer_id": str(request.customer_id), "case_id": str(request.recovery_case_id),
         "invoice_id": str(request.invoice_id), "payment_request_id": str(request.id),
         "payment_id": str(payment.id), "provider_event_id": payload.event_id,
+        "provider_reference": request.provider_reference, "provider_payment_reference": payload.payment_reference,
+        "event_type": payload.event_type, "financial_mutation": "PAYMENT_PERSISTED",
         "outstanding_before": str(before_outstanding), "outstanding_after": str(invoice.outstanding_amount),
         "score_before": before_intelligence.score, "score_after": after_intelligence.score,
         "recommendation_before": before_recommendation.recommended_action.value,
@@ -160,5 +168,40 @@ def ingest_demo_payment_event(db: Session, request: ExternalPaymentRequest, case
         )))
         if existing is None:
             raise
-        return ProviderEventResponse(duplicate=True, provider_event_id=existing.provider_event_id, payment_id=str(existing.payment_id), payment_request_id=str(existing.payment_request_id), evidence=existing.evidence)
+        duplicate_evidence = _record_duplicate_event(db, request, existing, payload, case)
+        return ProviderEventResponse(duplicate=True, provider_event_id=existing.provider_event_id, payment_id=str(existing.payment_id), payment_request_id=str(existing.payment_request_id), evidence=duplicate_evidence)
     return ProviderEventResponse(duplicate=False, provider_event_id=event.provider_event_id, payment_id=str(payment.id), payment_request_id=str(request.id), evidence=evidence)
+
+
+def _record_duplicate_event(
+    db: Session,
+    request: ExternalPaymentRequest,
+    existing: ProviderEvent,
+    payload: DemoPaymentEventInput,
+    case: RecoveryCase,
+) -> dict:
+    """Persist proof that a provider replay was observed without applying it twice."""
+    outstanding = str(case.invoice.outstanding_amount) if case.invoice is not None else None
+    replay = {
+        "ignored": True,
+        "original_event": existing.provider_event_id,
+        "replayed_event": payload.event_id,
+        "financial_mutation": "NONE",
+        "outstanding_before": outstanding,
+        "outstanding_after": outstanding,
+    }
+    db.add(AuditEvent(
+        entity_type="ExternalPaymentRequest", entity_id=request.id,
+        event_type="PROVIDER_DUPLICATE_EVENT_IGNORED", actor_type="provider_demo", actor_id=payload.event_id,
+        payload={
+            "source": "Provider Demo Mode", "provider": request.provider, "provider_mode": request.provider_mode,
+            "customer_id": str(request.customer_id), "case_id": str(request.recovery_case_id),
+            "invoice_id": str(request.invoice_id), "payment_request_id": str(request.id),
+            "provider_reference": request.provider_reference,
+            "provider_event_id": payload.event_id, "provider_payment_reference": payload.payment_reference,
+            **replay,
+        },
+        occurred_at=datetime.now(UTC),
+    ))
+    db.commit()
+    return {**existing.evidence, "duplicate_replay": replay}

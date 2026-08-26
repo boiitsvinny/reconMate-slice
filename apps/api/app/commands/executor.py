@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import HTTPException
+from uuid import NAMESPACE_URL, uuid5
 
 from app.commands.schemas import (
     ActionOutcome,
@@ -76,6 +77,7 @@ class CommandExecutor:
                     tools.simulation_date,
                     expected_action,
                     operator_note=request.note,
+                    idempotency_id=uuid5(NAMESPACE_URL, f"reconmate/command/{plan.plan_id}/{proposal.proposal_id}"),
                 )
                 outcomes.append(ActionOutcome(
                     proposal_id=proposal.proposal_id,

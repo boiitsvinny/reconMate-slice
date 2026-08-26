@@ -93,7 +93,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
       total_outstanding: invoice.outstanding_amount, promise_state: "NONE", dispute_state: "NONE", intended_channel: "Operator-selected channel",
       purpose: "Request payment status and expected resolution", tone: "Professional payment-status follow-up", prepared_at: new Date().toISOString(),
       body: `Hello ${workspace.customer.name},\n\nOur records show invoice ${invoice.number} with an outstanding balance of INR ${amount}. The invoice was due on ${invoice.due_date} and is ${workspace.recommendation.relevant_days_overdue} days overdue. Please confirm the current payment status and expected resolution date.\n\nThank you.`,
-      reason: "The current recommendation is a payment reminder and no active promise or dispute blocks operator-reviewed outreach.",
+      reason: "The current case workflow recommendation is a payment reminder and no active promise or dispute blocks operator-reviewed outreach.",
     });
   };
   const decision = (verb: "approve" | "reject" | "hold" | "cancel" | "execute") => {
@@ -148,11 +148,12 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               <Card label="Recovery state" value={label(workspace.workflow.recovery_state)} />
             </section>
             <section className="rounded-2xl border border-sky-300/25 bg-sky-400/[.07] p-5 shadow-[0_16px_35px_rgba(14,165,233,.07)]">
-              <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">Recommended operator next step</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">Current customer intelligence</p>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-                <h3 className="text-xl font-semibold tracking-[-.025em] text-white">{label(workspace.recommendation.recommended_action)}</h3>
-                <StatusPill tone="sky">{workspace.recommendation.priority}</StatusPill>
+                <h3 className="text-xl font-semibold tracking-[-.025em] text-white">{workspace.intelligence.recommendation.title}</h3>
+                <StatusPill tone="sky">{workspace.intelligence.level}</StatusPill>
               </div>
+              <p className="mt-2 text-sm leading-6 text-slate-300">{workspace.intelligence.recommendation.explanation}</p>
               <div className="mt-4 rounded-xl border border-white/[.07] bg-black/10 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Current intelligence score</p>
@@ -163,11 +164,11 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                   <ul className="mt-3 space-y-2">
                     {(workspace.intelligence.factors.length ? workspace.intelligence.factors : workspace.intelligence.signals).slice(0, 2).map((factor) => <li key={`${factor.title}-${factor.explanation}`} className="text-xs leading-5 text-slate-400"><span className="font-semibold text-slate-200">{factor.title}:</span> {factor.explanation}</li>)}
                   </ul>
-                ) : <p className="mt-3 text-xs leading-5 text-slate-400">No material risk factor is present in the current case facts.</p>}
+                ) : <p className="mt-3 text-xs leading-5 text-slate-400">No material risk factor is present in the current customer portfolio facts.</p>}
               </div>
-              <p className="mt-3 text-sm leading-6 text-slate-300">{workspace.recommendation.operator_explanation}</p>
-              <div className="mt-3 grid gap-3 rounded-xl border border-white/[.07] bg-black/10 p-3 sm:grid-cols-2"><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Stored workflow priority</p><p className="mt-1 text-xs font-semibold text-slate-200">{workspace.workflow.stored_priority} / {label(workspace.workflow.recovery_state)}</p></div><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Current recommended action</p><p className="mt-1 text-xs font-semibold text-slate-200">{label(workspace.recommendation.recommended_action)}</p></div></div>
+              <div className="mt-3 grid gap-3 rounded-xl border border-white/[.07] bg-black/10 p-3 sm:grid-cols-3"><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Current recommended action</p><p className="mt-1 text-xs font-semibold text-slate-200">{label(workspace.intelligence.recommendation.action)}</p></div><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Stored workflow state</p><p className="mt-1 text-xs font-semibold text-slate-200">{workspace.workflow.stored_priority} / {label(workspace.workflow.recovery_state)}</p></div><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Case workflow recommendation</p><p className="mt-1 text-xs font-semibold text-slate-200">{label(workspace.recommendation.recommended_action)}</p></div></div>
               {workspace.workflow.stored_priority !== workspace.intelligence.level && <p className="mt-2 text-[11px] leading-5 text-slate-400"><span className="font-semibold text-slate-200">Why these differ:</span> current intelligence is recalculated from today’s persisted facts; stored workflow priority records the case’s existing operational state until an operator updates it.</p>}
+              <p className="mt-3 text-sm leading-6 text-slate-300"><span className="font-semibold text-slate-200">Case workflow guidance:</span> {workspace.recommendation.operator_explanation}</p>
               <div className="mt-4 grid gap-3 border-t border-sky-200/10 pt-4 sm:grid-cols-2">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-200/70">Operator step</p>
@@ -193,7 +194,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               <p className="mt-1 text-[11px] leading-4 text-slate-500">Creating an action records internal recovery work. It does not contact the customer or modify financial facts automatically.</p>
               {!latest ? (
                 workspace.recommendation.recommended_action === "NO_ACTION_REQUIRED" ? (
-                  <div className="mt-4 rounded-xl border border-white/[.08] bg-black/10 p-4"><p className="text-sm font-semibold text-slate-200">Analysis only — no workflow action available</p><p className="mt-1 text-xs leading-5 text-slate-500">The current factual recommendation requires monitoring only, so ReconMate will not create unnecessary recovery work.</p></div>
+                  <div className="mt-4 rounded-xl border border-white/[.08] bg-black/10 p-4"><p className="text-sm font-semibold text-slate-200">Analysis only — no workflow action available</p><p className="mt-1 text-xs leading-5 text-slate-500">The case workflow recommendation requires monitoring only, so ReconMate will not create unnecessary recovery work.</p></div>
                 ) : reviewingRecommendation ? (
                   <div className="mt-4 rounded-xl border border-sky-300/20 bg-sky-300/[.04] p-4">
                     <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.13em] text-sky-300">Prepared action review</p><StatusPill tone={workspace.recommendation.human_approval_required ? "amber" : "sky"}>{workspace.recommendation.human_approval_required ? "Approval required" : "Operator controlled"}</StatusPill></div>
@@ -242,12 +243,43 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               )}
             </section>
             <PaymentRequestPanel workspace={workspace} />
-            {latestPayment && <OutcomeEvidenceChain payment={latestPayment} precedingAction={precedingAction} currentExposure={workspace.invoice?.outstanding_amount ?? "0"} recommendation={workspace.recommendation.recommended_action} />}
+            {latestPayment && <OutcomeEvidenceChain payment={latestPayment} precedingAction={precedingAction} currentExposure={workspace.invoice?.outstanding_amount ?? "0"} recommendation={workspace.intelligence.recommendation.action} />}
+            <CaseEvidenceTimeline entries={workspace.evidence_timeline ?? []} />
           </div>
         )}
       </section>
     </div>
   );
+}
+
+function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evidence_timeline"]> }) {
+  const tones = {
+    FACT_EVENT: "border-sky-300/35 text-sky-200",
+    INTELLIGENCE_REASSESSMENT: "border-violet-300/35 text-violet-200",
+    OPERATOR_ACTION: "border-amber-300/35 text-amber-100",
+    PROVIDER_EVENT: "border-emerald-300/35 text-emerald-200",
+  };
+  const value = (record: Record<string, string | number | null> | null) => record
+    ? Object.entries(record).map(([key, item]) => `${label(key)} ${item ?? "-"}`).join(" · ")
+    : null;
+  return <section className="rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
+    <p className="text-[10px] font-bold uppercase tracking-[.15em] text-sky-300">Persisted evidence</p>
+    <h3 className="mt-1.5 text-lg font-semibold text-white">Case event and decision timeline</h3>
+    <p className="mt-1 text-xs leading-5 text-slate-400">Fact → decision → controlled action → provider outcome → reassessment. Historical decisions are labeled and never replace the current recommendation above.</p>
+    {entries.length ? <ol className="mt-5 space-y-3">{entries.map((entry) => {
+      const before = value(entry.before); const after = value(entry.after);
+      const refs = [entry.request_reference && `Request ${entry.request_reference}`, entry.event_reference && `Event ${entry.event_reference}`, entry.payment_reference && `Payment ${entry.payment_reference}`].filter(Boolean);
+      const ids = [entry.customer_id && `Customer ${entry.customer_id}`, entry.case_id && `Case ${entry.case_id}`, entry.invoice_id && `Invoice ${entry.invoice_id}`].filter(Boolean);
+      return <li key={entry.id} className={`border-l-2 pl-4 ${tones[entry.category]}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.12em]">{label(entry.category)}</p><time className="text-[10px] text-slate-500">{new Date(entry.occurred_at).toLocaleString()}</time></div>
+        <div className="mt-1 flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-white">{entry.title}</p>{entry.historical && <StatusPill tone="slate">Historical / stored</StatusPill>}</div>
+        {entry.detail && <p className="mt-1 text-xs leading-5 text-slate-400">{label(entry.detail)}</p>}
+        {before && after && <p className="mt-1 text-xs text-slate-300"><span className="text-slate-500">Before:</span> {before} <span className="mx-1 text-sky-300">→</span> <span className="text-slate-500">After:</span> {after}</p>}
+        {refs.length > 0 && <p className="mt-1 break-all text-[10px] text-slate-400">{refs.join(" · ")}</p>}
+        <p className="mt-1 break-all text-[10px] text-slate-500">Source: {entry.provenance}{ids.length ? ` · ${ids.join(" · ")}` : ""}</p>
+      </li>;
+    })}</ol> : <p className="mt-4 rounded-xl border border-white/[.07] bg-black/10 p-4 text-xs text-slate-500">No persisted events are linked to this case yet.</p>}
+  </section>;
 }
 
 function OutcomeEvidenceChain({ payment, precedingAction, currentExposure, recommendation }: { payment: NonNullable<Workspace["payments"]>[number]; precedingAction?: Workspace["actions"][number]; currentExposure: string; recommendation: string }) {

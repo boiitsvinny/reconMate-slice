@@ -187,6 +187,8 @@ class ActionProposal(BaseModel):
     execution_mode: ExecutionMode
     executable: bool
     requires_confirmation: bool
+    current_intelligence_score: int | None = Field(default=None, ge=0, le=100)
+    current_intelligence_action: str | None = None
     workflow_recommendation_action: str | None = None
     reminder_artifact: ReminderArtifact | None = None
     limitations: list[str] = Field(default_factory=list)

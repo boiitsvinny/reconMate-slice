@@ -106,6 +106,7 @@ def test_confirm_builds_existing_domain_records_and_provenance(monkeypatch) -> N
     assert any(isinstance(value, RecoveryCase) for value in session.added)
     audits = [value for value in session.added if isinstance(value, AuditEvent)]
     assert len(audits) == 1 and audits[0].event_type == "RECEIVABLE_IMPORTED"
+    assert audits[0].payload["source"] == "CSV Import"
 
     imported_invoice = next(value for value in session.added if isinstance(value, Invoice))
     imported_invoice.customer_id = imported_invoice.customer.id

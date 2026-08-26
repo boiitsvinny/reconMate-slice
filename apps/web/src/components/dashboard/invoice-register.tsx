@@ -9,6 +9,7 @@ type CustomerSummary = { name: string; account_reference: string; outstanding_am
 type Preview = { invoiceId: string; x: number; y: number };
 type Risk = { level: PriorityLevel; score: number };
 type SortKey = "newest" | "oldest" | "risk" | "invoice" | "customer" | "due" | "exposure" | "status";
+type SortDirection = "asc" | "desc";
 type StatusFilter = "all" | "pending" | "overdue" | "disputed";
 
 const money = (value: string) => {
@@ -25,6 +26,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
   const pageSize = 30;
   const [page, setPage] = useState(0);
   const [sort, setSort] = useState<SortKey>("newest");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const visibleInvoices = useMemo(() => {
     const filtered = invoices.filter((invoice) => statusFilter === "all"
@@ -37,16 +39,17 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
       if (sort === "invoice") comparison = left.invoice_number.localeCompare(right.invoice_number);
       if (sort === "customer") comparison = (customers.get(left.customer_id)?.name ?? "").localeCompare(customers.get(right.customer_id)?.name ?? "");
       if (sort === "due") comparison = left.due_date.localeCompare(right.due_date);
-      if (sort === "exposure") comparison = Number(right.outstanding_amount) - Number(left.outstanding_amount);
+      if (sort === "exposure") comparison = Number(left.outstanding_amount) - Number(right.outstanding_amount);
       if (sort === "status") comparison = left.status.localeCompare(right.status);
       if (sort === "risk") {
         const leftRisk = riskByCustomer.get(left.customer_id);
         const rightRisk = riskByCustomer.get(right.customer_id);
-        comparison = (riskRank[rightRisk?.level ?? "LOW"] - riskRank[leftRisk?.level ?? "LOW"]) || ((rightRisk?.score ?? 0) - (leftRisk?.score ?? 0));
+        comparison = (riskRank[leftRisk?.level ?? "LOW"] - riskRank[rightRisk?.level ?? "LOW"]) || ((leftRisk?.score ?? 0) - (rightRisk?.score ?? 0));
       }
+      if (sort !== "newest" && sort !== "oldest" && sortDirection === "desc") comparison *= -1;
       return comparison || left.invoice_number.localeCompare(right.invoice_number);
     });
-  }, [customers, invoices, riskByCustomer, sort, statusFilter]);
+  }, [customers, invoices, riskByCustomer, sort, sortDirection, statusFilter]);
   const pages = Math.max(1, Math.ceil(visibleInvoices.length / pageSize));
   const rows = useMemo(() => visibleInvoices.slice(page * pageSize, (page + 1) * pageSize), [page, visibleInvoices]);
   const first = visibleInvoices.length ? page * pageSize + 1 : 0;
@@ -54,6 +57,10 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
   const [preview, setPreview] = useState<Preview | null>(null);
   const [previewVisible, setPreviewVisible] = useState(false);
   const closeTimer = useRef<number | null>(null);
+  const selectSort = (key: SortKey, initial: SortDirection = "asc") => {
+    if (sort === key && key !== "newest" && key !== "oldest") setSortDirection((value) => value === "asc" ? "desc" : "asc");
+    else { setSort(key); setSortDirection(initial); }
+  };
 
   const cancelClose = () => {
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
@@ -95,9 +102,9 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
       <div className="grid gap-3 border-b border-white/[.06] bg-white/[.015] p-4 lg:grid-cols-[auto_1fr] lg:items-center lg:px-5">
         <div className="flex flex-wrap items-center gap-2" aria-label="Invoice ordering">
           <span className="mr-1 text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">Sort</span>
-          <Control active={sort === "newest"} onClick={() => setSort("newest")}>Newest</Control>
-          <Control active={sort === "oldest"} onClick={() => setSort("oldest")}>Oldest</Control>
-          <Control active={sort === "risk"} disabled={!riskAvailable} title={riskAvailable ? "Sort by live customer intelligence" : "Live intelligence is unavailable"} onClick={() => setSort("risk")}>Risk</Control>
+          <Control active={sort === "newest"} onClick={() => selectSort("newest", "desc")}>Newest</Control>
+          <Control active={sort === "oldest"} onClick={() => selectSort("oldest", "asc")}>Oldest</Control>
+          <Control active={sort === "risk"} disabled={!riskAvailable} title={riskAvailable ? "Sort by live customer intelligence" : "Live intelligence is unavailable"} onClick={() => selectSort("risk", "desc")}>Risk</Control>
         </div>
         <div className="flex flex-wrap items-center gap-2 lg:justify-end" aria-label="Invoice status filter">
           <span className="mr-1 text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">Status</span>
@@ -116,12 +123,12 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
       <div className="hidden overflow-x-auto md:block">
         <div className="min-w-[960px]">
           <div className="grid grid-cols-[1.15fr_1fr_.7fr_.75fr_.72fr_.72fr] gap-4 border-b border-white/[.08] bg-black/10 px-5 py-3 text-[11px] font-bold uppercase tracking-[.11em] text-slate-400">
-            <SortHeader label="Invoice / account" active={sort === "invoice"} direction="A–Z" onClick={() => setSort("invoice")} />
-            <SortHeader label="Customer" active={sort === "customer"} direction="A–Z" onClick={() => setSort("customer")} />
-            <SortHeader label="Due date" active={sort === "due"} direction="↑" onClick={() => setSort("due")} />
-            <SortHeader label="Exposure" active={sort === "exposure"} direction="↓" onClick={() => setSort("exposure")} />
-            <SortHeader label="Status" active={sort === "status"} direction="A–Z" onClick={() => setSort("status")} />
-            <SortHeader label="Risk" active={sort === "risk"} direction="↓" disabled={!riskAvailable} onClick={() => setSort("risk")} />
+            <SortHeader label="Invoice / account" active={sort === "invoice"} direction={sort === "invoice" && sortDirection === "desc" ? "Z–A" : "A–Z"} onClick={() => selectSort("invoice")} />
+            <SortHeader label="Customer" active={sort === "customer"} direction={sort === "customer" && sortDirection === "desc" ? "Z–A" : "A–Z"} onClick={() => selectSort("customer")} />
+            <SortHeader label="Due date" active={sort === "due"} direction={sort === "due" && sortDirection === "desc" ? "↓" : "↑"} onClick={() => selectSort("due")} />
+            <SortHeader label="Exposure" active={sort === "exposure"} direction={sort === "exposure" && sortDirection === "asc" ? "↑" : "↓"} onClick={() => selectSort("exposure", "desc")} />
+            <SortHeader label="Status" active={sort === "status"} direction={sort === "status" && sortDirection === "desc" ? "Z–A" : "A–Z"} onClick={() => selectSort("status")} />
+            <SortHeader label="Risk" active={sort === "risk"} direction={sort === "risk" && sortDirection === "asc" ? "↑" : "↓"} disabled={!riskAvailable} onClick={() => selectSort("risk", "desc")} />
           </div>
           {rows.map((invoice) => (
             <button type="button" key={invoice.id} onClick={(event) => openPreview(invoice, event.clientX, event.clientY)} className="interactive-row grid w-full grid-cols-[1.15fr_1fr_.7fr_.75fr_.72fr_.72fr] gap-4 border-b border-white/[.045] px-5 py-4 text-left text-sm last:border-b-0 focus:bg-sky-400/[.06] focus:outline-none">

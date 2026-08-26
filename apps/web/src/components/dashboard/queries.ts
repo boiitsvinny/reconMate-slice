@@ -46,8 +46,9 @@ export function useRecoveryQueue() {
   const customers = useCustomers();
   const cases = useCases();
   const recommendations = useRecommendations();
-  const queue = useMemo(() => customers.data && cases.data && recommendations.data ? createPriorityQueue(customers.data, cases.data, recommendations.data) : [], [customers.data, cases.data, recommendations.data]);
-  return { customers, cases, recommendations, queue };
+  const currentIntelligence = usePortfolioIntelligence();
+  const queue = useMemo(() => customers.data && cases.data && recommendations.data && currentIntelligence.data ? createPriorityQueue(customers.data, cases.data, recommendations.data, currentIntelligence.data.customers) : [], [customers.data, cases.data, recommendations.data, currentIntelligence.data]);
+  return { customers, cases, recommendations, currentIntelligence, queue };
 }
 
 export function useInvalidateOperationalData() {

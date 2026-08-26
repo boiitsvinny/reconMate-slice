@@ -160,6 +160,8 @@ export type ActionProposal = {
   execution_mode: ExecutionMode;
   executable: boolean;
   requires_confirmation: boolean;
+  current_intelligence_score: number | null;
+  current_intelligence_action: string | null;
   workflow_recommendation_action: string | null;
   reminder_artifact: ReminderArtifact | null;
   limitations: string[];

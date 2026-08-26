@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -57,7 +58,22 @@ def _ensure_facts_allow_execution(case: RecoveryCase, recommendation: RecoveryRe
         _fail("An active dispute blocks simulated outreach.")
 
 
-def create_action(db: Session, case: RecoveryCase, simulation_date, expected_action: RecommendedAction | None, operator_note: str | None = None) -> RecoveryAction:
+def create_action(
+    db: Session,
+    case: RecoveryCase,
+    simulation_date,
+    expected_action: RecommendedAction | None,
+    operator_note: str | None = None,
+    idempotency_id: UUID | None = None,
+) -> RecoveryAction:
+    if idempotency_id is not None:
+        existing = db.get(RecoveryAction, idempotency_id)
+        if existing is not None:
+            if existing.recovery_case_id != case.id or (
+                expected_action is not None and existing.recommendation_action != expected_action.value
+            ):
+                _fail("The confirmation identity is already bound to different workflow work.")
+            return existing
     recommendation = recommend_case(case, simulation_date)
     if expected_action is not None and recommendation.recommended_action is not expected_action:
         _fail(f"Recommendation is stale: current action is {recommendation.recommended_action.value}.")
@@ -74,6 +90,7 @@ def create_action(db: Session, case: RecoveryCase, simulation_date, expected_act
         _fail("An active or executed action already exists for this exact recommendation.")
     approval_required = bool(recommendation.human_approval_required)
     action = RecoveryAction(
+        id=idempotency_id,
         recovery_case=case, action_type=action_type,
         status=RecoveryActionStatus.PENDING_APPROVAL if approval_required else RecoveryActionStatus.RECOMMENDED,
         approval_status=ApprovalStatus.PENDING if approval_required else ApprovalStatus.NOT_REQUIRED,

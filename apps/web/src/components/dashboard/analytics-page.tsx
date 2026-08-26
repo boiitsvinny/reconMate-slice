@@ -12,8 +12,8 @@ import { buttonStyles } from "./ui";
 export function AnalyticsPage() {
   const [selected, setSelected] = useState<PriorityCase | null>(null);
   const { preview, openPreview, closePreview } = useCasePreview();
-  const { customers, cases, recommendations, queue } = useRecoveryQueue();
-  const queries = [customers, cases, recommendations];
+  const { customers, cases, recommendations, currentIntelligence, queue } = useRecoveryQueue();
+  const queries = [customers, cases, recommendations, currentIntelligence];
   const ready = queries.every((query) => Boolean(query.data));
   const error = queries.find((query) => query.isError)?.error;
   const errorMessage = error instanceof Error ? error.message : error ? "Unable to load recovery intelligence." : null;

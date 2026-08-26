@@ -64,9 +64,10 @@ export function ActionProposalCard({
       </div>
       <p className="mt-4 text-xs leading-5 text-slate-300/85">{proposal.explanation}</p>
       {proposal.reminder_artifact && <ReminderArtifact artifact={proposal.reminder_artifact} />}
-      <dl className="mt-4 grid grid-cols-2 gap-3 border-y border-white/[.06] py-3 text-xs sm:grid-cols-3">
-        <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-600">Risk level</dt><dd className="mt-1 font-semibold text-slate-200">{proposal.risk_level}</dd></div>
-        <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-600">Current decision</dt><dd className="mt-1 font-semibold text-slate-200">{proposal.workflow_recommendation_action ? label(proposal.workflow_recommendation_action) : proposal.executable ? "Review current intelligence" : "Review safeguard"}</dd></div>
+      <dl className="mt-4 grid grid-cols-2 gap-3 border-y border-white/[.06] py-3 text-xs sm:grid-cols-4">
+        <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-600">Current intelligence</dt><dd className="mt-1 font-semibold text-slate-200">{proposal.risk_level}{proposal.current_intelligence_score != null ? ` · ${proposal.current_intelligence_score}/100` : ""}</dd></div>
+        <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-600">Current recommended action</dt><dd className="mt-1 font-semibold text-slate-200">{proposal.current_intelligence_action ? label(proposal.current_intelligence_action) : "Review current intelligence"}</dd></div>
+        <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-600">Prepared workflow</dt><dd className="mt-1 font-semibold text-slate-200">{proposal.workflow_recommendation_action ? label(proposal.workflow_recommendation_action) : "No workflow action"}</dd></div>
         <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-600">Next state</dt><dd className="mt-1 font-semibold text-slate-200">{proposal.requires_confirmation ? "Awaiting your confirmation" : proposal.execution_mode === "READ_ONLY" ? "No workflow record" : "Prepared only"}</dd></div>
       </dl>
       {outcome && <p className="mt-3 text-xs leading-5 text-slate-400">{outcome.message}</p>}

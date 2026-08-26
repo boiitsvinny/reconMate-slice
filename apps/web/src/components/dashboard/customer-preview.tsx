@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PriorityCase } from "./data";
 import { buttonStyles, StatusPill } from "./ui";
 
-const toneForState = (state: string) => state === "ESCALATED" ? "rose" : state === "AWAITING_CUSTOMER" ? "amber" : "sky";
+const toneForRisk = (risk: PriorityCase["currentRisk"]) => risk === "CRITICAL" ? "rose" : risk === "HIGH" ? "amber" : "sky";
 
 export type CasePreviewState = { item: PriorityCase; x: number; y: number };
 
@@ -61,7 +61,7 @@ export function CustomerPreview({ preview, onClose, onViewMore }: { preview: Cas
           <p className="mt-0.5 text-[10px] uppercase tracking-[0.13em] text-slate-500">Case preview / {item.customerReference}</p>
         </div>
         <div className="flex items-center gap-2">
-          <StatusPill tone={toneForState(item.state)}>{item.state.replaceAll("_", " ")}</StatusPill>
+          <StatusPill tone={toneForRisk(item.currentRisk)}>{item.currentRisk} · {item.currentScore}/100</StatusPill>
           <button type="button" onClick={onClose} className="rounded-md px-1.5 py-0.5 text-xs text-slate-500 transition hover:bg-white/[.06] hover:text-white" aria-label="Close case preview">×</button>
         </div>
       </div>
@@ -71,12 +71,13 @@ export function CustomerPreview({ preview, onClose, onViewMore }: { preview: Cas
           <p className="mt-1 text-base font-semibold text-white">{item.amount}</p>
         </div>
         <div>
-          <p className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Eligibility</p>
-          <p className={`mt-1 text-sm font-semibold ${item.allowed ? "text-emerald-300" : "text-amber-200"}`}>{item.allowed ? "Eligible" : "Blocked"}</p>
+          <p className="text-[10px] uppercase tracking-[0.1em] text-slate-500">Stored workflow state</p>
+          <p className="mt-1 text-sm font-semibold text-slate-200">{item.state.replaceAll("_", " ")}</p>
         </div>
       </div>
       <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-400">
-        <li className="font-medium text-sky-200">Next: {item.recommendedAction.replaceAll("_", " ")}</li>
+        <li className="font-medium text-sky-200">Current recommended action: {item.currentAction.replaceAll("_", " ")}</li>
+        <li>Case workflow recommendation: {item.recommendedAction.replaceAll("_", " ")}</li>
         <li>{item.daysOverdue > 0 ? `${item.daysOverdue} days overdue` : "Current invoice exposure"}</li>
         <li>{item.promiseSignal}</li>
         <li className={item.allowed ? "text-emerald-300" : "text-amber-200"}>{item.reason}</li>

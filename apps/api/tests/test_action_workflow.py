@@ -19,6 +19,7 @@ class FakeSession:
     def __init__(self): self.added = []
     def add(self, item): self.added.append(item)
     def scalar(self, _query): return None
+    def get(self, model, identity): return next((item for item in self.added if isinstance(item, model) and item.id == identity), None)
     def flush(self):
         for item in self.added:
             if getattr(item, "id", None) is None: item.id = uuid4()
@@ -45,6 +46,14 @@ def test_recommendation_becomes_persisted_action_with_snapshot_and_audit() -> No
     assert action.status is RecoveryActionStatus.RECOMMENDED
     assert action.recommendation_context["recommended_action"] == "SEND_PAYMENT_REMINDER"
     assert any(getattr(event, "event_type", None) == "RECOVERY_ACTION_RECOMMENDED" for event in db.added)
+
+
+def test_command_confirmation_identity_returns_original_workflow_action() -> None:
+    db = FakeSession(); case = _case(); identity = uuid4()
+    first = create_action(db, case, SIM_DATE, RecommendedAction.SEND_PAYMENT_REMINDER, idempotency_id=identity)
+    repeated = create_action(db, case, SIM_DATE, RecommendedAction.SEND_PAYMENT_REMINDER, idempotency_id=identity)
+    assert repeated is first
+    assert len([item for item in db.added if isinstance(item, RecoveryAction)]) == 1
 
 
 def test_approval_required_action_cannot_execute_before_approval() -> None:

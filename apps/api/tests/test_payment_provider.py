@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.api.routes.payments import apply_demo_payment_event
-from app.models.domain import Customer, ExternalPaymentRequest, Invoice, InvoiceStatus, Payment, ProviderEvent, RecoveryCase, RecoveryPriority, RecoveryState
+from app.models.domain import AuditEvent, Customer, ExternalPaymentRequest, Invoice, InvoiceStatus, Payment, ProviderEvent, RecoveryCase, RecoveryPriority, RecoveryState
 from app.payments.provider import CreatedPaymentRequest, PaymentProviderError
 from app.payments.schemas import CreatePaymentRequestInput, DemoPaymentEventInput
 from app.payments.service import create_external_payment_request, ingest_demo_payment_event
@@ -95,6 +95,11 @@ def test_provider_reference_and_demo_provenance_persist() -> None:
     assert request.provider == "PROVIDER_DEMO" and request.provider_mode == "DEMO"
     assert request.status == "ACTIVE" and db.commits == 1
     assert (item.invoice.outstanding_amount, item.invoice.status, len(item.invoice.payments)) == before
+    audit = next(value for value in db.added if isinstance(value, AuditEvent))
+    assert audit.payload["source"] == "Provider Demo Mode"
+    assert audit.payload["financial_mutation"] == "NONE"
+    assert audit.payload["outstanding_before"] == audit.payload["outstanding_after"] == "500"
+    assert audit.payload["customer_id"] == str(item.customer.id)
 
 
 def test_provider_failure_is_persisted_safely() -> None:
@@ -168,6 +173,10 @@ def test_successful_event_uses_payment_model_updates_financial_state_and_evidenc
     assert result.evidence["payment_request_id"] == str(request.id)
     assert result.evidence["payment_id"] == str(payment.id)
     assert result.evidence["provider_event_id"] == "evt-1"
+    assert result.evidence["source"] == "Provider Demo Mode"
+    assert result.evidence["provider_reference"] == request.provider_reference
+    assert result.evidence["provider_payment_reference"] == "demo_pay-1"
+    assert result.evidence["financial_mutation"] == "PAYMENT_PERSISTED"
     assert provider_event.provider == "PROVIDER_DEMO" and result.duplicate is False
 
 
@@ -175,9 +184,15 @@ def test_duplicate_event_and_payment_reference_are_idempotent() -> None:
     item = case()
     request = external_request(item)
     prior = ProviderEvent(id=uuid4(), payment_request_id=request.id, payment_id=uuid4(), provider="PROVIDER_DEMO", provider_event_id="evt-1", provider_payment_reference="demo_pay-1", event_type="payment_request.paid", payload={}, evidence={"outstanding_after": "0"})
-    result = ingest_demo_payment_event(FakeSession([prior]), request, item, OPERATING_DATE, event())
+    db = FakeSession([prior])
+    result = ingest_demo_payment_event(db, request, item, OPERATING_DATE, event())
     assert result.duplicate is True
     assert item.invoice.outstanding_amount == Decimal("500")
+    assert result.evidence["duplicate_replay"]["financial_mutation"] == "NONE"
+    assert result.evidence["duplicate_replay"]["outstanding_before"] == result.evidence["duplicate_replay"]["outstanding_after"] == "500"
+    replay_audit = next(value for value in db.added if isinstance(value, AuditEvent))
+    assert replay_audit.event_type == "PROVIDER_DUPLICATE_EVENT_IGNORED"
+    assert replay_audit.payload["original_event"] == "evt-1"
 
 
 def test_partial_event_preserves_remaining_request_balance(monkeypatch) -> None:

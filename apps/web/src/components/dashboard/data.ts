@@ -1,4 +1,5 @@
 import { apiFetch } from "@/lib/api";
+import type { IntelligenceResult } from "@/lib/intelligence-api";
 
 export type Portfolio = { simulation_date: string | null; total_outstanding_amount: string; total_invoices: number; total_customers: number };
 export type Recovery = { overdue_exposure: string; broken_promise_exposure: string; cases_eligible_for_recovery: number; cases_requiring_attention?: number; cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number; open_cases?: number; active_cases?: number; total_cases: number };
@@ -79,23 +80,31 @@ export type RecoveryAction = {
   created_at: string | null;
 };
 export type ExternalPaymentRequest = { id: string; case_id: string; customer_id: string; invoice_id: string; provider: string; provider_mode: "DEMO" | "TEST"; provider_reference: string | null; provider_url: string | null; requested_amount: string; paid_amount: string; status: string; purpose: string; operator_id: string; failure_reason: string | null; created_at: string | null };
-export type ProviderEventEvidence = { id: string; payment_request_id: string; provider_event_id: string; provider_payment_reference: string; event_type: string; evidence: { chronology?: string; outstanding_before?: string; outstanding_after?: string; score_before?: number; score_after?: number; recommendation_before?: string; recommendation_after?: string }; received_at: string };
+export type ProviderEventEvidence = { id: string; payment_request_id: string; provider_event_id: string; provider_payment_reference: string; event_type: string; evidence: { source?: string; provider?: string; provider_mode?: string; provider_reference?: string; provider_payment_reference?: string; chronology?: string; financial_mutation?: string; outstanding_before?: string; outstanding_after?: string; score_before?: number; score_after?: number; recommendation_before?: string; recommendation_after?: string; duplicate_replay?: { ignored: boolean; original_event: string; financial_mutation: string; outstanding_before?: string; outstanding_after?: string } }; received_at: string };
+export type EvidenceTimelineEntry = {
+  id: string; occurred_at: string; category: "FACT_EVENT" | "INTELLIGENCE_REASSESSMENT" | "OPERATOR_ACTION" | "PROVIDER_EVENT";
+  event_type: string; title: string; detail: string | null; customer_id: string | null; case_id: string | null; invoice_id: string | null;
+  request_reference: string | null; event_reference: string | null; payment_reference: string | null;
+  before: Record<string, string | number | null> | null; after: Record<string, string | number | null> | null;
+  provenance: string; historical: boolean;
+};
 export type ProviderMode = { provider: string; mode: "DEMO" | "TEST"; label: string };
 export type Invoice = { id: string; invoice_number: string; customer_id: string; issue_date: string; due_date: string; original_amount: string; outstanding_amount: string; status: string; source: "CSV_IMPORT" | "DEMO_SANDBOX"; latest_payment_amount: string | null; latest_payment_date: string | null; latest_payment_reference: string | null };
-export type PriorityCase = { id: string; customerId: string; customerName: string; customerReference: string; amount: string; exposure: number; state: string; daysOverdue: number; promiseSignal: string; allowed: boolean; reason: string; recommendedAction: string; recommendationPriority: Recommendation["priority"]; recommendationReason: string; humanApprovalRequired: boolean };
+export type PriorityCase = { id: string; customerId: string; customerName: string; customerReference: string; amount: string; exposure: number; state: string; daysOverdue: number; promiseSignal: string; allowed: boolean; reason: string; recommendedAction: string; recommendationPriority: Recommendation["priority"]; recommendationReason: string; humanApprovalRequired: boolean; currentScore: number; currentRisk: IntelligenceResult["level"]; currentAction: string };
 export type Workspace = {
   case_id: string;
   customer: { id: string; name: string; strategic: boolean };
   workflow: { stored_priority: string; recovery_state: string; opened_at: string | null; updated_at: string | null };
   invoice: { id: string; number: string; status: string; outstanding_amount: string; due_date: string } | null;
   recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; operator_explanation: string; operator_next_step: string; workflow_effect: string; communication_signals: { intent: string; confidence: string | null }[] };
-  intelligence: { score: number; raw_score: number; calculated_at: string; level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; signals: { title: string; explanation: string; severity: string }[]; factors: { title: string; explanation: string; points: number; impact: string }[] };
+  intelligence: { score: number; raw_score: number; calculated_at: string; level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; recommendation: { action: string; title: string; explanation: string }; signals: { title: string; explanation: string; severity: string }[]; factors: { title: string; explanation: string; points: number; impact: string }[] };
   promises: { status: string; promised_amount: string; promised_date: string }[];
   payments?: { id: string; amount: string; payment_date: string; reference: string | null }[];
   communications: { id: string; direction: string; content: string; occurred_at: string; analyses: { intent?: string }[] }[];
   actions: { id: string; action_type: string; status: string; approval_status: string; recommended_action: string | null; human_approval_required: boolean; recommendation_context: { workflow_effect?: string; operator_next_step?: string; blockers?: string[] } | null; decision_by: string | null; decision_reason: string | null; decision_at: string | null; executed_at: string | null; created_at: string | null }[];
   external_payment_requests?: ExternalPaymentRequest[];
   provider_events?: ProviderEventEvidence[];
+  evidence_timeline?: EvidenceTimelineEntry[];
   audit_events: { id: string; event_type: string; occurred_at: string }[];
 };
 
@@ -113,14 +122,17 @@ export async function fetchJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function createPriorityQueue(customersList: Customer[], casesList: CaseApi[], recommendations: Recommendation[]): PriorityCase[] {
+export function createPriorityQueue(customersList: Customer[], casesList: CaseApi[], recommendations: Recommendation[], intelligence: IntelligenceResult[]): PriorityCase[] {
   const customers = new Map(customersList.map((customer) => [customer.id, customer]));
   const cases = new Map(casesList.map((item) => [item.case_id, item]));
+  const currentByCustomer = new Map(intelligence.map((item) => [item.entity_id, item]));
 
   return recommendations.flatMap((recommendation) => {
     const item = cases.get(recommendation.case_id);
     if (!item) return [];
     const customer = customers.get(item.customer_id);
+    const current = currentByCustomer.get(item.customer_id);
+    if (!current) return [];
     const invoice = item.evaluation.invoice;
     const promises = item.evaluation.promises;
     const exposure = Number(invoice?.outstanding_amount ?? customer?.outstanding_amount ?? "0");
@@ -140,6 +152,9 @@ export function createPriorityQueue(customersList: Customer[], casesList: CaseAp
       recommendationPriority: recommendation.priority,
       recommendationReason: recommendation.operator_explanation,
       humanApprovalRequired: recommendation.human_approval_required,
+      currentScore: current.score,
+      currentRisk: current.level,
+      currentAction: current.recommendation.action,
     };
   });
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { buttonStyles, cx, StatusPill } from "./ui";
 
@@ -51,6 +51,7 @@ const money = (value: string | null) => value === null ? "—" : new Intl.Number
 
 export function ReceivableImport({ onImported }: { onImported: () => Promise<unknown> }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
   const [open, setOpen] = useState(false);
   const [fileName, setFileName] = useState("");
   const [csvText, setCsvText] = useState("");
@@ -61,6 +62,13 @@ export function ReceivableImport({ onImported }: { onImported: () => Promise<unk
 
   const chooseFile = () => inputRef.current?.click();
   const close = () => { if (!busy) setOpen(false); };
+  useEffect(() => {
+    if (!open) return;
+    dialogRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && !busy) setOpen(false); };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [busy, open]);
   const load = async (file?: File) => {
     if (!file) return;
     setBusy(true); setError(null); setPreview(null); setResult(null); setFileName(file.name);
@@ -91,26 +99,27 @@ export function ReceivableImport({ onImported }: { onImported: () => Promise<unk
 
   return <>
     <input ref={inputRef} type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => void load(event.target.files?.[0])} />
-    <button type="button" onClick={chooseFile} className={buttonStyles.primary}>Import receivables</button>
+    <button type="button" onClick={() => setOpen(true)} className={buttonStyles.primary}>Import receivables</button>
     {open && <div className="fixed inset-0 z-50 grid place-items-center bg-[#030712]/75 p-3 backdrop-blur-sm" onClick={close} role="presentation">
-      <section role="dialog" aria-modal="true" aria-label="Import receivables" onClick={(event) => event.stopPropagation()} className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/[.12] bg-[#0b1526] shadow-2xl shadow-black/60">
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Import receivables" onClick={(event) => event.stopPropagation()} className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-2xl border border-white/[.12] bg-[#0b1526] shadow-2xl shadow-black/60 focus:outline-none">
         <header className="flex flex-col justify-between gap-4 border-b border-white/[.07] p-5 sm:flex-row sm:items-start">
           <div><p className="text-[11px] font-bold uppercase tracking-[.16em] text-sky-300">External data intake</p><h2 className="mt-2 text-2xl font-semibold text-white">Import receivables</h2><p className="mt-2 max-w-3xl text-[13px] leading-5 text-slate-400">Upload → validate → preview → confirm. No portfolio record changes until confirmation succeeds.</p></div>
           <button type="button" onClick={close} disabled={busy} className={buttonStyles.secondary}>Close</button>
         </header>
         <div className="space-y-5 p-5">
-          <div className="flex flex-col justify-between gap-3 rounded-xl border border-sky-300/12 bg-sky-300/[.03] p-4 sm:flex-row sm:items-center"><div><p className="text-sm font-semibold text-white">{fileName || "No CSV selected"}</p><p className="mt-1 text-xs text-slate-400">Required: customer reference, customer name, invoice number, amounts, invoice date, and due date.</p></div><div className="flex flex-wrap gap-2"><a className={buttonStyles.secondary} href={`data:text/csv;charset=utf-8,${encodeURIComponent(sample)}`} download="reconmate-receivables-sample.csv">Download sample</a><button type="button" onClick={chooseFile} disabled={busy} className={buttonStyles.secondary}>Choose another CSV</button></div></div>
+          <div className="flex flex-col justify-between gap-3 rounded-xl border border-sky-300/12 bg-sky-300/[.03] p-4 sm:flex-row sm:items-center"><div><p className="text-sm font-semibold text-white">{fileName || "No CSV selected"}</p><p className="mt-1 text-xs text-slate-400">Required: customer reference, customer name, invoice number, amounts, invoice date, and due date.</p></div><div className="flex flex-col gap-2 min-[420px]:flex-row"><a className={buttonStyles.secondary} href={`data:text/csv;charset=utf-8,${encodeURIComponent(sample)}`} download="reconmate-receivables-sample.csv">Download sample</a><button type="button" onClick={chooseFile} disabled={busy} className={buttonStyles.secondary}>{fileName ? "Choose another CSV" : "Choose CSV"}</button></div></div>
           <p className="rounded-xl border border-emerald-300/12 bg-emerald-300/[.035] p-3 text-xs leading-5 text-emerald-100/80"><strong>Data origin:</strong> Demo Sandbox remains synthetic and replayable. CSV imports are user-supplied receivables that enter the same persisted intelligence and recommendation path.</p>
           {error && <p role="alert" className="rounded-xl border border-rose-300/20 bg-rose-300/[.06] p-3 text-sm text-rose-100">{error}</p>}
           {busy && !preview && <div className="h-32 animate-pulse rounded-xl bg-white/[.04]" role="status"><span className="sr-only">Validating CSV</span></div>}
           {preview && <>
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-300/15 bg-sky-300/[.035] p-3 text-xs"><p className="font-semibold text-sky-100">Source: CSV Import</p><p className="text-slate-400">Preview only · records persisted: 0 · financial mutation: none</p></div>
             <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-white/[.07] bg-white/[.07] md:grid-cols-6"><ImportMetric label="Rows detected" value={String(preview.rows_detected)} /><ImportMetric label="Valid" value={String(preview.valid_rows)} tone="emerald" /><ImportMetric label="Invalid" value={String(preview.invalid_rows)} tone={preview.invalid_rows ? "rose" : "slate"} /><ImportMetric label="Duplicates" value={String(preview.duplicate_rows)} tone={preview.duplicate_rows ? "amber" : "slate"} /><ImportMetric label="Original total" value={money(preview.total_original_amount)} /><ImportMetric label="Outstanding import" value={money(preview.total_outstanding_amount)} /></div>
             {preview.file_errors.length > 0 && <ul className="rounded-xl border border-rose-300/20 bg-rose-300/[.06] p-4 text-sm text-rose-100">{preview.file_errors.map((item) => <li key={item}>• {item}</li>)}</ul>}
             <div className="overflow-x-auto rounded-xl border border-white/[.07]"><table className="min-w-[900px] w-full text-left text-xs"><thead className="bg-black/15 text-[10px] uppercase tracking-[.1em] text-slate-400"><tr><th className="p-3">Row</th><th>Customer</th><th>Invoice</th><th>Original</th><th>Outstanding</th><th>Dates</th><th>Status</th><th>Validation</th></tr></thead><tbody className="divide-y divide-white/[.055]">{preview.rows.slice(0, 50).map((row) => <tr key={row.row_number} className="align-top"><td className="p-3 text-slate-500">{row.row_number}</td><td className="py-3 pr-3"><p className="font-semibold text-slate-200">{row.customer_name || "Missing"}</p><p className="mt-1 text-slate-500">{row.customer_reference || "No reference"}</p></td><td className="py-3 pr-3 text-slate-300">{row.invoice_number || "Missing"}</td><td className="py-3 pr-3 tabular-nums text-slate-300">{money(row.original_amount)}</td><td className="py-3 pr-3 tabular-nums text-slate-300">{money(row.outstanding_amount)}</td><td className="py-3 pr-3 text-slate-400">{row.issue_date ?? "—"}<br />{row.due_date ?? "—"}</td><td className="py-3 pr-3 text-slate-300">{row.status ?? "Derived"}</td><td className="py-3 pr-3"><StatusPill tone={row.validation_status === "VALID" ? "emerald" : row.validation_status === "DUPLICATE" ? "amber" : "rose"}>{row.validation_status}</StatusPill>{row.errors.map((item) => <p key={item} className="mt-1 max-w-xs leading-4 text-rose-200/80">{item}</p>)}</td></tr>)}</tbody></table></div>
             {preview.rows.length > 50 && <p className="text-xs text-slate-500">Showing the first 50 of {preview.rows.length} rows.</p>}
             <div className="flex flex-col justify-between gap-3 border-t border-white/[.07] pt-4 sm:flex-row sm:items-center"><p className="max-w-2xl text-xs leading-5 text-slate-400">Duplicates are skipped. Invalid rows block the entire import so financial records are never partially persisted.</p><button type="button" onClick={() => void confirm()} disabled={busy || Boolean(result) || preview.invalid_rows > 0 || preview.file_errors.length > 0 || preview.valid_rows === 0} className={cx(buttonStyles.primary, "disabled:cursor-not-allowed disabled:opacity-40")}>{result ? "Import completed" : busy ? "Persisting and refreshing…" : `Confirm import of ${preview.valid_rows} row${preview.valid_rows === 1 ? "" : "s"}`}</button></div>
           </>}
-          {result && <div className="rounded-xl border border-emerald-300/20 bg-emerald-300/[.05] p-5"><div className="flex items-center justify-between gap-3"><h3 className="text-lg font-semibold text-white">Import completed</h3><StatusPill tone="emerald">Persisted</StatusPill></div><p className="mt-2 text-sm leading-6 text-emerald-100/80">{result.invoices_created} invoices across {result.customers_created} new customers were persisted; {result.duplicates_skipped} duplicates were skipped. {result.recovery_cases_created} recovery cases entered the existing evaluation path for operating date {result.evaluation_date}.</p><p className="mt-2 text-xs text-slate-400">Imported outstanding: {money(result.total_outstanding_imported)}. Close this window to inspect the records in the ledger.</p></div>}
+          {result && <div className="rounded-xl border border-emerald-300/20 bg-emerald-300/[.05] p-5"><div className="flex items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-emerald-300">Source: CSV Import</p><h3 className="mt-1 text-lg font-semibold text-white">Import completed</h3></div><StatusPill tone="emerald">Persisted</StatusPill></div><p className="mt-2 text-sm leading-6 text-emerald-100/80">{result.invoices_created} invoices across {result.customers_created} new customers were persisted; {result.duplicates_skipped} duplicates were skipped. {result.recovery_cases_created} recovery cases entered the existing evaluation path for operating date {result.evaluation_date}.</p><p className="mt-2 text-xs text-slate-400">Records persisted after confirmation: {result.invoices_created} invoices and {result.recovery_cases_created} recovery cases. Imported outstanding: {money(result.total_outstanding_imported)}.</p></div>}
         </div>
       </section>
     </div>}

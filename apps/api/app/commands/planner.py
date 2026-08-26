@@ -17,13 +17,14 @@ from app.commands.schemas import (
     ExclusionCount,
     InspectionScope,
     ProposalActionType,
+    QueryEntity,
     QueryEvidence,
     RankingEvidence,
     StructuredQuery,
 )
 from app.commands.tools import CaseCandidate, CommandTools, QueryExecution
 from app.intelligence.operational_schemas import IntelligenceResult, PriorityLevel
-from app.models.domain import RecoveryPriority
+from app.models.domain import RecoveryActionStatus, RecoveryPriority
 from app.recommendations.schemas import RecommendedAction
 
 
@@ -77,6 +78,8 @@ class CommandPlanner:
             query = interpreted.query
             if intent is CommandIntentType.PRIORITIZE_CASES and not query.count_only and query.limit is None and not interpreted.filters.include_all:
                 query = query.model_copy(update={"limit": DEFAULT_RESULT_LIMIT})
+                interpreted.query = query
+                interpreted.filters = interpreted.filters.model_copy(update={"top_n": query.limit})
             if query.entity.value == "RECOVERY_CASES":
                 execution = tools.execute_case_query(query)
                 candidates = execution.records
@@ -133,22 +136,56 @@ class CommandPlanner:
                     )
 
         elif intent is CommandIntentType.PREPARE_FOLLOW_UPS:
-            query = interpreted.query.model_copy(update={"broken_promise": True})
-            broken = tools.query_customer_intelligence(query)
-            analyzed = broken
-            customer_ids = {item.entity_id for item in broken}
-            candidates = tools.get_recovery_candidates(customer_ids=customer_ids, top_n=interpreted.filters.top_n)
-            summary = f"Prepared safe follow-up proposals for {len(candidates)} recovery cases belonging to customers with broken promises."
-            actions.extend(self._case_recovery_proposal(plan_id, item, follow_up=True) for item in candidates)
-            if broken and not candidates:
-                warnings.append("Broken-promise customers were found, but none currently has a recovery case that can receive workflow work.")
+            query = interpreted.query.model_copy(update={
+                "entity": QueryEntity.RECOVERY_CASES,
+                "broken_promise": True,
+                "actionable": True,
+            })
+            if query.limit is None and not interpreted.filters.include_all:
+                query = query.model_copy(update={"limit": DEFAULT_RESULT_LIMIT})
+            interpreted.query = query
+            interpreted.filters = interpreted.filters.model_copy(update={"top_n": query.limit})
+            execution = tools.execute_case_query(query.model_copy(update={"limit": None}))
+            available, duplicate_exclusions = self._without_active_duplicates(execution.records, warnings)
+            candidates = available if query.limit is None else available[:query.limit]
+            analyzed = [item.intelligence for item in candidates]
+            summary = f"Prepared safe follow-up proposals for {len(candidates)} actionable recovery cases with broken promises."
+            if duplicate_exclusions:
+                execution = QueryExecution(
+                    records=candidates, inspected=execution.inspected,
+                    matched=max(0, execution.matched - duplicate_exclusions),
+                    exclusions=execution.exclusions + [("Equivalent active workflow already exists", duplicate_exclusions)],
+                    scope=execution.scope,
+                )
+            evidence = self._execution_evidence(execution, analyzed, tools, query)
+            for candidate in candidates:
+                actions.append(self._case_recovery_proposal(plan_id, candidate, follow_up=True))
 
         elif intent is CommandIntentType.PREPARE_RECOVERY_ACTIONS:
-            levels = interpreted.filters.risk_levels or [PriorityLevel.CRITICAL]
-            candidates = tools.get_recovery_candidates(levels=levels, top_n=None if interpreted.filters.include_all else limit)
+            query = interpreted.query.model_copy(update={
+                "entity": QueryEntity.RECOVERY_CASES,
+                "risk_levels": interpreted.query.risk_levels or [PriorityLevel.CRITICAL],
+                "actionable": True,
+                "limit": None if interpreted.filters.include_all else (interpreted.query.limit or limit),
+            })
+            interpreted.query = query
+            interpreted.filters = interpreted.filters.model_copy(update={"top_n": query.limit, "risk_levels": query.risk_levels})
+            execution = tools.execute_case_query(query.model_copy(update={"limit": None}))
+            available, duplicate_exclusions = self._without_active_duplicates(execution.records, warnings)
+            candidates = available if query.limit is None else available[:query.limit]
+            if duplicate_exclusions:
+                execution = QueryExecution(
+                    records=candidates, inspected=execution.inspected,
+                    matched=max(0, execution.matched - duplicate_exclusions),
+                    exclusions=execution.exclusions + [("Equivalent active workflow already exists", duplicate_exclusions)],
+                    scope=execution.scope,
+                )
             analyzed = [item.intelligence for item in candidates]
-            summary = f"Prepared {len(candidates)} recovery-case proposals after applying current intelligence and recovery blockers."
-            actions.extend(self._case_recovery_proposal(plan_id, item) for item in candidates)
+            summary = f"Found {execution.matched} actionable recovery cases in the requested current risk band and prepared {len(candidates)} bounded results."
+            stored = {item.intelligence.entity_id: item.case.priority.value for item in candidates}
+            evidence = self._execution_evidence(execution, analyzed, tools, query, stored)
+            for candidate in candidates:
+                actions.append(self._case_recovery_proposal(plan_id, candidate))
 
         elif intent is CommandIntentType.PREPARE_PAYMENT_REMINDERS:
             analyzed = tools.get_overdue_customers(interpreted.filters.top_n)
@@ -295,17 +332,44 @@ class CommandPlanner:
         proposal = self._analysis_action(plan_id, result, ProposalActionType.ANALYZE_CASE)
         if case is None:
             return proposal
-        stored_level = self._stored_level(case.priority)
-        effective_level = max((result.level, stored_level), key=lambda level: list(PriorityLevel).index(level))
         recorded_reason = next((action.reason for action in case.actions if action.reason), None)
         context = f" Stored workflow priority is {case.priority.value}."
         if recorded_reason:
             context += f" Recorded case context: {recorded_reason}"
         return proposal.model_copy(update={
-            "priority": effective_level,
-            "risk_level": effective_level,
             "explanation": proposal.explanation + context,
         })
+
+    @staticmethod
+    def _active_equivalent_action(candidate: CaseCandidate):
+        active = {
+            RecoveryActionStatus.RECOMMENDED,
+            RecoveryActionStatus.PENDING_APPROVAL,
+            RecoveryActionStatus.APPROVED,
+            RecoveryActionStatus.HELD,
+        }
+        expected = candidate.recommendation.recommended_action.value
+        return next((action for action in candidate.case.actions if action.status in active and action.recommendation_action == expected), None)
+
+    @staticmethod
+    def _duplicate_warning(candidate: CaseCandidate, action) -> str:
+        status = action.status.value.replace("_", " ").lower()
+        return (
+            f"Existing action already {status} for {candidate.case.customer.name} "
+            f"(workflow {action.id}); no duplicate proposal was created."
+        )
+
+    def _without_active_duplicates(self, candidates: list[CaseCandidate], warnings: list[str]) -> tuple[list[CaseCandidate], int]:
+        available: list[CaseCandidate] = []
+        duplicate_count = 0
+        for candidate in candidates:
+            duplicate = self._active_equivalent_action(candidate)
+            if duplicate is None:
+                available.append(candidate)
+            else:
+                duplicate_count += 1
+                warnings.append(self._duplicate_warning(candidate, duplicate))
+        return available, duplicate_count
 
     def _case_recovery_proposal(
         self,
@@ -352,6 +416,8 @@ class CommandPlanner:
             explanation=recommendation.operator_explanation, priority=candidate.risk_level,
             risk_level=candidate.risk_level, execution_mode=ExecutionMode.CONFIRMATION_REQUIRED,
             executable=True, requires_confirmation=True,
+            current_intelligence_score=candidate.intelligence.score,
+            current_intelligence_action=candidate.intelligence.recommendation.action.value,
             workflow_recommendation_action=recommendation.recommended_action.value,
             limitations=["Confirmation creates only an internal workflow action; it does not contact the customer."],
         )

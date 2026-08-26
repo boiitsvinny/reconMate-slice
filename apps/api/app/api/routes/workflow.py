@@ -9,7 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.intelligence.operational_service import evaluate_case_intelligence
+from app.evidence.timeline import build_case_evidence_timeline
+from app.intelligence.operational_service import evaluate_customer_intelligence
 from app.models.domain import AuditEvent, Communication, Customer, ExternalPaymentRequest, Invoice, PromiseToPay, ProviderEvent, RecoveryAction, RecoveryCase, SimulationState
 from app.recommendations.service import recommend_case
 from app.workflow.schemas import CreateActionRequest, OperatorDecisionRequest, RecoveryActionResponse
@@ -25,9 +26,19 @@ def _simulation_date(db: Session):
     return value
 
 
+def _current_workspace_intelligence(case: RecoveryCase, simulation_date):
+    """Authoritative current intelligence shared with portfolio consumers."""
+    return evaluate_customer_intelligence(case.customer, simulation_date)
+
+
 def _case_query():
     return select(RecoveryCase).options(
         selectinload(RecoveryCase.customer).selectinload(Customer.communications).selectinload(Communication.analyses),
+        selectinload(RecoveryCase.customer).selectinload(Customer.invoices).selectinload(Invoice.payments),
+        selectinload(RecoveryCase.customer).selectinload(Customer.promises_to_pay).selectinload(PromiseToPay.invoice).selectinload(Invoice.payments),
+        selectinload(RecoveryCase.customer).selectinload(Customer.promises_to_pay).selectinload(PromiseToPay.source_communication),
+        selectinload(RecoveryCase.customer).selectinload(Customer.recovery_cases).selectinload(RecoveryCase.actions),
+        selectinload(RecoveryCase.customer).selectinload(Customer.recovery_cases).selectinload(RecoveryCase.invoice),
         selectinload(RecoveryCase.invoice).selectinload(Invoice.payments),
         selectinload(RecoveryCase.invoice).selectinload(Invoice.promises_to_pay).selectinload(PromiseToPay.source_communication),
         selectinload(RecoveryCase.actions),
@@ -125,17 +136,21 @@ def case_workspace(case_id: UUID, db: Session = Depends(get_db)) -> dict[str, An
     events = db.scalars(select(AuditEvent).where((AuditEvent.entity_type == "RecoveryCase") & (AuditEvent.entity_id == case.id)).order_by(AuditEvent.occurred_at.desc())).all()
     payment_requests = list(db.scalars(select(ExternalPaymentRequest).where(ExternalPaymentRequest.recovery_case_id == case.id).order_by(ExternalPaymentRequest.created_at.desc())))
     provider_events = list(db.scalars(select(ProviderEvent).where(ProviderEvent.payment_request_id.in_([item.id for item in payment_requests])).order_by(ProviderEvent.received_at.desc()))) if payment_requests else []
+    evidence_timeline = build_case_evidence_timeline(db, case, payment_requests, provider_events)
     return {
         "case_id": str(case.id), "customer": {"id": str(case.customer.id), "name": case.customer.name, "strategic": bool(case.customer.is_strategic_account)},
         "workflow": {"stored_priority": case.priority.value, "recovery_state": case.current_state.value, "opened_at": case.opened_at, "updated_at": case.updated_at},
         "recommendation": recommend_case(case, simulation_date).model_dump(mode="json"),
-        "intelligence": evaluate_case_intelligence(case, simulation_date).model_dump(mode="json"),
+        # Use the same customer-level current intelligence as Home, Reports, and
+        # Analyze. Case recommendation and stored workflow remain separate.
+        "intelligence": _current_workspace_intelligence(case, simulation_date).model_dump(mode="json"),
         "invoice": None if case.invoice is None else {"id": str(case.invoice.id), "number": case.invoice.invoice_number, "status": case.invoice.status.value, "outstanding_amount": case.invoice.outstanding_amount, "due_date": case.invoice.due_date},
         "promises": [{"id": str(item.id), "status": item.status.value, "promised_amount": item.promised_amount, "promised_date": item.promised_date} for item in case.invoice.promises_to_pay] if case.invoice else [],
         "payments": [{"id": str(item.id), "amount": item.amount, "payment_date": item.payment_date, "reference": item.reference} for item in sorted(case.invoice.payments, key=lambda item: item.payment_date, reverse=True)] if case.invoice else [],
         "communications": [{"id": str(item.id), "direction": item.direction.value, "content": item.content, "occurred_at": item.occurred_at, "analyses": [analysis.result for analysis in item.analyses]} for item in sorted(case.customer.communications, key=lambda item: item.occurred_at, reverse=True)],
         "actions": [_action_response(item).model_dump(mode="json") for item in case.actions],
-        "external_payment_requests": [{"id": str(item.id), "provider": item.provider, "provider_mode": item.provider_mode, "provider_reference": item.provider_reference, "provider_url": item.provider_url, "requested_amount": item.requested_amount, "paid_amount": item.paid_amount, "status": item.status, "purpose": item.purpose, "operator_id": item.operator_id, "failure_reason": item.failure_reason, "created_at": item.created_at} for item in payment_requests],
+        "external_payment_requests": [{"id": str(item.id), "case_id": str(item.recovery_case_id), "customer_id": str(item.customer_id), "invoice_id": str(item.invoice_id), "provider": item.provider, "provider_mode": item.provider_mode, "provider_reference": item.provider_reference, "provider_url": item.provider_url, "requested_amount": item.requested_amount, "paid_amount": item.paid_amount, "status": item.status, "purpose": item.purpose, "operator_id": item.operator_id, "failure_reason": item.failure_reason, "created_at": item.created_at} for item in payment_requests],
         "provider_events": [{"id": str(item.id), "payment_request_id": str(item.payment_request_id), "provider_event_id": item.provider_event_id, "provider_payment_reference": item.provider_payment_reference, "event_type": item.event_type, "evidence": item.evidence, "received_at": item.received_at} for item in provider_events],
+        "evidence_timeline": evidence_timeline,
         "audit_events": [{"id": str(item.id), "event_type": item.event_type, "payload": item.payload, "occurred_at": item.occurred_at} for item in events],
     }

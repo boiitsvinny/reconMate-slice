@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.intelligence.operational_schemas import IntelligenceResult, PortfolioIntelligence, PriorityLevel, SignalType
 from app.intelligence.operational_service import (
-    evaluate_case_intelligence,
     evaluate_customer_intelligence,
     evaluate_portfolio_intelligence,
 )
@@ -25,7 +24,6 @@ from app.models.domain import (
     InvoiceStatus,
     PromiseToPay,
     RecoveryCase,
-    RecoveryPriority,
     SimulationState,
     SimulationEvent,
 )
@@ -77,14 +75,6 @@ def _case_query():
     )
 
 
-_STORED_PRIORITY_LEVEL = {
-    RecoveryPriority.LOW: PriorityLevel.LOW,
-    RecoveryPriority.NORMAL: PriorityLevel.MEDIUM,
-    RecoveryPriority.HIGH: PriorityLevel.HIGH,
-    RecoveryPriority.CRITICAL: PriorityLevel.CRITICAL,
-}
-
-
 class CommandTools:
     """One request-scoped facade over current operational data and Phase A intelligence."""
 
@@ -123,10 +113,20 @@ class CommandTools:
 
     def get_case_intelligence(self, case_id: UUID) -> IntelligenceResult | None:
         case = self.get_case(case_id)
-        return evaluate_case_intelligence(case, self.simulation_date) if case is not None else None
+        return self._case_scoped_customer_intelligence(case) if case is not None else None
 
     def get_case(self, case_id: UUID | str) -> RecoveryCase | None:
         return next((item for item in self.cases() if str(item.id) == str(case_id)), None)
+
+    def _case_scoped_customer_intelligence(self, case: RecoveryCase) -> IntelligenceResult:
+        """Keep case identity while using the portfolio's authoritative current score."""
+        current = evaluate_customer_intelligence(case.customer, self.simulation_date)
+        invoice_label = case.invoice.invoice_number if case.invoice is not None else "account-level case"
+        return current.model_copy(update={
+            "entity_type": "RECOVERY_CASE",
+            "entity_id": str(case.id),
+            "entity_name": f"{case.customer.name} / {invoice_label}",
+        })
 
     def get_priority_customers(
         self,
@@ -210,9 +210,10 @@ class CommandTools:
                 RecommendedAction.NO_ACTION_REQUIRED, RecommendedAction.MONITOR_ACTIVE_PROMISE,
                 RecommendedAction.HOLD_FOR_DISPUTE,
             }
-            effective_result = result.model_copy(update={"level": candidate.risk_level})
-            contexts.append((effective_result, partial, recent, blocked, monitoring, actionable, latest_ids is None or str(candidate.case.customer_id) in latest_ids, effective_result.entity_id in changed_ids, effective_result.entity_id in held_ids))
-            candidate_by_entity[effective_result.entity_id] = candidate
+            # Stored workflow priority is historical workflow state. It must not
+            # promote fresh intelligence into a different current risk band.
+            contexts.append((result, partial, recent, blocked, monitoring, actionable, latest_ids is None or str(candidate.case.customer_id) in latest_ids, result.entity_id in changed_ids, result.entity_id in held_ids))
+            candidate_by_entity[result.entity_id] = candidate
         remaining, exclusions = self._apply_predicates(query, contexts)
         matched = [candidate_by_entity[item[0].entity_id] for item in remaining]
         matched.sort(key=lambda item: self._ranking_key(item.intelligence, query))
@@ -441,34 +442,21 @@ class CommandTools:
         for case in self.cases():
             if customer_ids is not None and str(case.customer_id) not in customer_ids:
                 continue
-            intelligence = evaluate_case_intelligence(case, self.simulation_date)
-            effective_level = max(
-                (intelligence.level, _STORED_PRIORITY_LEVEL[case.priority]),
-                key=lambda level: list(PriorityLevel).index(level),
-            )
-            if levels and effective_level not in levels:
+            intelligence = self._case_scoped_customer_intelligence(case)
+            if levels and intelligence.level not in levels:
                 continue
             recommendation = recommend_case(case, self.simulation_date)
             candidates.append(CaseCandidate(
                 case=case,
                 intelligence=intelligence,
                 recommendation=recommendation,
-                risk_level=effective_level,
+                risk_level=intelligence.level,
             ))
         candidates.sort(
             key=lambda item: (
-                -max(item.intelligence.score, _priority_floor(item.case.priority)),
+                -item.intelligence.score,
                 -item.intelligence.metrics.overdue_exposure,
                 str(item.case.id),
             )
         )
         return candidates[:top_n] if top_n is not None else candidates
-
-
-def _priority_floor(priority: RecoveryPriority) -> int:
-    return {
-        RecoveryPriority.LOW: 0,
-        RecoveryPriority.NORMAL: 20,
-        RecoveryPriority.HIGH: 45,
-        RecoveryPriority.CRITICAL: 80,
-    }[priority]

@@ -49,6 +49,14 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
 
     def interpret(self, request: CommandRequest) -> CommandIntent:
         text = self._normalize(request.command)
+        unsupported_constraints = self._unsupported_constraints(text)
+        if unsupported_constraints:
+            named = ", ".join(unsupported_constraints)
+            return self._unknown(
+                CommandFilters(),
+                StructuredQuery(),
+                f"Unsupported query constraint(s): {named}. ReconMate cannot apply these from the current receivables model, so no part of the request was silently dropped.",
+            )
         query = self._structured_query(text)
         filters = self._legacy_filters(query, text)
 
@@ -164,7 +172,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             min_days_overdue=int(more_days.group(1)) + 1 if more_days else None,
             max_days_overdue=max(0, int(fewer_days.group(1)) - 1) if fewer_days else None,
             min_score=min(100, int(more_score.group(1)) + 1) if more_score else None,
-            max_score=max(0, int(fewer_score.group(1)) - 1) if fewer_score else None,
+            max_score=min(100, max(0, int(fewer_score.group(1)) - 1)) if fewer_score else None,
             sort_by=sort_by,
             descending=descending,
             limit=limit,
@@ -273,6 +281,24 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         if query.min_score is not None and query.max_score is not None and query.min_score > query.max_score:
             return "The minimum score filter exceeds the maximum. Correct the numeric range; no filter was weakened."
         return None
+
+    @staticmethod
+    def _unsupported_constraints(text: str) -> list[str]:
+        """Reject plausible business filters that are absent from persisted facts."""
+        unsupported: list[str] = []
+        if re.search(r"\bcredit (?:scores?|ratings?|bureau)\b|\bcibil\b", text):
+            unsupported.append("credit score")
+        geography = re.search(
+            r"\b(?:in|from|located in|based in) (?!disputes?\b|recovery\b|collections?\b|arrears\b|payments?\b|promises?\b|monitoring\b|workflow\b|portfolio\b|critical\b|high\b|medium\b|low\b)([a-z][a-z ]{1,30}?)(?=\s+(?:with|without|who|that|and|or|having|where)\b|$)|"
+            r"\b(?:city|country|region|province|postal code|zip code|geography|location|customer state|billing state)\b",
+            text,
+        )
+        if geography:
+            place = geography.group(1).strip() if geography.lastindex and geography.group(1) else None
+            unsupported.append(f"geography ({place})" if place else "geography")
+        if re.search(r"\b(?:age|gender|sex|ethnicity|race|religion|marital status|demographic|demographics)\b", text):
+            unsupported.append("demographic attributes")
+        return unsupported
 
     @staticmethod
     def _has(text: str, concepts: tuple[str, ...]) -> bool:
