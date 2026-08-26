@@ -39,7 +39,7 @@ export function AIPriorities({ intelligence, loading, error, transitions, casesB
     <Panel className="mt-5 overflow-hidden">
       <SectionHeader eyebrow="Contextual decisioning" title="AI Priorities" detail="The same overdue condition can produce a different decision when customer evidence differs." prominent />
       {caseLinksError && <p className="border-b border-amber-300/10 bg-amber-300/[.04] px-5 py-3 text-[11px] text-amber-100/75">Case links are temporarily unavailable; the current decision evidence remains visible.</p>}
-      <div className="grid gap-px bg-white/[.06] xl:grid-cols-2">
+      <div className="grid xl:grid-cols-2">
         {urgent && <PriorityDecisionCard kind="priority" item={urgent} transition={urgentTransition} recoveryCase={casesByCustomer.get(urgent.entity_id)} caseLinkLoading={caseLinksLoading} onSelectCase={onSelectCase} />}
         {restraint && <PriorityDecisionCard kind="restraint" item={restraint} transition={restraintTransition} recoveryCase={casesByCustomer.get(restraint.entity_id)} caseLinkLoading={caseLinksLoading} onSelectCase={onSelectCase} />}
       </div>
@@ -61,7 +61,7 @@ function PriorityDecisionCard({ kind, item, transition, recoveryCase, caseLinkLo
   const reason = transition?.why_intelligence_changed || item.recommendation.explanation;
 
   return (
-    <article className={`relative bg-[#08111f] p-5 sm:p-7 ${restraint ? "border-t-[3px] border-t-emerald-300/50 xl:border-l xl:border-t-0" : "border-t-[3px] border-t-rose-300/60"}`}>
+    <article className={`relative bg-[#08111f] p-5 sm:p-7 ${restraint ? "border-t-[3px] border-t-emerald-300/50" : "border-t-[3px] border-t-rose-300/60"}`}>
       <p className={`mb-4 text-sm font-extrabold uppercase tracking-[.18em] ${restraint ? "text-emerald-200" : "text-rose-200"}`}>{restraint ? "Do not act yet" : "Act now"}</p>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><p className={`text-[11px] font-bold uppercase tracking-[.14em] ${restraint ? "text-emerald-300" : "text-rose-300"}`}>{restraint ? "Intelligent restraint" : transition ? "Decision changed" : "Operator priority"}</p><h3 className="mt-2 text-2xl font-semibold text-white">{item.entity_name}</h3><p className="mt-1 text-[15px] font-medium tabular-nums text-slate-300">{formatMoney(item.metrics.total_outstanding_amount)} outstanding</p></div>
