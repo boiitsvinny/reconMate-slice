@@ -97,3 +97,26 @@ def test_duplicate_provider_audit_is_explicitly_non_financial() -> None:
     assert entry["title"] == "Duplicate provider event ignored"
     assert entry["detail"] == "Original event: demo_evt_1 · Financial mutation: none · Outstanding unchanged"
     assert entry["before"] == entry["after"] == {"outstanding": "200"}
+
+
+def test_ai_interpretation_fact_and_reassessment_are_scoped_and_ordered() -> None:
+    case, _, _, _ = _records()
+    analysis_id = uuid4()
+    other_case_id = uuid4()
+    base = datetime(2026, 8, 4, 18, tzinfo=UTC)
+    common = {"customer_id": str(case.customer.id), "case_id": str(case.id), "invoice_id": str(case.invoice.id), "candidate_fact": "ACTIVE_DISPUTE"}
+    audits = [
+        AuditEvent(id=uuid4(), entity_type="CommunicationAnalysis", entity_id=analysis_id, event_type="AI_CANDIDATE_EXTRACTED", payload=common, occurred_at=base),
+        AuditEvent(id=uuid4(), entity_type="CommunicationAnalysis", entity_id=analysis_id, event_type="AI_CANDIDATE_ACCEPTED", payload=common, occurred_at=base.replace(microsecond=1)),
+        AuditEvent(id=uuid4(), entity_type="Invoice", entity_id=case.invoice.id, event_type="DISPUTE_OPENED", payload=common, occurred_at=base.replace(microsecond=2)),
+        AuditEvent(id=uuid4(), entity_type="RecoveryCase", entity_id=case.id, event_type="AI_FACT_INTELLIGENCE_REASSESSMENT", payload={**common, "score_before": 70, "score_after": 90, "recommendation_before": "PRIORITIZE_RECOVERY", "recommendation_after": "REVIEW_DISPUTE"}, occurred_at=base.replace(microsecond=3)),
+        AuditEvent(id=uuid4(), entity_type="CommunicationAnalysis", entity_id=uuid4(), event_type="AI_CANDIDATE_ACCEPTED", payload={**common, "case_id": str(other_case_id)}, occurred_at=base.replace(microsecond=4)),
+    ]
+    timeline = build_case_evidence_timeline(FakeSession(audits), case, [], [])  # type: ignore[arg-type]
+    ai_chain = [item for item in timeline if item["event_type"].startswith("AI_") or item["event_type"] == "DISPUTE_OPENED"]
+    assert [item["event_type"] for item in ai_chain] == [
+        "AI_CANDIDATE_EXTRACTED", "AI_CANDIDATE_ACCEPTED", "DISPUTE_OPENED", "AI_FACT_INTELLIGENCE_REASSESSMENT",
+    ]
+    assert ai_chain[0]["category"] == "AI_INTERPRETATION"
+    assert ai_chain[-1]["category"] == "INTELLIGENCE_REASSESSMENT"
+    assert all(item["case_id"] == str(case.id) and item["invoice_id"] == str(case.invoice.id) for item in ai_chain)

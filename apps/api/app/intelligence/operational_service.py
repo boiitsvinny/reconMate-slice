@@ -110,12 +110,13 @@ def _latest_case_activity(case: RecoveryCase) -> date | None:
 
 
 def _metrics(scope: _Scope, calculated_at: date, policy: IntelligencePolicy) -> IntelligenceMetrics:
-    invoice_facts = [(invoice, evaluate_invoice(invoice, calculated_at)) for invoice in scope.invoices]
+    current_invoices = [invoice for invoice in scope.invoices if invoice.issue_date <= calculated_at]
+    invoice_facts = [(invoice, evaluate_invoice(invoice, calculated_at)) for invoice in current_invoices]
     overdue = [(invoice, facts) for invoice, facts in invoice_facts if facts.state == "OVERDUE"]
-    payments = [payment for invoice in scope.invoices for payment in invoice.payments if payment.payment_date <= calculated_at]
+    payments = [payment for invoice in current_invoices for payment in invoice.payments if payment.payment_date <= calculated_at]
     last_payment = max((payment.payment_date for payment in payments), default=None)
     promise_facts = [evaluate_promise(promise, calculated_at) for promise in scope.promises]
-    active_cases = [case for case in scope.cases if case.current_state not in _INACTIVE_CASE_STATES and case.closed_at is None]
+    active_cases = [case for case in scope.cases if case.current_state not in _INACTIVE_CASE_STATES and case.closed_at is None and (case.invoice is None or case.invoice.issue_date <= calculated_at)]
     stalled_cases = []
     for case in active_cases:
         activity = _latest_case_activity(case)
@@ -129,7 +130,7 @@ def _metrics(scope: _Scope, calculated_at: date, policy: IntelligencePolicy) -> 
         broken_promise_count=sum(facts.state == "BROKEN" for facts in promise_facts),
         active_promise_count=sum(facts.state == "ACTIVE" for facts in promise_facts),
         active_dispute_count=sum(
-            invoice.status is InvoiceStatus.DISPUTED and invoice.outstanding_amount > 0 for invoice in scope.invoices
+            invoice.status is InvoiceStatus.DISPUTED and invoice.outstanding_amount > 0 for invoice in current_invoices
         ),
         days_since_last_payment=(calculated_at - last_payment).days if last_payment is not None else None,
         active_recovery_case_count=len(active_cases),

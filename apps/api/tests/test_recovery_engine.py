@@ -38,6 +38,21 @@ def test_invoice_facts_detect_paid_open_due_and_overdue() -> None:
     assert facts.partially_paid is True
 
 
+def test_future_issued_invoice_is_scheduled_and_blocked_from_recovery() -> None:
+    customer = _customer()
+    invoice = Invoice(
+        customer=customer, invoice_number="FUTURE-INV", issue_date=SIM_DATE + timedelta(days=5),
+        due_date=SIM_DATE - timedelta(days=1), original_amount=Decimal("100"),
+        outstanding_amount=Decimal("100"), status=InvoiceStatus.OVERDUE,
+    )
+    case = RecoveryCase(customer=customer, invoice=invoice, current_state=RecoveryState.NEW, priority=RecoveryPriority.NORMAL)
+    facts = evaluate_invoice(invoice, SIM_DATE)
+    evaluation = evaluate_case(case, SIM_DATE)
+    assert facts.state == "SCHEDULED" and facts.days_overdue == 0
+    assert evaluation.eligibility.allowed is False
+    assert "INVOICE_SCHEDULED" in evaluation.eligibility.blocking_reasons
+
+
 def test_promise_facts_detect_active_broken_and_fulfilled() -> None:
     customer = _customer()
     invoice = _invoice(customer, "100", SIM_DATE - timedelta(days=2))

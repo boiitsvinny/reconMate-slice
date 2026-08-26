@@ -17,17 +17,9 @@ const navigation = [
 export function AppHeader({ connected, updating = false }: AppHeaderProps) {
   const pathname = usePathname();
   const home = pathname === "/";
-  const [today, setToday] = useState("");
   const [navigationVisible, setNavigationVisible] = useState(true);
   const lastScrollY = useRef(0);
   const { enabled: inspectionEnabled, toggle: toggleInspection } = useInsightMode();
-
-  useEffect(() => {
-    const update = () => setToday(new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date()));
-    update();
-    const timer = window.setInterval(update, 60_000);
-    return () => window.clearInterval(timer);
-  }, []);
 
   useEffect(() => {
     let frame = 0;
@@ -78,10 +70,6 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
       </nav>
       <div className="flex items-center gap-3">
         {!home && <div className={`hidden rounded-lg border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] lg:block ${updating ? "border-sky-300/20 bg-sky-300/[.07] text-sky-200" : connected ? "border-emerald-300/15 bg-emerald-300/[0.06] text-emerald-200" : "border-amber-300/20 bg-amber-300/[.07] text-amber-100"}`}>{systemLabel}</div>}
-        <div className="rounded-lg border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 text-right sm:px-3">
-          <div className="text-[8px] font-semibold uppercase tracking-[0.12em] text-slate-500 sm:text-[10px]">Actual date</div>
-          <div className="mt-0.5 whitespace-nowrap text-[10px] font-semibold text-slate-200 sm:text-xs">{today || "-"}</div>
-        </div>
         {!home && <span className={`h-2 w-2 rounded-full ${updating ? "animate-pulse bg-sky-300" : connected ? "bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,.8)]" : "bg-rose-400"}`} aria-label={updating ? "Refreshing live data" : connected ? "API connected" : "API unavailable"} />}
       </div>
     </header>

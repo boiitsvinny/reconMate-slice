@@ -309,7 +309,7 @@ def persist_receivables(
             )
             db.add(invoice)
             invoices.append(invoice)
-            if record.outstanding_amount > 0 and record.status not in {InvoiceStatus.CANCELLED, InvoiceStatus.WRITTEN_OFF}:
+            if record.issue_date <= operating_date and record.outstanding_amount > 0 and record.status not in {InvoiceStatus.CANCELLED, InvoiceStatus.WRITTEN_OFF}:
                 recovery_case = RecoveryCase(
                     customer=customer, invoice=invoice, current_state=RecoveryState.NEW,
                     priority=RecoveryPriority.NORMAL, opened_at=occurred_at, updated_at=occurred_at,

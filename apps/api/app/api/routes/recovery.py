@@ -39,14 +39,14 @@ def _case_query():
 @router.get("/recommendations", response_model=list[RecoveryRecommendation], summary="Return a prioritized read-only recommendation queue")
 def list_recommendations(db: Session = Depends(get_db)) -> list[RecoveryRecommendation]:
     simulation_date = _simulation_date(db)
-    cases = db.scalars(_case_query()).all()
+    cases = [case for case in db.scalars(_case_query()).all() if case.invoice is None or case.invoice.issue_date <= simulation_date]
     return prioritized_recommendations(cases, simulation_date)
 
 
 @router.get("/cases", summary="List recovery cases with deterministic state")
 def list_recovery_cases(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
     simulation_date = _simulation_date(db)
-    cases = db.scalars(_case_query().order_by(RecoveryCase.opened_at)).all()
+    cases = [case for case in db.scalars(_case_query().order_by(RecoveryCase.opened_at)).all() if case.invoice is None or case.invoice.issue_date <= simulation_date]
     return [{
         "case_id": str(case.id), "customer_id": str(case.customer_id), "customer_name": case.customer.name,
         "invoice_id": str(case.invoice_id) if case.invoice_id else None,

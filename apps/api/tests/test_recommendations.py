@@ -32,6 +32,7 @@ def _analysis(case, *, intent="NO_CLEAR_COMMITMENT", claim=False, dispute=False,
     }
     analysis = CommunicationAnalysis(id=uuid4(), communication=communication, provider="mock", model_version="test",
                                      result=result, confidence=Decimal("0.9000"), review_status=AnalysisReviewStatus.NOT_REQUIRED)
+    communication.ai_processing_metadata = {"accepted_analysis_ids": [str(analysis.id)]}
     case.customer.communications = [communication]
     communication.analyses = [analysis]
 

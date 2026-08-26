@@ -45,6 +45,8 @@ def _source(event_type: str, payload: dict[str, Any], actor_type: str | None = N
 
 
 def _category(event_type: str) -> str:
+    if event_type.startswith("AI_CANDIDATE"):
+        return "AI_INTERPRETATION"
     if "INTELLIGENCE_REASSESSMENT" in event_type or event_type.startswith("SIMULATION_INTELLIGENCE"):
         return "INTELLIGENCE_REASSESSMENT"
     if event_type.startswith("RECOVERY_ACTION") or event_type == "EXTERNAL_PAYMENT_REQUEST_CREATED":
@@ -55,6 +57,12 @@ def _category(event_type: str) -> str:
 
 
 def _title(event_type: str) -> str:
+    if event_type == "AI_CANDIDATE_EXTRACTED":
+        return "AI candidate extracted"
+    if event_type == "AI_CANDIDATE_ACCEPTED":
+        return "Operator accepted candidate"
+    if event_type == "AI_CANDIDATE_REJECTED":
+        return "Operator rejected candidate"
     if "INTELLIGENCE_REASSESSMENT" in event_type or event_type.startswith("SIMULATION_INTELLIGENCE"):
         return "Intelligence recalculated"
     if event_type == "EXTERNAL_PAYMENT_REQUEST_CREATED":
@@ -71,7 +79,7 @@ def _title(event_type: str) -> str:
 def _changes(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     before: dict[str, Any] = {}
     after: dict[str, Any] = {}
-    for field in ("outstanding", "score", "recommendation", "risk_level", "state"):
+    for field in ("outstanding", "score", "recommendation", "risk_level", "state", "blockers"):
         before_value = payload.get(f"{field}_before", payload.get(f"previous_{field}"))
         after_value = payload.get(f"{field}_after", payload.get(f"current_{field}"))
         if before_value is not None or after_value is not None:
@@ -122,6 +130,7 @@ def build_case_evidence_timeline(
     customer_id = case.customer_id or case.customer.id
     promise_ids = [item.id for item in case.invoice.promises_to_pay] if case.invoice is not None else []
     action_ids = [item.id for item in case.actions]
+    analysis_ids = [analysis.id for communication in case.customer.communications for analysis in communication.analyses]
     request_ids = [item.id for item in payment_requests]
     payment_ids = [item.payment_id for item in provider_events]
 
@@ -135,6 +144,8 @@ def build_case_evidence_timeline(
         audit_scope.append(and_(AuditEvent.entity_type == "PromiseToPay", AuditEvent.entity_id.in_(promise_ids)))
     if action_ids:
         audit_scope.append(and_(AuditEvent.entity_type == "RecoveryAction", AuditEvent.entity_id.in_(action_ids)))
+    if analysis_ids:
+        audit_scope.append(and_(AuditEvent.entity_type == "CommunicationAnalysis", AuditEvent.entity_id.in_(analysis_ids)))
     if request_ids:
         audit_scope.append(and_(AuditEvent.entity_type == "ExternalPaymentRequest", AuditEvent.entity_id.in_(request_ids)))
     if payment_ids:
@@ -144,14 +155,19 @@ def build_case_evidence_timeline(
     entries: list[dict[str, Any]] = []
     for event in audits:
         payload = dict(event.payload or {})
+        if event.entity_type == "CommunicationAnalysis" and (
+            (payload.get("case_id") and str(payload["case_id"]) != str(case.id))
+            or (payload.get("invoice_id") and str(payload["invoice_id"]) != str(invoice_id))
+        ):
+            continue
         for key, expected in (("customer_id", customer_id), ("case_id", case.id), ("invoice_id", invoice_id)):
             if payload.get(key) is not None and (expected is None or str(payload[key]) != str(expected)):
                 payload.pop(key)
         # ProviderEvent is the canonical payment event; avoid presenting its audit mirror twice.
         if event.event_type == "PROVIDER_PAYMENT_EVENT_APPLIED":
             continue
-        linked_to_case = event.entity_type in {"RecoveryCase", "RecoveryAction", "PromiseToPay", "ExternalPaymentRequest", "Payment"}
-        linked_to_invoice = event.entity_type in {"Invoice", "PromiseToPay", "RecoveryCase", "RecoveryAction", "ExternalPaymentRequest", "Payment"}
+        linked_to_case = event.entity_type in {"RecoveryCase", "RecoveryAction", "PromiseToPay", "ExternalPaymentRequest", "Payment", "CommunicationAnalysis"}
+        linked_to_invoice = event.entity_type in {"Invoice", "PromiseToPay", "RecoveryCase", "RecoveryAction", "ExternalPaymentRequest", "Payment", "CommunicationAnalysis"}
         entries.append(_entry(
             event_id=event.id, occurred_at=event.occurred_at, event_type=event.event_type,
             payload=payload, customer_id=customer_id,

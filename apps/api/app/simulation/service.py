@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from app.intelligence.service import persist_analysis
+from app.intelligence.provider import MockCommunicationIntelligenceProvider
 from app.intelligence.operational_schemas import IntelligenceResult
 from app.intelligence.operational_service import evaluate_case_intelligence
 from app.intelligence.transitions import compare_intelligence
@@ -67,7 +68,8 @@ def _communication(db: Session, state: SimulationState, customer: Customer, invo
     message = Communication(id=uuid.uuid5(uuid.NAMESPACE_URL, f"reconmate.simulation/communication/{state.cycle}/{ordinal}"), customer=customer,
                             direction=CommunicationDirection.INBOUND, channel=CommunicationChannel.PORTAL, content=content, occurred_at=_when(state))
     db.add(message); db.flush()
-    analysis = persist_analysis(message)
+    # Synthetic simulation remains deterministic and never incurs live-model latency or cost.
+    analysis = persist_analysis(message, provider_override=MockCommunicationIntelligenceProvider())
     db.add(analysis)
     return message
 

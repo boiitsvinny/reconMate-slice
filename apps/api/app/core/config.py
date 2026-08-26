@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://reconmate:change-me-for-local-development@localhost:5432/reconmate"
     ai_provider: str = "mock"
     ai_model: str | None = None
+    openai_api_key: SecretStr | None = None
+    ai_timeout_seconds: float = Field(default=12, gt=0, le=30)
+    ai_confidence_threshold: float = Field(default=0.7, ge=0, le=1)
+    ai_allow_mock_fallback: bool = False
     payment_provider_mode: str = "provider_demo"
     razorpay_key_id: str | None = None
     razorpay_key_secret: str | None = None

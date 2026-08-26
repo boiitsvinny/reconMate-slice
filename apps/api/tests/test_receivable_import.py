@@ -8,6 +8,7 @@ from app.imports import receivables
 from app.imports.receivables import parse_receivables_csv, persist_receivables
 from app.api.routes.portfolio import _invoice_item
 from app.intelligence.operational_service import evaluate_customer_intelligence
+from app.recovery.engine import evaluate_invoice
 from app.models.domain import (
     AuditEvent,
     Customer,
@@ -111,6 +112,19 @@ def test_confirm_builds_existing_domain_records_and_provenance(monkeypatch) -> N
     imported_invoice = next(value for value in session.added if isinstance(value, Invoice))
     imported_invoice.customer_id = imported_invoice.customer.id
     assert _invoice_item(imported_invoice, {imported_invoice.id}).source == "CSV_IMPORT"
+
+
+def test_future_invoice_is_imported_as_scheduled_without_recovery_case(monkeypatch) -> None:
+    parsed = parse_receivables_csv(csv(
+        "EXT-FUTURE,Scheduled Trading,INV-FUTURE,1000,1000,2026-09-01,2026-09-30,INR,OPEN",
+    ), TODAY, [])
+    session = FakeSession()
+    monkeypatch.setattr(receivables, "synchronize_recovery_states", lambda _db, _date: {"cases_evaluated": 0, "cases_changed": 0})
+    result = persist_receivables(session, parsed, [], TODAY)  # type: ignore[arg-type]
+    invoice = next(value for value in session.added if isinstance(value, Invoice))
+    assert result.invoices_created == 1 and result.recovery_cases_created == 0
+    assert not any(isinstance(value, RecoveryCase) for value in session.added)
+    assert evaluate_invoice(invoice, TODAY).state == "SCHEDULED"
 
 
 def test_imported_facts_use_the_same_intelligence_engine_as_seeded_facts(monkeypatch) -> None:

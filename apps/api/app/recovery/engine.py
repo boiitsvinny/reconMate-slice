@@ -66,7 +66,9 @@ def evaluate_invoice(invoice: Invoice, simulation_date: date) -> InvoiceFacts:
     outstanding = invoice.outstanding_amount
     recovered = invoice.original_amount - outstanding
     percentage = Decimal("0") if invoice.original_amount == 0 else (recovered / invoice.original_amount * 100).quantize(Decimal("0.01"))
-    if outstanding == 0:
+    if invoice.issue_date > simulation_date:
+        state, overdue_days = "SCHEDULED", 0
+    elif outstanding == 0:
         state, overdue_days = "PAID", 0
     elif invoice.due_date < simulation_date:
         state, overdue_days = "OVERDUE", (simulation_date - invoice.due_date).days
@@ -123,6 +125,8 @@ def evaluate_case(case: RecoveryCase, simulation_date: date) -> CaseEvaluation:
     reasons: list[str] = []
     if disputed:
         reasons.append("ACTIVE_DISPUTE")
+    if invoice_facts is not None and invoice_facts.state == "SCHEDULED":
+        reasons.append("INVOICE_SCHEDULED")
     if case.current_state is RecoveryState.CLOSED or case.closed_at is not None:
         reasons.append("CASE_CLOSED")
     if invoice_facts is not None and invoice_facts.state == "PAID":
@@ -134,7 +138,9 @@ def evaluate_case(case: RecoveryCase, simulation_date: date) -> CaseEvaluation:
     if len(recent_actions) >= MAX_AUTOMATED_ACTIONS:
         reasons.append("MAX_RECENT_AUTOMATED_ACTIONS")
     derived_state = _desired_case_state(case, invoice_facts, promises, disputed)
-    if disputed:
+    if invoice_facts and invoice_facts.state == "SCHEDULED":
+        attention = "Invoice is scheduled for a future operating date and is outside current recovery scope."
+    elif disputed:
         attention = "Dispute is active; automated recovery must remain on hold."
     elif any(promise.state == "ACTIVE" for promise in promises):
         attention = "Await the active payment promise deadline or a matching payment."
@@ -223,7 +229,7 @@ def recovery_summary(session: Session, simulation_date: date) -> dict[str, int |
     promises = session.scalars(select(PromiseToPay).options(
         selectinload(PromiseToPay.invoice).selectinload(Invoice.payments), selectinload(PromiseToPay.source_communication),
     )).all()
-    evaluations = [evaluate_case(case, simulation_date) for case in cases]
+    evaluations = [evaluate_case(case, simulation_date) for case in cases if case.invoice is None or case.invoice.issue_date <= simulation_date]
     invoice_facts = [(invoice, evaluate_invoice(invoice, simulation_date)) for invoice in invoices]
     promise_facts = [evaluate_promise(promise, simulation_date) for promise in promises]
     overdue_exposure = sum((facts.outstanding_amount for _, facts in invoice_facts if facts.state == "OVERDUE"), Decimal("0"))

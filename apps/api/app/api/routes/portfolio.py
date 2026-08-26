@@ -104,11 +104,11 @@ class PortfolioSummary(BaseModel):
     recovery_cases: int
 
 
-def _invoice_item(invoice: Invoice, imported_ids: set[UUID] | None = None) -> InvoiceItem:
+def _invoice_item(invoice: Invoice, imported_ids: set[UUID] | None = None, operating_date: date | None = None) -> InvoiceItem:
     latest_payment = max(invoice.payments, key=lambda item: (item.payment_date, str(item.id)), default=None)
     return InvoiceItem(id=invoice.id, invoice_number=invoice.invoice_number, issue_date=invoice.issue_date,
                        due_date=invoice.due_date, original_amount=invoice.original_amount,
-                       outstanding_amount=invoice.outstanding_amount, status=invoice.status.value,
+                       outstanding_amount=invoice.outstanding_amount, status="SCHEDULED" if operating_date and invoice.issue_date > operating_date else invoice.status.value,
                        customer_id=invoice.customer_id,
                        source="CSV_IMPORT" if imported_ids and invoice.id in imported_ids else "DEMO_SANDBOX",
                        latest_payment_amount=latest_payment.amount if latest_payment else None,
@@ -143,10 +143,11 @@ def get_customer(customer_id: UUID, db: Session = Depends(get_db)) -> CustomerDe
         AuditEvent.entity_type == "Invoice", AuditEvent.event_type == "RECEIVABLE_IMPORTED",
         AuditEvent.entity_id.in_([item.id for item in customer.invoices]),
     ))) if customer.invoices else set()
+    operating_date = db.scalar(select(SimulationState.simulation_date).where(SimulationState.name == "default"))
     return CustomerDetail(
         id=customer.id, name=customer.name, account_reference=customer.account_reference,
         segment=customer.segment, is_strategic_account=customer.is_strategic_account,
-        invoices=[_invoice_item(invoice, imported_ids) for invoice in sorted(customer.invoices, key=lambda item: item.due_date)],
+        invoices=[_invoice_item(invoice, imported_ids, operating_date) for invoice in sorted(customer.invoices, key=lambda item: item.due_date)],
         promises_to_pay=[PromiseItem(id=item.id, invoice_id=item.invoice_id, promised_amount=item.promised_amount,
                                      promised_date=item.promised_date, status=item.status.value, confidence=item.confidence)
                          for item in sorted(customer.promises_to_pay, key=lambda item: item.promised_date)],
@@ -169,14 +170,16 @@ def list_invoices(customer_id: UUID | None = Query(default=None), db: Session = 
         AuditEvent.entity_type == "Invoice", AuditEvent.event_type == "RECEIVABLE_IMPORTED",
         AuditEvent.entity_id.in_([item.id for item in invoices]),
     ))) if invoices else set()
-    return [_invoice_item(invoice, imported_ids) for invoice in invoices]
+    operating_date = db.scalar(select(SimulationState.simulation_date).where(SimulationState.name == "default"))
+    return [_invoice_item(invoice, imported_ids, operating_date) for invoice in invoices]
 
 
 @router.get("/portfolio/summary", response_model=PortfolioSummary, summary="Return factual portfolio metrics")
 def get_portfolio_summary(db: Session = Depends(get_db)) -> PortfolioSummary:
-    metrics = portfolio_summary(db)
     simulation_date = db.scalar(select(SimulationState.simulation_date).where(SimulationState.name == "default"))
-    total_original = db.scalar(select(func.coalesce(func.sum(Invoice.original_amount), 0))) or Decimal("0")
+    metrics = portfolio_summary(db, simulation_date)
+    total_original = db.scalar(select(func.coalesce(func.sum(Invoice.original_amount), 0)).where(Invoice.issue_date <= simulation_date)) if simulation_date else Decimal("0")
+    total_original = total_original or Decimal("0")
     return PortfolioSummary(
         simulation_date=simulation_date, total_customers=int(metrics["customers"]), total_invoices=int(metrics["invoices"]),
         open_invoices=int(metrics["open_invoices"]), overdue_invoices=int(metrics["overdue_invoices"]),

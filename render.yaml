@@ -17,6 +17,16 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: AI_PROVIDER
-        value: mock
+        value: openai
+      - key: AI_MODEL
+        value: gpt-4o-mini-2024-07-18
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: AI_TIMEOUT_SECONDS
+        value: "12"
+      - key: AI_CONFIDENCE_THRESHOLD
+        value: "0.70"
+      - key: AI_ALLOW_MOCK_FALLBACK
+        value: "false"
       - key: SIMULATION_TICK_INTERVAL_SECONDS
         value: "15"

@@ -28,9 +28,12 @@ def _signals(case: RecoveryCase, simulation_date: date) -> list[CommunicationSig
     """Return valid, recent-or-historical stored interpretation summaries only."""
     signals: list[CommunicationSignal] = []
     for communication in case.customer.communications:
+        accepted = set((communication.ai_processing_metadata or {}).get("accepted_analysis_ids") or [])
         if communication.direction.value != "INBOUND":
             continue
         for analysis in communication.analyses:
+            if str(analysis.id) not in accepted:
+                continue
             try:
                 result = CommunicationAnalysisResult.model_validate(analysis.result)
             except Exception:

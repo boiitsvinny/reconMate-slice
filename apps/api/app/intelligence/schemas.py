@@ -21,6 +21,15 @@ class Intent(str, Enum):
     OTHER = "OTHER"
 
 
+class CandidateFactType(str, Enum):
+    ACTIVE_DISPUTE = "ACTIVE_DISPUTE"
+    PAYMENT_PROMISE = "PAYMENT_PROMISE"
+    BROKEN_PROMISE = "BROKEN_PROMISE"
+    CUSTOMER_DELAY_REASON = "CUSTOMER_DELAY_REASON"
+    POSSIBLE_PAYMENT_CLAIM = "POSSIBLE_PAYMENT_CLAIM"
+    UNKNOWN_NEEDS_REVIEW = "UNKNOWN_NEEDS_REVIEW"
+
+
 class Sentiment(str, Enum):
     COOPERATIVE = "COOPERATIVE"
     NEUTRAL = "NEUTRAL"
@@ -66,6 +75,19 @@ class PaymentCompletedClaim(BaseModel):
     confidence: float = Field(default=0, ge=0, le=1)
 
 
+class CandidateFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    fact_type: CandidateFactType
+    confidence: float = Field(ge=0, le=1)
+    evidence_span: str = Field(min_length=1, max_length=500)
+    proposed_data: dict[str, str | bool | None] = Field(default_factory=dict)
+    persistence_eligible: bool
+    defer_reason: str | None = None
+    operator_confirmation_required: bool = True
+
+
 class CommunicationAnalysisResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     intent: Intent
@@ -77,6 +99,7 @@ class CommunicationAnalysisResult(BaseModel):
     urgency: Urgency = Urgency.NORMAL
     requires_human_review: bool = False
     review_reasons: list[str] = Field(default_factory=list)
+    candidates: list[CandidateFact] = Field(default_factory=list)
 
 
 class PreviewRequest(BaseModel):
@@ -89,4 +112,38 @@ class AnalysisResponse(BaseModel):
     provider: str
     model_version: str | None = None
     analyzed_at: str | None = None
+    runtime_mode: str
     result: CommunicationAnalysisResult
+    candidates: list[CandidateFact] = Field(default_factory=list)
+
+
+class CandidateDecision(str, Enum):
+    ACCEPT = "ACCEPT"
+    REJECT = "REJECT"
+
+
+class CandidateDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: str
+    invoice_id: str
+    candidate_id: str
+    decision: CandidateDecision
+    operator_id: str = Field(min_length=1, max_length=255)
+
+
+class CandidateDecisionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    analysis_id: str
+    candidate: CandidateFact
+    decision: CandidateDecision
+    operator_id: str
+    persisted_fact: str | None
+    score_before: int
+    score_after: int
+    blockers_before: list[str]
+    blockers_after: list[str]
+    recommendation_before: str
+    recommendation_after: str
+    financial_mutation: str = "NONE"

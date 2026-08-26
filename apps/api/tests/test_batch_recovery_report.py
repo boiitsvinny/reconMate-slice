@@ -132,6 +132,10 @@ def test_batch_recovery_classifies_full_partial_and_current_open_state() -> None
     assert reconciliation["fully_recovered_account_count"] == 1
     assert reconciliation["partially_recovered_account_count"] == 1
     assert proof["scope"]["provenance"] == "Mixed: CSV Import + Synthetic Demo Sandbox"
+    assert proof["metric_metadata"]["observed_recovery"] == {
+        "unit": "INR", "scope": "overdue cohort persisted payments", "window": "post-due through operating date",
+    }
+    assert {item["source"] for item in proof["payment_provenance"]} == {"Synthetic Demo Sandbox", "Provider Demo Mode"}
 
 
 def test_stopping_rules_are_authoritative_and_paid_cases_are_not_targets() -> None:
@@ -144,6 +148,12 @@ def test_stopping_rules_are_authoritative_and_paid_cases_are_not_targets() -> No
     assert stopping["blocked_action_count"] == 1
     assert stopping["approval_required_case_count"] == 2
     assert stopping["unresolved_exception_count"] == 2
+    assert stopping["unresolved_exception_categories"] == {
+        "elevated_open_cases": 2, "broken_promise_cases": 0,
+        "active_dispute_cases": 1, "workflow_requests_awaiting_approval": 1,
+    }
+    assert stopping["exception_categories_overlap"] is True
+    assert stopping["other_blocked_case_count"] == 0
     assert {row["case_id"] for row in stopping["hold_evidence"]} == {str(partial_case.id), str(disputed_case.id)}
 
 
@@ -157,3 +167,20 @@ def test_baseline_uses_same_scope_and_makes_no_payment_counterfactual() -> None:
     assert "Payment outcomes are not re-simulated" in baseline["limitation"]
     assert proof["reconciliation"]["measurement_note"].endswith("It does not claim ReconMate caused payment.")
     assert "recovery_amount" not in baseline
+
+
+def test_future_invoice_is_excluded_consistently_from_report_scope() -> None:
+    customer = Customer(id=uuid4(), name="Future Co", account_reference="FUTURE")
+    invoice = Invoice(
+        id=uuid4(), customer=customer, invoice_number="FUTURE-1",
+        issue_date=OPERATING_DATE + timedelta(days=1), due_date=OPERATING_DATE - timedelta(days=10),
+        original_amount=Decimal("1000"), outstanding_amount=Decimal("1000"), status=InvoiceStatus.OVERDUE,
+    )
+    case = RecoveryCase(id=uuid4(), customer=customer, invoice=invoice, current_state=RecoveryState.NEW, priority=RecoveryPriority.HIGH)
+    proof = build_batch_recovery_proof(
+        simulation_date=OPERATING_DATE, cycle=7, invoices=[invoice], cases=[case], actions=[],
+        payment_requests=[], provider_events=[], imported_invoice_ids=set(),
+    )
+    assert proof["scope"]["invoice_count"] == 0 and proof["scope"]["case_count"] == 0
+    assert proof["reconciliation"]["starting_overdue_exposure"] == "0.00"
+    assert proof["reconciliation"]["remaining_overdue_exposure"] == "0.00"

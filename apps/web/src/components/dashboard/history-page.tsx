@@ -4,14 +4,15 @@ import { useMemo } from "react";
 import { AppHeader } from "@/components/layout/app-header";
 import { InvoiceRegister } from "./invoice-register";
 import { ReceivableImport } from "./receivable-import";
-import { useCustomers, useInvoices, usePortfolioIntelligence } from "./queries";
+import { useCustomers, useInvoices, usePortfolioIntelligence, useSimulationState } from "./queries";
 
 export function HistoryPage() {
   const customers = useCustomers();
   const invoices = useInvoices();
   const intelligence = usePortfolioIntelligence();
-  const ready = Boolean(customers.data && invoices.data);
-  const error = customers.error ?? invoices.error;
+  const simulation = useSimulationState();
+  const ready = Boolean(customers.data && invoices.data && simulation.data);
+  const error = customers.error ?? invoices.error ?? simulation.error;
   const errorMessage = error instanceof Error ? error.message : error ? "Unable to load invoice history." : null;
   const intelligenceError = intelligence.error instanceof Error ? intelligence.error.message : intelligence.isError ? "Risk intelligence is temporarily unavailable." : null;
   const customerMap = useMemo(() => new Map(customers.data?.map((customer) => [customer.id, customer]) ?? []), [customers.data]);
@@ -24,13 +25,13 @@ export function HistoryPage() {
         <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
           <div className="max-w-3xl"><p className="text-[11px] font-bold uppercase tracking-[.22em] text-sky-200">Authoritative receivables ledger</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Invoice Record Ledger</h1>
-          <p className="mt-3 text-sm leading-6 text-slate-300/90">Review every live invoice record in the operational source of truth. Select a row to inspect its factual invoice and customer profile.</p></div>
+          <p className="mt-3 text-sm leading-6 text-slate-300/90">Review every persisted invoice record. Current status is evaluated at operating date {simulation.data?.simulation_date ?? "—"}; future-issued records are explicitly scheduled and remain outside recovery.</p></div>
           <ReceivableImport onImported={() => Promise.all([customers.refetch(), invoices.refetch(), intelligence.refetch()])} />
         </header>
         {!ready && errorMessage && <PageError message={errorMessage} onRetry={async () => { await Promise.all([customers.refetch(), invoices.refetch()]); }} />}
         {!ready && !errorMessage && <PageSkeleton />}
         {ready && (errorMessage || intelligenceError) && <div className="mt-5 flex flex-col justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 sm:flex-row sm:items-center"><p className="text-xs text-amber-100">{errorMessage ? "Live refresh is delayed. Showing the last successful invoice data." : "Invoice records are available, but current risk intelligence could not be loaded."}</p><button type="button" onClick={() => void Promise.all([customers.refetch(), invoices.refetch(), intelligence.refetch()])} className="text-xs font-semibold text-amber-50 underline decoration-amber-200/30 underline-offset-4">Retry refresh</button></div>}
-        {invoices.data && <InvoiceRegister invoices={invoices.data} customers={customerMap} riskByCustomer={riskByCustomer} riskAvailable={Boolean(intelligence.data)} />}
+        {invoices.data && simulation.data && <InvoiceRegister invoices={invoices.data} customers={customerMap} riskByCustomer={riskByCustomer} riskAvailable={Boolean(intelligence.data)} operatingDate={simulation.data.simulation_date} />}
       </div>
     </main>
   );

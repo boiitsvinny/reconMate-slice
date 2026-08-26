@@ -22,7 +22,7 @@ const statusTone = (status: string) => status === "PAID" ? "emerald" : status ==
 const riskTone = (level?: PriorityLevel) => level === "CRITICAL" ? "rose" : level === "HIGH" ? "amber" : level === "MEDIUM" ? "sky" : "slate";
 const riskRank: Record<PriorityLevel, number> = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
 
-export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvailable }: { invoices: Invoice[]; customers: Map<string, CustomerSummary>; riskByCustomer: Map<string, Risk>; riskAvailable: boolean }) {
+export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvailable, operatingDate }: { invoices: Invoice[]; customers: Map<string, CustomerSummary>; riskByCustomer: Map<string, Risk>; riskAvailable: boolean; operatingDate: string }) {
   const pageSize = 30;
   const [page, setPage] = useState(0);
   const [sort, setSort] = useState<SortKey>("newest");
@@ -97,7 +97,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
       <SectionHeader
         eyebrow="Receivables register"
         title="Invoice operations register"
-        detail="Sort and narrow the complete live invoice portfolio. Select any record for its factual profile."
+        detail={`Complete persisted ledger as of operating date ${operatingDate}. Scheduled invoices are visible but excluded from current recovery.`}
         prominent
         action={
           <div className="flex items-center gap-3 text-xs text-slate-400">
@@ -150,7 +150,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
             <button type="button" key={invoice.id} onClick={(event) => openPreview(invoice, event.clientX, event.clientY)} className="interactive-row grid w-full grid-cols-[1.15fr_1fr_.7fr_.75fr_.72fr_.72fr] gap-4 border-b border-white/[.045] px-5 py-4 text-left text-sm last:border-b-0 focus:bg-sky-400/[.06] focus:outline-none">
               <div>
                 <div className="flex items-center gap-2"><p className="font-medium text-slate-200">{invoice.invoice_number}</p>{invoice.source === "CSV_IMPORT" && <StatusPill tone="sky">Imported</StatusPill>}</div>
-                <p className="mt-0.5 text-[11px] text-slate-500">Issued {invoice.issue_date}</p>
+                <p className="mt-0.5 text-[11px] text-slate-500">{invoice.status === "SCHEDULED" ? `Scheduled to issue ${invoice.issue_date}` : `Issued ${invoice.issue_date}`}</p>
               </div>
               <p className="truncate text-slate-300">{customers.get(invoice.customer_id)?.name ?? "Portfolio account"}</p>
               <p className="text-slate-300">{invoice.due_date}</p>
@@ -182,7 +182,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
           <dl className="mt-4 grid grid-cols-2 gap-4 text-xs">
             <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Invoice exposure</dt><dd className="mt-1 font-semibold text-white">{money(previewInvoice.outstanding_amount)}</dd></div>
             <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Due date</dt><dd className="mt-1 font-semibold text-white">{previewInvoice.due_date}</dd></div>
-            <div className="col-span-2"><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Account outstanding</dt><dd className="mt-1 font-semibold text-white">{money(customers.get(previewInvoice.customer_id)?.outstanding_amount ?? "0")}</dd></div>
+            <div className="col-span-2"><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Operating scope</dt><dd className="mt-1 font-semibold text-white">{previewInvoice.status === "SCHEDULED" ? `Future invoice · enters scope on ${previewInvoice.issue_date}` : `Current at ${operatingDate}`}</dd></div>
             {previewInvoice.latest_payment_amount && <div className="col-span-2 rounded-xl border border-emerald-300/12 bg-emerald-300/[.035] p-3"><dt className="text-[10px] uppercase tracking-[.1em] text-emerald-300">Latest persisted payment</dt><dd className="mt-1 font-semibold text-white">{money(previewInvoice.latest_payment_amount)} · {previewInvoice.latest_payment_date}</dd><dd className="mt-1 break-all text-[10px] text-slate-500">Reference {previewInvoice.latest_payment_reference ?? "not recorded"}</dd></div>}
           </dl>
           <p className="mt-4 text-[10px] leading-4 text-slate-500">Move onto this card to keep it open. Move away and it will fade automatically.</p>

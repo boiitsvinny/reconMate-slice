@@ -73,7 +73,8 @@ def build_batch_recovery_proof(
     """
     scoped_invoices = [
         invoice for invoice in invoices
-        if invoice.due_date < simulation_date
+        if invoice.issue_date <= simulation_date
+        and invoice.due_date < simulation_date
         and invoice.status not in EXCLUDED_INVOICE_STATUSES
         and (
             invoice.outstanding_amount > 0
@@ -218,6 +219,23 @@ def build_batch_recovery_proof(
         if action.status is RecoveryActionStatus.PENDING_APPROVAL
     }
     unresolved_exception_ids.update(pending_case_ids)
+    elevated_case_ids = {
+        str(case.id) for case, evaluation, _, _ in active_case_evidence
+        if evaluation.derived_state not in terminal_states and case.priority.value in {"HIGH", "CRITICAL"}
+    }
+    broken_promise_case_ids = {
+        str(case.id) for case, evaluation, _, _ in active_case_evidence
+        if evaluation.derived_state not in terminal_states and any(promise.state == "BROKEN" for promise in evaluation.promises)
+    }
+    dispute_case_ids = {
+        str(case.id) for case, evaluation, _, _ in active_case_evidence
+        if evaluation.derived_state not in terminal_states and evaluation.active_dispute
+    }
+    exception_memberships = len(elevated_case_ids) + len(broken_promise_case_ids) + len(dispute_case_ids) + len(pending_case_ids)
+    other_blocked_case_count = sum(
+        not {"ACTIVE_DISPUTE", "ACTIVE_PAYMENT_PROMISE"}.intersection(row["reasons"])
+        for row in hold_rows
+    )
 
     age_only_targets = [
         (case, evaluation) for case, evaluation, _, _ in active_case_evidence
@@ -247,6 +265,12 @@ def build_batch_recovery_proof(
     ).quantize(Decimal("0.01"))
     duplicate_count = sum(event.entity_id in request_by_id for event in duplicate_provider_audits)
     payment_evidence.sort(key=lambda item: (item["payment_date"], item["payment_id"]), reverse=True)
+    provenance_counts: dict[str, dict[str, Any]] = {}
+    for row in payment_evidence:
+        category = row["provenance"]
+        current = provenance_counts.setdefault(category, {"payment_count": 0, "amount": Decimal("0")})
+        current["payment_count"] += 1
+        current["amount"] += Decimal(row["amount"])
 
     return {
         "scope": {
@@ -273,14 +297,33 @@ def build_batch_recovery_proof(
             "partially_recovered_account_count": partially_recovered_accounts,
             "measurement_note": "Observed recovery sums persisted payments recorded after each scoped invoice became overdue. It does not claim ReconMate caused payment.",
         },
+        "metric_metadata": {
+            "starting_overdue_exposure": {"unit": "INR", "scope": "overdue cohort", "window": "invoice due date through operating date"},
+            "observed_recovery": {"unit": "INR", "scope": "overdue cohort persisted payments", "window": "post-due through operating date"},
+            "remaining_overdue_exposure": {"unit": "INR", "scope": "current overdue invoices", "window": "operating date"},
+            "recovery_rate": {"unit": "percent", "scope": "overdue cohort", "window": "observed window"},
+            "accounts": {"unit": "customers", "scope": "overdue cohort", "window": "observed window"},
+            "invoices": {"unit": "invoices", "scope": "overdue cohort", "window": "observed window"},
+            "stopping_rules": {"unit": "cases", "scope": "current open recovery cases", "window": "operating date"},
+            "workflow_outcomes": {"unit": "workflows", "scope": "overdue-cohort cases", "window": "persisted history"},
+            "payments": {"unit": "payments", "scope": "qualifying overdue-cohort payments", "window": "observed window"},
+        },
         "stopping_rules": {
             "deliberate_hold_count": len(deliberate_hold_ids),
             "active_dispute_hold_count": active_dispute_holds,
             "active_promise_hold_count": active_promise_holds,
             "resolved_or_paid_case_count": resolved_or_paid,
+            "other_blocked_case_count": other_blocked_case_count,
             "blocked_action_count": sum(action_counts[status.value] for status in BLOCKED_ACTION_STATUSES),
             "approval_required_case_count": approval_required,
             "unresolved_exception_count": len(unresolved_exception_ids),
+            "unresolved_exception_categories": {
+                "elevated_open_cases": len(elevated_case_ids),
+                "broken_promise_cases": len(broken_promise_case_ids),
+                "active_dispute_cases": len(dispute_case_ids),
+                "workflow_requests_awaiting_approval": len(pending_case_ids),
+            },
+            "exception_categories_overlap": exception_memberships > len(unresolved_exception_ids),
             "hold_evidence": hold_rows,
         },
         "action_outcomes": {
@@ -310,4 +353,8 @@ def build_batch_recovery_proof(
             "limitation": "The baseline uses the same current portfolio and operating date. Payment outcomes are not re-simulated, so no counterfactual recovery amount is claimed.",
         },
         "payment_evidence": payment_evidence,
+        "payment_provenance": [
+            {"source": source, "payment_count": values["payment_count"], "amount": _money(values["amount"])}
+            for source, values in sorted(provenance_counts.items())
+        ],
     }

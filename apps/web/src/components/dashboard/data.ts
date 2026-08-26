@@ -83,14 +83,16 @@ export type ExternalPaymentRequest = { id: string; case_id: string; customer_id:
 export type BatchRecoveryProof = {
   scope: { as_of_date: string; cycle: number; customer_count: number; invoice_count: number; case_count: number; earliest_due_date: string | null; provenance: string; definition: string };
   reconciliation: { starting_overdue_exposure: string; observed_recovery: string; remaining_overdue_exposure: string; recovery_rate: string; equation_holds: boolean; qualifying_payment_count: number; recovered_invoice_count: number; partially_recovered_invoice_count: number; remaining_open_overdue_invoice_count: number; fully_recovered_account_count: number; partially_recovered_account_count: number; measurement_note: string };
-  stopping_rules: { deliberate_hold_count: number; active_dispute_hold_count: number; active_promise_hold_count: number; resolved_or_paid_case_count: number; blocked_action_count: number; approval_required_case_count: number; unresolved_exception_count: number; hold_evidence: { case_id: string; customer_id: string; invoice_id: string | null; customer_name: string; invoice_number: string | null; reasons: string[]; current_recommendation: string; provenance: string }[] };
+  metric_metadata: Record<string, { unit: string; scope: string; window: string }>;
+  stopping_rules: { deliberate_hold_count: number; active_dispute_hold_count: number; active_promise_hold_count: number; resolved_or_paid_case_count: number; other_blocked_case_count: number; blocked_action_count: number; approval_required_case_count: number; unresolved_exception_count: number; unresolved_exception_categories: { elevated_open_cases: number; broken_promise_cases: number; active_dispute_cases: number; workflow_requests_awaiting_approval: number }; exception_categories_overlap: boolean; hold_evidence: { case_id: string; customer_id: string; invoice_id: string | null; customer_name: string; invoice_number: string | null; reasons: string[]; current_recommendation: string; provenance: string }[] };
   action_outcomes: { persisted_action_count: number; recommended: number; planned: number; pending_approval: number; approved: number; held: number; rejected: number; executed: number; cancelled: number; failed: number; payment_requests_created: number; provider_events_received: number; payments_persisted: number; duplicate_provider_events_ignored: number };
   baseline: { name: string; same_scope: boolean; same_operating_date: string; age_only_target_count: number; reconmate_immediate_action_count: number; reconmate_deliberate_hold_count: number; blocker_violations_avoided: number; limitation: string };
   payment_evidence: { payment_id: string; payment_reference: string | null; payment_date: string; amount: string; customer_id: string; case_id: string | null; invoice_id: string; invoice_number: string; provenance: string; provider_mode: string | null; request_reference: string | null; event_reference: string | null; provider_payment_reference: string | null; outstanding_before: string | null; outstanding_after: string | null }[];
+  payment_provenance: { source: string; payment_count: number; amount: string }[];
 };
 export type ProviderEventEvidence = { id: string; payment_request_id: string; provider_event_id: string; provider_payment_reference: string; event_type: string; evidence: { source?: string; provider?: string; provider_mode?: string; provider_reference?: string; provider_payment_reference?: string; chronology?: string; financial_mutation?: string; outstanding_before?: string; outstanding_after?: string; score_before?: number; score_after?: number; recommendation_before?: string; recommendation_after?: string; duplicate_replay?: { ignored: boolean; original_event: string; financial_mutation: string; outstanding_before?: string; outstanding_after?: string } }; received_at: string };
 export type EvidenceTimelineEntry = {
-  id: string; occurred_at: string; category: "FACT_EVENT" | "INTELLIGENCE_REASSESSMENT" | "OPERATOR_ACTION" | "PROVIDER_EVENT";
+  id: string; occurred_at: string; category: "AI_INTERPRETATION" | "FACT_EVENT" | "INTELLIGENCE_REASSESSMENT" | "OPERATOR_ACTION" | "PROVIDER_EVENT";
   event_type: string; title: string; detail: string | null; customer_id: string | null; case_id: string | null; invoice_id: string | null;
   request_reference: string | null; event_reference: string | null; payment_reference: string | null;
   before: Record<string, string | number | null> | null; after: Record<string, string | number | null> | null;
@@ -108,7 +110,18 @@ export type Workspace = {
   intelligence: { score: number; raw_score: number; calculated_at: string; level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; recommendation: { action: string; title: string; explanation: string }; signals: { title: string; explanation: string; severity: string }[]; factors: { title: string; explanation: string; points: number; impact: string }[] };
   promises: { status: string; promised_amount: string; promised_date: string }[];
   payments?: { id: string; amount: string; payment_date: string; reference: string | null }[];
-  communications: { id: string; direction: string; content: string; occurred_at: string; analyses: { intent?: string }[] }[];
+  communications: {
+    id: string; direction: string; content: string; occurred_at: string;
+    analyses: {
+      id: string; provider: string; model_version: string | null; runtime_mode: "LIVE MODEL" | "MOCK / DEV MODE"; analyzed_at: string | null; result: { intent: string };
+      candidates: {
+        candidate_id: string; fact_type: string; confidence: number; evidence_span: string;
+        proposed_data: Record<string, string | boolean | null>; persistence_eligible: boolean; defer_reason: string | null;
+        operator_confirmation_required: boolean;
+        decision_result: null | { decision: "ACCEPT" | "REJECT"; operator_id: string; persisted_fact: string | null; score_before: number; score_after: number; blockers_before: string[]; blockers_after: string[]; recommendation_before: string; recommendation_after: string; financial_mutation: "NONE" };
+      }[];
+    }[];
+  }[];
   actions: { id: string; action_type: string; status: string; approval_status: string; recommended_action: string | null; human_approval_required: boolean; recommendation_context: { workflow_effect?: string; operator_next_step?: string; blockers?: string[] } | null; decision_by: string | null; decision_reason: string | null; decision_at: string | null; executed_at: string | null; created_at: string | null }[];
   external_payment_requests?: ExternalPaymentRequest[];
   provider_events?: ProviderEventEvidence[];

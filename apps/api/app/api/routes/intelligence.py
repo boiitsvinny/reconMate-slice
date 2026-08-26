@@ -13,7 +13,9 @@ from app.intelligence.operational_service import (
     evaluate_portfolio_intelligence,
 )
 from app.intelligence.provider import ProviderError
-from app.intelligence.schemas import AnalysisResponse, CommunicationAnalysisResult, PreviewRequest
+from app.intelligence.candidates import candidate_facts
+from app.intelligence.fact_review import review_candidate_fact
+from app.intelligence.schemas import AnalysisResponse, CandidateDecisionRequest, CandidateDecisionResponse, CommunicationAnalysisResult, PreviewRequest
 from app.intelligence.service import analyze_text, persist_analysis
 from app.models.domain import (
     AIProcessingStatus,
@@ -56,17 +58,20 @@ def _case_query():
     )
 
 def _response(record: CommunicationAnalysis) -> AnalysisResponse:
+    result = CommunicationAnalysisResult.model_validate(record.result)
     return AnalysisResponse(analysis_id=str(record.id), provider=record.provider, model_version=record.model_version,
         analyzed_at=record.analyzed_at.isoformat() if record.analyzed_at else None,
-        result=CommunicationAnalysisResult.model_validate(record.result))
+        runtime_mode="LIVE MODEL" if record.provider == "openai" else "MOCK / DEV MODE",
+        result=result, candidates=candidate_facts(record.communication.content, result))
 
 @router.post("/intelligence/analyze-preview", response_model=AnalysisResponse, summary="Interpret draft text without storing it")
 def analyze_preview(payload: PreviewRequest) -> AnalysisResponse:
     try:
         provider, result = analyze_text(payload.content, payload.reference_date)
     except ProviderError as exc:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    return AnalysisResponse(provider=provider.name, model_version=provider.model_version, result=result)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI interpretation unavailable — no fact was written. " + str(exc)) from exc
+    return AnalysisResponse(provider=provider.name, model_version=provider.model_version, runtime_mode=provider.runtime_mode, result=result,
+                            candidates=candidate_facts(payload.content, result))
 
 @router.get("/communications", summary="List source communications")
 def list_communications(db: Session = Depends(get_db)) -> list[dict]:
@@ -95,7 +100,7 @@ def analyze_communication(communication_id: UUID, db: Session = Depends(get_db))
         item.ai_processing_status = AIProcessingStatus.FAILED
         item.ai_processing_metadata = {"error": str(exc)}
         db.commit()
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Communication analysis failed safely: " + str(exc)) from exc
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI interpretation unavailable — no fact was written. " + str(exc)) from exc
 
 @router.get("/communications/{communication_id}/analysis", response_model=list[AnalysisResponse], summary="List stored interpretations")
 def get_communication_analysis(communication_id: UUID, db: Session = Depends(get_db)) -> list[AnalysisResponse]:
@@ -103,6 +108,35 @@ def get_communication_analysis(communication_id: UUID, db: Session = Depends(get
     records = db.scalars(select(CommunicationAnalysis).where(CommunicationAnalysis.communication_id == communication_id)
                          .order_by(CommunicationAnalysis.analyzed_at.desc())).all()
     return [_response(record) for record in records]
+
+
+@router.post(
+    "/communications/{communication_id}/analyses/{analysis_id}/decision",
+    response_model=CandidateDecisionResponse,
+    summary="Accept or reject one typed candidate fact without granting AI policy authority",
+)
+def decide_candidate_fact(
+    communication_id: UUID,
+    analysis_id: UUID,
+    payload: CandidateDecisionRequest,
+    db: Session = Depends(get_db),
+) -> CandidateDecisionResponse:
+    communication = db.get(Communication, communication_id)
+    analysis = db.get(CommunicationAnalysis, analysis_id)
+    if communication is None or analysis is None or analysis.communication_id != communication.id:
+        raise HTTPException(status_code=404, detail="Stored communication interpretation not found.")
+    try:
+        case_id, invoice_id = UUID(payload.case_id), UUID(payload.invoice_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="Case and invoice identifiers must be valid UUIDs.") from exc
+    case = db.scalar(_case_query().where(RecoveryCase.id == case_id))
+    if case is None or case.invoice is None or case.invoice.id != invoice_id:
+        raise HTTPException(status_code=404, detail="Recovery case or invoice not found.")
+    return review_candidate_fact(
+        db, communication=communication, analysis=analysis, case=case, invoice=case.invoice,
+        candidate_id=payload.candidate_id, decision=payload.decision,
+        operator_id=payload.operator_id, operating_date=_simulation_date(db),
+    )
 
 
 @router.get(

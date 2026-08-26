@@ -424,7 +424,7 @@ class CommandPlanner:
 
     def _reminder_proposal(self, plan_id: UUID, result: IntelligenceResult, customer, prepared_at: datetime, simulation_date) -> ActionProposal:
         action = ProposalActionType.DRAFT_PAYMENT_REMINDER
-        invoices = [] if customer is None else [invoice for invoice in customer.invoices if invoice.outstanding_amount > 0 and invoice.due_date < simulation_date]
+        invoices = [] if customer is None else [invoice for invoice in customer.invoices if invoice.issue_date <= simulation_date and invoice.outstanding_amount > 0 and invoice.due_date < simulation_date]
         invoices.sort(key=lambda invoice: (invoice.due_date, invoice.invoice_number))
         invoice_facts = [{"invoice_number": invoice.invoice_number, "outstanding_amount": invoice.outstanding_amount, "due_date": invoice.due_date, "days_overdue": (simulation_date - invoice.due_date).days} for invoice in invoices]
         references = ", ".join(invoice.invoice_number for invoice in invoices)

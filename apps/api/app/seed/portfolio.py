@@ -19,6 +19,7 @@ from app.models.domain import (
     RecoveryActionType, RecoveryCase, RecoveryPriority, RecoveryState,
     SimulationEvent, SimulationState,
 )
+from app.recovery.engine import evaluate_invoice
 
 SIMULATION_DATE = date(2026, 8, 1)
 SEED = 20260801
@@ -416,17 +417,20 @@ def validate_portfolio(session: Session) -> None:
     assert session.scalar(select(func.count(PromiseToPay.id)).where(PromiseToPay.status == PromiseStatus.BROKEN)) >= 10
 
 
-def portfolio_summary(session: Session) -> dict[str, int | Decimal]:
+def portfolio_summary(session: Session, operating_date: date | None = None) -> dict[str, int | Decimal]:
     invoices = session.scalars(select(Invoice)).all()
+    operating_date = operating_date or session.scalar(select(SimulationState.simulation_date).where(SimulationState.name == "default")) or date.today()
+    current_invoices = [invoice for invoice in invoices if invoice.issue_date <= operating_date]
+    invoice_facts = [(invoice, evaluate_invoice(invoice, operating_date)) for invoice in current_invoices]
     return {
         "customers": session.scalar(select(func.count(Customer.id))) or 0,
-        "invoices": len(invoices), "open_invoices": sum(invoice.outstanding_amount > 0 for invoice in invoices),
-        "overdue_invoices": sum(invoice.status is InvoiceStatus.OVERDUE for invoice in invoices),
-        "outstanding_amount": sum((invoice.outstanding_amount for invoice in invoices), Decimal("0")),
-        "overdue_amount": sum((invoice.outstanding_amount for invoice in invoices if invoice.status is InvoiceStatus.OVERDUE), Decimal("0")),
+        "invoices": len(invoices), "open_invoices": sum(invoice.outstanding_amount > 0 for invoice in current_invoices),
+        "overdue_invoices": sum(facts.state == "OVERDUE" for _, facts in invoice_facts),
+        "outstanding_amount": sum((invoice.outstanding_amount for invoice in current_invoices), Decimal("0")),
+        "overdue_amount": sum((facts.outstanding_amount for _, facts in invoice_facts if facts.state == "OVERDUE"), Decimal("0")),
         "payments": session.scalar(select(func.count(Payment.id))) or 0,
         "promises": session.scalar(select(func.count(PromiseToPay.id))) or 0,
         "broken_promises": session.scalar(select(func.count(PromiseToPay.id)).where(PromiseToPay.status == PromiseStatus.BROKEN)) or 0,
-        "active_disputes": sum(invoice.status is InvoiceStatus.DISPUTED for invoice in invoices),
+        "active_disputes": sum(invoice.status is InvoiceStatus.DISPUTED for invoice in current_invoices),
         "recovery_cases": session.scalar(select(func.count(RecoveryCase.id))) or 0,
     }

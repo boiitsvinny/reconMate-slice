@@ -196,6 +196,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               {workspace.recommendation.recommended_action === "SEND_PAYMENT_REMINDER" && !reminderDraft && <button type="button" onClick={prepareReminder} className={`${buttonStyles.primary} mt-4`}>Prepare reminder draft</button>}
               {reminderDraft && <ReminderArtifact artifact={reminderDraft} />}
             </section>
+            <CommunicationFactReview workspace={workspace} busy={busy} request={request} />
             <section className="rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
               <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-slate-500">Operator decision</p>
               <h3 className="mt-1.5 text-lg font-semibold tracking-[-.02em] text-white sm:text-xl">Choose the controlled workflow response</h3>
@@ -261,6 +262,33 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
   );
 }
 
+function CommunicationFactReview({ workspace, busy, request }: { workspace: Workspace; busy: boolean; request: (url: string, body: Record<string, unknown>) => Promise<boolean> }) {
+  const messages = workspace.communications.filter((item) => item.direction === "INBOUND").slice(0, 3);
+  const analyze = (communicationId: string) => request(`/communications/${communicationId}/analyze`, {});
+  const decide = (communicationId: string, analysisId: string, candidateId: string, decision: "ACCEPT" | "REJECT") => {
+    if (!workspace.invoice) return Promise.resolve(false);
+    return request(`/communications/${communicationId}/analyses/${analysisId}/decision`, {
+      case_id: workspace.case_id, invoice_id: workspace.invoice.id, candidate_id: candidateId,
+      decision, operator_id: "web-operator",
+    });
+  };
+  return <section className="rounded-2xl border border-fuchsia-300/15 bg-fuchsia-300/[.025] p-5">
+    <p className="text-[10px] font-bold uppercase tracking-[.15em] text-fuchsia-200">Bounded communication intelligence</p>
+    <h3 className="mt-1.5 text-lg font-semibold text-white">Customer message → candidate fact → operator decision</h3>
+    <p className="mt-1 text-xs leading-5 text-slate-400">AI interprets one customer message into candidate facts. Deterministic policy owns risk, blockers, actionability, and recommendations. The operator confirms facts before persistence; financial state changes only through verified payment events.</p>
+    {messages.length ? <div className="mt-4 space-y-3">{messages.map((message) => {
+      const analysis = message.analyses[0];
+      return <article key={message.id} className="rounded-xl border border-white/[.08] bg-black/10 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Customer message</p><p className="mt-2 text-sm leading-6 text-slate-200">“{message.content}”</p><p className="mt-1 text-[10px] text-slate-600">Received {new Date(message.occurred_at).toLocaleString()}</p></div>{!analysis && <button type="button" disabled={busy} onClick={() => void analyze(message.id)} className={buttonStyles.primary}>{busy ? "Interpreting…" : "Extract candidate facts"}</button>}</div>
+        {analysis && <div className="mt-4 border-t border-white/[.07] pt-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-fuchsia-200">AI interpretation</p><StatusPill tone={analysis.runtime_mode === "LIVE MODEL" ? "emerald" : "slate"}>{analysis.runtime_mode}</StatusPill></div><p className="mt-1 text-[10px] text-slate-500">Provider {analysis.provider} · model {analysis.model_version ?? "not reported"} · extracted {analysis.analyzed_at ? new Date(analysis.analyzed_at).toLocaleString() : "timestamp unavailable"} · structured intent {label(analysis.result.intent)}</p><div className="mt-3 space-y-2">{analysis.candidates.map((candidate) => {
+          const decision = candidate.decision_result;
+          return <div key={candidate.candidate_id} className="rounded-xl border border-white/[.07] bg-white/[.025] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-white">{label(candidate.fact_type)}</p><span className="text-xs font-semibold tabular-nums text-fuchsia-100">{Math.round(candidate.confidence * 100)}% confidence</span></div><p className="mt-2 text-xs text-slate-400"><span className="text-slate-500">Evidence:</span> “{candidate.evidence_span}”</p>{candidate.defer_reason && <p className="mt-2 text-xs text-amber-200">Safely deferred: {candidate.defer_reason}</p>}{decision ? <div className="mt-3 rounded-lg border border-white/[.07] bg-black/10 p-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone={decision.decision === "ACCEPT" ? "emerald" : "rose"}>{decision.decision === "ACCEPT" ? "Accepted" : "Rejected"}</StatusPill><span className="text-[11px] text-slate-400">Operator {decision.operator_id}</span></div>{decision.persisted_fact && <p className="mt-2 text-xs font-semibold text-emerald-200">Persisted fact: {decision.persisted_fact}</p>}<p className="mt-2 text-xs text-slate-300">Score {decision.score_before} → {decision.score_after} · recommendation {label(decision.recommendation_before)} → {label(decision.recommendation_after)}</p><p className="mt-1 text-[10px] text-slate-500">Financial mutation: none. Deterministic reassessment only.</p></div> : <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={busy || !candidate.persistence_eligible || !workspace.invoice} onClick={() => void decide(message.id, analysis.id, candidate.candidate_id, "ACCEPT")} className={buttonStyles.success}>Accept structured fact</button><button type="button" disabled={busy} onClick={() => void decide(message.id, analysis.id, candidate.candidate_id, "REJECT")} className={buttonStyles.secondary}>Reject candidate</button></div>}</div>;
+        })}</div></div>}
+      </article>;
+    })}</div> : <p className="mt-4 rounded-xl border border-white/[.07] bg-black/10 p-4 text-xs text-slate-500">No inbound customer communication is linked to this case account.</p>}
+  </section>;
+}
+
 function DecisionDialog({ verb, reason, busy, onReasonChange, onCancel, onConfirm }: { verb: "approve" | "reject" | "hold" | "cancel" | "execute"; reason: string; busy: boolean; onReasonChange: (value: string) => void; onCancel: () => void; onConfirm: () => void }) {
   const requiresReason = ["reject", "hold", "cancel"].includes(verb);
   const copy = verb === "execute" ? "Record this internal workflow step as executed. No customer contact or financial mutation occurs." : verb === "approve" ? "Approve this internal recovery action so it can proceed through the controlled workflow." : `${label(verb)} this internal recovery action and record the operator reason.`;
@@ -277,6 +305,7 @@ function DecisionDialog({ verb, reason, busy, onReasonChange, onCancel, onConfir
 
 function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evidence_timeline"]> }) {
   const tones = {
+    AI_INTERPRETATION: "border-fuchsia-300/35 text-fuchsia-200",
     FACT_EVENT: "border-sky-300/35 text-sky-200",
     INTELLIGENCE_REASSESSMENT: "border-violet-300/35 text-violet-200",
     OPERATOR_ACTION: "border-amber-300/35 text-amber-100",
