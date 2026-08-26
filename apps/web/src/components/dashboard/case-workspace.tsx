@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
@@ -29,6 +30,8 @@ function executedActionExplanation(action: { executed_at: string | null; recomme
 export function CaseWorkspace({ item, onClose, liveVersion, affected, transition }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean; transition?: IntelligenceTransition }) {
   const [reviewingRecommendation, setReviewingRecommendation] = useState(false);
   const [reminderDraft, setReminderDraft] = useState<ReminderArtifactData | null>(null);
+  const [decisionDialog, setDecisionDialog] = useState<"approve" | "reject" | "hold" | "cancel" | "execute" | null>(null);
+  const [decisionReason, setDecisionReason] = useState("");
   const router = useRouter();
   const queryClient = useQueryClient();
   const commandSession = useCommandSession();
@@ -96,11 +99,16 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
       reason: "The current case workflow recommendation is a payment reminder and no active promise or dispute blocks operator-reviewed outreach.",
     });
   };
-  const decision = (verb: "approve" | "reject" | "hold" | "cancel" | "execute") => {
-    if (!latest || !window.confirm(`${label(verb)} this simulated recovery action?`)) return;
-    const reason = verb === "reject" || verb === "hold" || verb === "cancel" ? window.prompt(`Reason for ${verb}:`) : undefined;
-    if ((verb === "reject" || verb === "hold" || verb === "cancel") && !reason) return;
-    request(`/recovery/actions/${latest.id}/${verb}`, { operator_id: "web-operator", reason });
+  const openDecision = (verb: "approve" | "reject" | "hold" | "cancel" | "execute") => {
+    setDecisionReason("");
+    setDecisionDialog(verb);
+  };
+  const submitDecision = async () => {
+    if (!latest || !decisionDialog) return;
+    const requiresReason = ["reject", "hold", "cancel"].includes(decisionDialog);
+    if (requiresReason && !decisionReason.trim()) return;
+    const completed = await request(`/recovery/actions/${latest.id}/${decisionDialog}`, { operator_id: "web-operator", reason: decisionReason.trim() || undefined });
+    if (completed) setDecisionDialog(null);
   };
 
   return (
@@ -233,11 +241,11 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                     </div>
                   )}
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {latest.status === "PENDING_APPROVAL" && <button disabled={busy} onClick={() => decision("approve")} className={buttonStyles.success}>Approve internal action</button>}
-                    {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("hold")} className={buttonStyles.warning}>Hold</button>}
-                    {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("reject")} className={buttonStyles.danger}>Reject</button>}
-                    {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED", "HELD", "REJECTED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("cancel")} className={buttonStyles.secondary}>Cancel workflow action</button>}
-                    {["RECOMMENDED", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => decision("execute")} className={buttonStyles.primary}>Record simulated internal action</button>}
+                    {latest.status === "PENDING_APPROVAL" && <button disabled={busy} onClick={() => openDecision("approve")} className={buttonStyles.success}>Approve internal action</button>}
+                    {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => openDecision("hold")} className={buttonStyles.warning}>Hold</button>}
+                    {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => openDecision("reject")} className={buttonStyles.danger}>Reject</button>}
+                    {["RECOMMENDED", "PENDING_APPROVAL", "APPROVED", "HELD", "REJECTED"].includes(latest.status) && <button disabled={busy} onClick={() => openDecision("cancel")} className={buttonStyles.secondary}>Cancel workflow action</button>}
+                    {["RECOMMENDED", "APPROVED"].includes(latest.status) && <button disabled={busy} onClick={() => openDecision("execute")} className={buttonStyles.primary}>Record simulated internal action</button>}
                   </div>
                 </div>
               )}
@@ -247,9 +255,24 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
             <CaseEvidenceTimeline entries={workspace.evidence_timeline ?? []} />
           </div>
         )}
+        {decisionDialog && <DecisionDialog verb={decisionDialog} reason={decisionReason} busy={busy} onReasonChange={setDecisionReason} onCancel={() => setDecisionDialog(null)} onConfirm={() => void submitDecision()} />}
       </section>
     </div>
   );
+}
+
+function DecisionDialog({ verb, reason, busy, onReasonChange, onCancel, onConfirm }: { verb: "approve" | "reject" | "hold" | "cancel" | "execute"; reason: string; busy: boolean; onReasonChange: (value: string) => void; onCancel: () => void; onConfirm: () => void }) {
+  const requiresReason = ["reject", "hold", "cancel"].includes(verb);
+  const copy = verb === "execute" ? "Record this internal workflow step as executed. No customer contact or financial mutation occurs." : verb === "approve" ? "Approve this internal recovery action so it can proceed through the controlled workflow." : `${label(verb)} this internal recovery action and record the operator reason.`;
+  return createPortal(<div className="fixed inset-0 z-[80] grid place-items-center bg-[#030712]/75 p-4 backdrop-blur-sm" role="presentation" onClick={onCancel}>
+    <section role="dialog" aria-modal="true" aria-labelledby="decision-dialog-title" onClick={(event) => event.stopPropagation()} className="w-full max-w-md rounded-2xl border border-sky-200/20 bg-[#0b1526] p-5 shadow-2xl shadow-black/70">
+      <p className="text-[10px] font-bold uppercase tracking-[.15em] text-sky-300">Operator confirmation</p>
+      <h3 id="decision-dialog-title" className="mt-2 text-xl font-semibold text-white">{label(verb)} workflow action?</h3>
+      <p className="mt-2 text-xs leading-5 text-slate-400">{copy}</p>
+      {requiresReason && <label className="mt-5 block text-xs font-semibold text-slate-300">Reason for {verb}<textarea autoFocus value={reason} onChange={(event) => onReasonChange(event.target.value)} placeholder="Add a concise operator reason…" rows={3} className="mt-2 w-full resize-none rounded-xl border border-white/[.12] bg-[#050d19] px-3 py-2.5 text-sm font-normal text-white outline-none placeholder:text-slate-600 focus:border-sky-300/45 focus:ring-2 focus:ring-sky-300/10" /></label>}
+      <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" disabled={busy} onClick={onCancel} className={buttonStyles.secondary}>Keep current state</button><button type="button" disabled={busy || (requiresReason && !reason.trim())} onClick={onConfirm} className={verb === "approve" || verb === "execute" ? buttonStyles.primary : verb === "reject" || verb === "cancel" ? buttonStyles.danger : buttonStyles.warning}>{busy ? "Recording decision…" : `Confirm ${verb}`}</button></div>
+    </section>
+  </div>, document.body);
 }
 
 function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evidence_timeline"]> }) {

@@ -28,11 +28,19 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
   const [sort, setSort] = useState<SortKey>("newest");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [search, setSearch] = useState("");
   const visibleInvoices = useMemo(() => {
-    const filtered = invoices.filter((invoice) => statusFilter === "all"
-      || (statusFilter === "pending" && (invoice.status === "OPEN" || invoice.status === "PARTIALLY_PAID"))
-      || (statusFilter === "overdue" && invoice.status === "OVERDUE")
-      || (statusFilter === "disputed" && invoice.status === "DISPUTED"));
+    const needle = search.trim().toLocaleLowerCase();
+    const filtered = invoices.filter((invoice) => {
+      const customer = customers.get(invoice.customer_id);
+      const matchesStatus = statusFilter === "all"
+        || (statusFilter === "pending" && (invoice.status === "OPEN" || invoice.status === "PARTIALLY_PAID"))
+        || (statusFilter === "overdue" && invoice.status === "OVERDUE")
+        || (statusFilter === "disputed" && invoice.status === "DISPUTED");
+      const matchesSearch = !needle || [invoice.invoice_number, invoice.status, customer?.name, customer?.account_reference]
+        .some((value) => value?.toLocaleLowerCase().includes(needle));
+      return matchesStatus && matchesSearch;
+    });
     return [...filtered].sort((left, right) => {
       let comparison = 0;
       if (sort === "newest" || sort === "oldest") comparison = left.issue_date.localeCompare(right.issue_date) * (sort === "newest" ? -1 : 1);
@@ -49,7 +57,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
       if (sort !== "newest" && sort !== "oldest" && sortDirection === "desc") comparison *= -1;
       return comparison || left.invoice_number.localeCompare(right.invoice_number);
     });
-  }, [customers, invoices, riskByCustomer, sort, sortDirection, statusFilter]);
+  }, [customers, invoices, riskByCustomer, search, sort, sortDirection, statusFilter]);
   const pages = Math.max(1, Math.ceil(visibleInvoices.length / pageSize));
   const rows = useMemo(() => visibleInvoices.slice(page * pageSize, (page + 1) * pageSize), [page, visibleInvoices]);
   const first = visibleInvoices.length ? page * pageSize + 1 : 0;
@@ -75,13 +83,13 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
   };
   const openPreview = (invoice: Invoice, clientX: number, clientY: number) => {
     cancelClose();
-    setPreview({ invoiceId: invoice.id, x: Math.min(clientX + 14, window.innerWidth - 340), y: Math.min(clientY + 14, window.innerHeight - 280) });
+    setPreview({ invoiceId: invoice.id, x: Math.max(12, Math.min(clientX + 14, window.innerWidth - 332)), y: Math.max(12, Math.min(clientY + 14, window.innerHeight - 420)) });
     setPreviewVisible(true);
     if (window.matchMedia("(hover: hover)").matches) closePreview(1100);
   };
 
   useEffect(() => () => cancelClose(), []);
-  useEffect(() => setPage(0), [sort, statusFilter]);
+  useEffect(() => setPage(0), [search, sort, statusFilter]);
   const previewInvoice = preview ? invoices.find((invoice) => invoice.id === preview.invoiceId) : null;
 
   return (
@@ -99,6 +107,14 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
           </div>
         }
       />
+      <div className="border-b border-white/[.06] bg-sky-300/[.025] p-4 lg:px-5">
+        <label htmlFor="invoice-search" className="mb-2 block text-[11px] font-bold uppercase tracking-[.13em] text-sky-200">Search invoice records</label>
+        <div className="relative max-w-3xl">
+          <span className="pointer-events-none absolute inset-y-0 left-4 grid place-items-center text-base text-sky-300" aria-hidden="true">⌕</span>
+          <input id="invoice-search" type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search invoice number, customer, account reference, or status…" className="min-h-12 w-full rounded-xl border border-sky-300/25 bg-[#050d19]/85 pl-11 pr-4 text-sm text-white shadow-[0_0_24px_rgba(56,189,248,.06)] outline-none transition placeholder:text-slate-600 focus:border-sky-300/55 focus:ring-2 focus:ring-sky-300/10" />
+        </div>
+        {search.trim() && <p className="mt-2 text-[11px] text-slate-400">{visibleInvoices.length} matching invoice{visibleInvoices.length === 1 ? "" : "s"}</p>}
+      </div>
       <div className="grid gap-3 border-b border-white/[.06] bg-white/[.015] p-4 lg:grid-cols-[auto_1fr] lg:items-center lg:px-5">
         <div className="flex flex-wrap items-center gap-2" aria-label="Invoice ordering">
           <span className="mr-1 text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">Sort</span>
@@ -111,18 +127,18 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
           {(["all", "pending", "overdue", "disputed"] as const).map((value) => <Control key={value} active={statusFilter === value} onClick={() => setStatusFilter(value)}>{value === "all" ? "All" : value === "disputed" ? "In dispute" : value[0].toUpperCase() + value.slice(1)}</Control>)}
         </div>
       </div>
-      <div className="divide-y divide-white/[.055] md:hidden">
+      <div className="operational-scrollbar max-h-[65vh] divide-y divide-white/[.055] overflow-y-auto overscroll-contain md:hidden" role="region" aria-label="Invoice search results" tabIndex={0}>
         {rows.map((invoice) => (
           <button type="button" key={invoice.id} onClick={(event) => openPreview(invoice, event.clientX, event.clientY)} className="interactive-row flex w-full items-start justify-between gap-4 p-4 text-left active:bg-sky-400/[.07]">
             <div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate text-sm font-semibold text-white">{invoice.invoice_number}</p>{invoice.source === "CSV_IMPORT" && <StatusPill tone="sky">Imported</StatusPill>}</div><p className="mt-1 truncate text-[13px] text-slate-300">{customers.get(invoice.customer_id)?.name ?? "Portfolio account"}</p><p className="mt-2 text-xs text-slate-400">Due {invoice.due_date}</p></div>
             <div className="flex shrink-0 flex-col items-end gap-2"><p className="text-sm font-semibold tabular-nums text-white">{money(invoice.outstanding_amount)}</p><div className="flex flex-wrap justify-end gap-1.5"><StatusPill tone={statusTone(invoice.status)}>{invoice.status}</StatusPill>{riskAvailable && <StatusPill tone={riskTone(riskByCustomer.get(invoice.customer_id)?.level)}>{riskByCustomer.get(invoice.customer_id)?.level ?? "LOW"} risk</StatusPill>}</div></div>
           </button>
         ))}
-        {!rows.length && <p className="px-5 py-10 text-center text-sm text-slate-500">No invoices match the selected status.</p>}
+        {!rows.length && <p className="px-5 py-10 text-center text-sm text-slate-500">No invoices match the current search and status filters.</p>}
       </div>
-      <div className="hidden overflow-x-auto md:block">
+      <div className="operational-scrollbar hidden max-h-[38rem] overflow-auto overscroll-contain md:block" role="region" aria-label="Invoice search results" tabIndex={0}>
         <div className="min-w-[960px]">
-          <div className="grid grid-cols-[1.15fr_1fr_.7fr_.75fr_.72fr_.72fr] gap-4 border-b border-white/[.08] bg-black/10 px-5 py-3 text-[11px] font-bold uppercase tracking-[.11em] text-slate-400">
+          <div className="sticky top-0 z-10 grid grid-cols-[1.15fr_1fr_.7fr_.75fr_.72fr_.72fr] gap-4 border-b border-white/[.08] bg-[#091321] px-5 py-3 text-[11px] font-bold uppercase tracking-[.11em] text-slate-400">
             <SortHeader label="Invoice / account" active={sort === "invoice"} direction={sort === "invoice" && sortDirection === "desc" ? "Z–A" : "A–Z"} onClick={() => selectSort("invoice")} />
             <SortHeader label="Customer" active={sort === "customer"} direction={sort === "customer" && sortDirection === "desc" ? "Z–A" : "A–Z"} onClick={() => selectSort("customer")} />
             <SortHeader label="Due date" active={sort === "due"} direction={sort === "due" && sortDirection === "desc" ? "↓" : "↑"} onClick={() => selectSort("due")} />
@@ -143,7 +159,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
               {riskAvailable ? <StatusPill tone={riskTone(riskByCustomer.get(invoice.customer_id)?.level)}>{riskByCustomer.get(invoice.customer_id)?.level ?? "LOW"}</StatusPill> : <span className="text-xs text-slate-600">Unavailable</span>}
             </button>
           ))}
-          {!rows.length && <p className={cx("px-5 py-10 text-center text-sm text-slate-500")}>No invoices match the selected status.</p>}
+          {!rows.length && <p className={cx("px-5 py-10 text-center text-sm text-slate-500")}>No invoices match the current search and status filters.</p>}
         </div>
       </div>
       {preview && previewInvoice && (

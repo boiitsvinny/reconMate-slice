@@ -9,12 +9,10 @@ import { apiFetch } from "@/lib/api";
 import { formatMoney as money, PriorityCase, SimState, SimulationTickResult } from "./data";
 import { CaseWorkspace } from "./case-workspace";
 import { CustomerPreview, useCasePreview } from "./customer-preview";
-import { LiveEventFeed } from "./live-event-feed";
 import { HomeRecoveryQueue } from "./home-recovery-queue";
 import { OperationalIntelligenceHero } from "./operational-intelligence-hero";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
-import { RecommendationSafety } from "./recommendation-safety";
 import { queryKeys, useCustomers, useInvalidateOperationalData, useLatestIntelligenceCycle, usePortfolio, usePortfolioIntelligence, useRecovery, useRecoveryQueue, useSimulationEvents, useSimulationState } from "./queries";
 import { CycleFeedback, ResetFeedback, SimulationControl } from "./simulation-control";
 import { AIPriorities } from "./todays-operational-focus";
@@ -165,7 +163,6 @@ export function Dashboard() {
     return () => window.clearInterval(timer);
   }, [auto, simulation.data, runTick]);
 
-  const names = useMemo(() => new Map(customers.data?.map((customer) => [customer.id, customer.name]) ?? []), [customers.data]);
   const currentCycleEvents = events.data?.filter((event) => event.cycle === simulation.data?.cycle) ?? [];
   const recoveredThisCycle = currentCycleEvents.reduce((sum, event) => sum + Number(event.metadata.payment_amount ?? 0), 0);
   const tickError = tick.error instanceof Error ? tick.error.message : null;
@@ -265,19 +262,10 @@ export function Dashboard() {
 
             {intelligence.data && <HomeRecoveryQueue items={recoveryQueue.queue} intelligence={intelligence.data} transitions={visibleTransitions} events={events.data} onSelect={openPreview} />}
 
-            {inspectionEnabled && <section aria-label="Demo inspection tools" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
-              <LiveEventFeed events={events.data} customers={names} onOpenCase={(caseId) => {
-                const item = recoveryQueue.queue.find((candidate) => candidate.id === caseId);
-                if (!item) return false;
-                openPreview(item);
-                return true;
-              }} />
-              <aside className="space-y-5">
-                <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
-                <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} phase={tickPhase} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} onReconcile={reconcile} />
-              </aside>
-            </section>}
-            {inspectionEnabled && <RecommendationSafety activeDisputes={recovery.data.cases_blocked_by_dispute} activePromises={recovery.data.cases_awaiting_payment} />}
+            <section aria-label="Portfolio simulation" className={`mt-7 grid gap-7 ${inspectionEnabled ? "xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]" : "max-w-5xl"}`}>
+              <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} phase={tickPhase} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} onReconcile={reconcile} />
+              {inspectionEnabled && <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />}
+            </section>
           </>
         )}
       </div>

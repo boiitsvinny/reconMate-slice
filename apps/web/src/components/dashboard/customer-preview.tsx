@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { PriorityCase } from "./data";
 import { buttonStyles, StatusPill } from "./ui";
 
@@ -53,7 +54,7 @@ export function CustomerPreview({ preview, onClose, onViewMore }: { preview: Cas
     : Math.max(12, Math.min(preview.x + 16 + width <= viewportWidth ? preview.x + 16 : preview.x - width - 16, viewportWidth - width - 12));
   const top = Math.max(12, Math.min(preview.y - 28, viewportHeight - 330));
 
-  return (
+  return createPortal(
     <div ref={cardRef} style={{ left, top, width }} className="fixed z-[60] max-h-[calc(100vh-24px)] overflow-y-auto rounded-2xl border border-sky-300/20 bg-[#111a2d]/95 p-4 shadow-2xl shadow-black/70 backdrop-blur-2xl" role="dialog" aria-label={`${item.customerName} case preview`}>
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -83,6 +84,7 @@ export function CustomerPreview({ preview, onClose, onViewMore }: { preview: Cas
         <li className={item.allowed ? "text-emerald-300" : "text-amber-200"}>{item.reason}</li>
       </ul>
       <button type="button" onClick={() => onViewMore(item)} className={`${buttonStyles.primary} mt-4 w-full`}>{item.recommendedAction === "NO_ACTION_REQUIRED" ? "Inspect case" : "Review recommended action"}</button>
-    </div>
+    </div>,
+    document.body,
   );
 }
