@@ -35,7 +35,7 @@ export function OperationalIntelligenceHero({ intelligence, recovery, latestCycl
         prominent
         action={<StatusPill tone={synchronizing ? "sky" : "emerald"}>{synchronizing ? "Reassessing" : "Evaluation current"}</StatusPill>}
       />
-      <div className="grid grid-cols-2 gap-px bg-white/[.06] sm:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-px bg-white/[.07] sm:grid-cols-3 xl:grid-cols-6">
         <IntelligenceMetric label="Cases monitored" value={String(activeCases)} detail="Active recovery cases" />
         <IntelligenceMetric label="Reassessed this cycle" value={latestCycle ? String(latestCycle.customers_affected) : "—"} detail="Affected customer records" />
         <IntelligenceMetric label="Decisions changed" value={latestCycle ? String(latestCycle.recommendations_changed) : "—"} detail="Material recommendation moves" emphasis={Boolean(latestCycle?.recommendations_changed)} />
@@ -43,7 +43,7 @@ export function OperationalIntelligenceHero({ intelligence, recovery, latestCycl
         <IntelligenceMetric label="Deliberate holds" value={String(holds)} detail="Monitor or wait decisions" restraint />
         <IntelligenceMetric label="Recovered this cycle" value={recoveredThisCycle} detail="Persisted payment events" restraint={recoveredThisCycle !== "—"} />
       </div>
-      <div className="flex flex-col gap-2 border-t border-white/[.06] px-5 py-3 text-[11px] sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-2 border-t border-white/[.06] px-5 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
         <p className={synchronizing ? "animate-pulse text-sky-200" : "text-slate-400"}>{activity}</p>
         <p className="text-slate-600">Portfolio evaluation refreshed at {evaluatedAt}{error ? " · refresh delayed" : ""}</p>
       </div>
@@ -53,10 +53,10 @@ export function OperationalIntelligenceHero({ intelligence, recovery, latestCycl
 
 function IntelligenceMetric({ label, value, detail, emphasis = false, restraint = false }: { label: string; value: string; detail: string; emphasis?: boolean; restraint?: boolean }) {
   return (
-    <article className="bg-[#08111f] p-4">
-      <p className="text-[9px] font-bold uppercase leading-4 tracking-[.12em] text-slate-500">{label}</p>
-      <p className={`mt-2 text-2xl font-semibold tabular-nums ${emphasis ? "text-amber-100" : restraint ? "text-emerald-200" : "text-white"}`}>{value}</p>
-      <p className="mt-1 text-[10px] leading-4 text-slate-600">{detail}</p>
+    <article className={`relative bg-[#08111f] p-4 ${emphasis ? "shadow-[inset_0_3px_0_rgba(251,191,36,.5)]" : restraint ? "shadow-[inset_0_3px_0_rgba(110,231,183,.35)]" : ""}`}>
+      <p className="text-[10px] font-bold uppercase leading-4 tracking-[.12em] text-slate-400">{label}</p>
+      <p className={`mt-2 text-[28px] font-semibold tabular-nums tracking-[-.03em] ${emphasis ? "text-amber-100" : restraint ? "text-emerald-200" : "text-white"}`}>{value}</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
     </article>
   );
 }

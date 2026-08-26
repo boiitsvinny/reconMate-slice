@@ -6,7 +6,7 @@ export function cx(...classes: Array<string | false | null | undefined>) {
 
 export function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <section className={cx("rounded-2xl border border-white/[.09] bg-[#08111f]/95 shadow-[0_18px_45px_rgba(0,0,0,.22)]", className)}>
+    <section className={cx("workspace-panel rounded-2xl border border-white/[.09] bg-[#08111f]/95 shadow-[0_18px_45px_rgba(0,0,0,.22)]", className)}>
       {children}
     </section>
   );
@@ -16,7 +16,7 @@ export function SectionEyebrow({ children, className = "" }: { children: ReactNo
   return (
     <div className={cx("flex items-center gap-2.5", className)}>
       <span className="h-4 w-1 shrink-0 rounded-full bg-sky-300 shadow-[0_0_12px_rgba(125,211,252,.55)]" aria-hidden="true" />
-      <p className="text-[11px] font-extrabold uppercase leading-none tracking-[.14em] text-sky-200">{children}</p>
+      <p className="text-[11px] font-extrabold uppercase leading-none tracking-[.14em] text-sky-200 sm:text-xs">{children}</p>
     </div>
   );
 }
@@ -39,7 +39,7 @@ export function SectionHeader({
       <div className="min-w-0">
         <SectionEyebrow>{eyebrow}</SectionEyebrow>
         <h2 className={cx("mt-2 font-semibold tracking-[-.025em] text-white", prominent ? "text-xl sm:text-2xl" : "text-base")}>{title}</h2>
-        {detail && <p className="mt-1.5 text-xs leading-5 text-slate-500">{detail}</p>}
+        {detail && <p className="mt-2 max-w-4xl text-[13px] leading-5 text-slate-400">{detail}</p>}
       </div>
       {action}
     </div>

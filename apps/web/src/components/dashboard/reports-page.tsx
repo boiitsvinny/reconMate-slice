@@ -36,7 +36,7 @@ export function ReportsPage() {
     : undefined;
 
   return (
-    <main className="min-h-screen overflow-x-hidden">
+    <main className="workspace-reports min-h-screen overflow-x-hidden">
       <AppHeader connected={ready && !errorMessage} updating={updating && !errorMessage} />
       <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
         <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">

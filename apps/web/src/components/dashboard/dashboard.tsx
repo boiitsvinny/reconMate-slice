@@ -205,7 +205,7 @@ export function Dashboard() {
   const caseLinksError = recoveryQueue.cases.isError || recoveryQueue.recommendations.isError;
 
   return (
-    <main className="min-h-screen overflow-x-hidden">
+    <main className="workspace-home min-h-screen overflow-x-hidden">
       <AppHeader connected={connectionsHealthy} updating={isUpdating} />
       <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
         {!dataReady && !errorMessage && <DashboardLoading />}
@@ -232,7 +232,7 @@ export function Dashboard() {
             <section aria-label="Top portfolio metrics" className="mb-5">
               <div className="hide-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-4">
                 <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Total outstanding" value={money(portfolio.data.total_outstanding_amount)} detail={`${portfolio.data.total_invoices} live receivables across the portfolio.`} tone="blue" />
-                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Amount at risk" state="Needs attention" value={money(recovery.data.overdue_exposure)} detail="Current overdue exposure—not every balance requires the same action." tone="red" />
+                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Amount at risk" state="Needs attention" value={money(recovery.data.overdue_exposure)} detail="Current overdue exposure—not every balance requires the same action." tone="red" emphasis />
                 <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Recovered this cycle" state={recoveredThisCycle > 0 ? "Confirmed" : "No payment event"} value={recoveredThisCycle > 0 ? money(recoveredThisCycle) : "—"} detail="Sum of persisted payment events in the current operating cycle." tone="green" />
                 <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Active cases" value={String(recovery.data.active_cases ?? recovery.data.total_cases)} detail="Open recovery work currently monitored by ReconMate." tone="amber" />
               </div>

@@ -25,7 +25,7 @@ function EntityInspector({ entity, rank, open, onOpenTarget }: { entity: Intelli
   return <details className="group p-4 sm:p-5" open={open}>
     <summary className="flex cursor-pointer list-none flex-col gap-3 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/40 sm:flex-row sm:items-center sm:justify-between">
       <div><p className="text-base font-semibold text-white">{entity.entity_name}</p><p className="mt-1 break-all text-[10px] text-slate-600">{label(entity.entity_type)} · {entity.entity_id}</p></div>
-      <div className="flex flex-wrap items-center gap-2"><StatusPill tone={tone(entity.level)}>{entity.level} risk</StatusPill><span className="text-sm font-semibold text-white">{entity.score}/100</span><span className="text-xs text-slate-500">{entity.recommendation.title}</span></div>
+      <div className="flex flex-wrap items-center gap-2"><StatusPill tone={tone(entity.level)}>{entity.level} risk</StatusPill><span className="text-base font-semibold text-white">{entity.score}/100</span><span className="text-[13px] text-slate-300">{entity.recommendation.title}</span></div>
     </summary>
     <div className="mt-5 grid gap-px overflow-hidden rounded-xl border border-white/[.07] bg-white/[.07] sm:grid-cols-2 xl:grid-cols-4">
       <SemanticCell label="Current risk" value={entity.level} detail="Risk derived from the current factual score." />
@@ -43,7 +43,7 @@ function EntityInspector({ entity, rank, open, onOpenTarget }: { entity: Intelli
       <LineageStage eyebrow="Decision" title={entity.recommendation.title} items={[entity.recommendation.explanation, actionability.detail]} />
     </div>
     <div className="mt-4 grid gap-4 rounded-xl border border-amber-300/12 bg-amber-300/[.025] p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-      <div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-amber-200/70">What would change this decision?</p><p className="mt-2 text-[11px] leading-5 text-slate-500">These supported fact changes trigger a fresh deterministic evaluation; they do not guarantee a specific future score.</p><ul className="mt-2 grid gap-1.5 text-xs leading-5 text-slate-300 sm:grid-cols-2">{decisionBoundaries(entity).map((item) => <li key={item} className="flex gap-2"><span className="text-amber-300">•</span><span>{item}</span></li>)}</ul></div>
+      <div><p className="text-[11px] font-bold uppercase tracking-[.12em] text-amber-200/80">What would change this decision?</p><p className="mt-2 text-xs leading-5 text-slate-400">These supported fact changes trigger a fresh deterministic evaluation; they do not guarantee a specific future score.</p><ul className="mt-2 grid gap-1.5 text-[13px] leading-5 text-slate-200 sm:grid-cols-2">{decisionBoundaries(entity).map((item) => <li key={item} className="flex gap-2"><span className="text-amber-300">•</span><span>{item}</span></li>)}</ul></div>
       <div className="flex flex-col gap-2 sm:flex-row"><Link href="/history" className={buttonStyles.secondary}>View underlying records</Link>{onOpenTarget && <button type="button" onClick={() => onOpenTarget(entity.entity_type, entity.entity_id)} className={buttonStyles.primary}>Review in workspace</button>}</div>
     </div>
     {rank?.stored_workflow_priority && <p className="mt-3 text-[10px] text-slate-500">Stored workflow priority: <strong className="text-slate-300">{label(rank.stored_workflow_priority)}</strong> · the priority already recorded in the operator workflow, shown separately from current intelligence.</p>}
@@ -51,7 +51,7 @@ function EntityInspector({ entity, rank, open, onOpenTarget }: { entity: Intelli
 }
 
 function ScoreStage({ entity }: { entity: IntelligenceResult }) {
-  return <article className="rounded-xl bg-[#08111f] p-4"><p className="text-[9px] font-bold uppercase tracking-[.14em] text-sky-300">Intelligence score</p><h4 className="mt-2 text-sm font-semibold text-white">Exact score construction</h4><div className="mt-3 space-y-2">{entity.factors.map((factor) => <div key={factor.type + "-" + factor.explanation} className="flex items-start justify-between gap-3 text-[11px]"><span className="leading-4 text-slate-400">{factor.title}</span><strong className="shrink-0 tabular-nums text-sky-200">+{factor.points}</strong></div>)}{!entity.factors.length && <p className="text-[11px] text-slate-600">No scoring factors contributed points.</p>}</div><div className="mt-4 border-t border-white/[.07] pt-3 text-xs"><div className="flex justify-between text-slate-400"><span>Raw weighted score</span><strong className="text-white">{entity.raw_score}</strong></div><div className="mt-2 flex justify-between text-slate-300"><span>Displayed score</span><strong className="text-sky-200">{entity.score}/100{entity.raw_score > 100 ? " · capped" : ""}</strong></div><div className="mt-2 flex justify-between text-slate-500"><span>Resulting severity</span><StatusPill tone={tone(entity.level)}>{entity.level}</StatusPill></div></div></article>;
+  return <article className="rounded-xl bg-[#08111f] p-4"><p className="text-[10px] font-bold uppercase tracking-[.14em] text-sky-300">Intelligence score</p><h4 className="mt-2 text-sm font-semibold text-white">Exact score construction</h4><div className="mt-3 space-y-2">{entity.factors.map((factor) => <div key={factor.type + "-" + factor.explanation} className="flex items-start justify-between gap-3 text-[13px]"><span className="leading-5 text-slate-300">{factor.title}</span><strong className="shrink-0 tabular-nums text-sky-200">+{factor.points}</strong></div>)}{!entity.factors.length && <p className="text-xs text-slate-500">No scoring factors contributed points.</p>}</div><div className="mt-4 border-t border-white/[.07] pt-3 text-[13px]"><div className="flex justify-between text-slate-400"><span>Raw weighted score</span><strong className="text-white">{entity.raw_score}</strong></div><div className="mt-2 flex justify-between text-slate-300"><span>Displayed score</span><strong className="text-sky-200">{entity.score}/100{entity.raw_score > 100 ? " · capped" : ""}</strong></div><div className="mt-2 flex justify-between text-slate-400"><span>Resulting severity</span><StatusPill tone={tone(entity.level)}>{entity.level}</StatusPill></div></div></article>;
 }
 
 function ComparisonPanel({ result }: { result: CommandResult }) {
@@ -124,7 +124,7 @@ function sourceFacts(entity: IntelligenceResult) {
 }
 
 function LineageStage({ eyebrow, title, items, empty, footer }: { eyebrow: string; title: string; items: string[]; empty?: string; footer?: string }) {
-  return <article className="rounded-xl bg-[#08111f] p-4"><p className="text-[9px] font-bold uppercase tracking-[.14em] text-sky-300">{eyebrow}</p><h4 className="mt-2 text-sm font-semibold text-white">{title}</h4>{items.length ? <ul className="mt-3 space-y-2 text-[11px] leading-4 text-slate-400">{items.slice(0, 5).map((item) => <li key={item} className="flex gap-2"><span className="text-sky-300">•</span><span>{item}</span></li>)}</ul> : <p className="mt-3 text-[11px] text-slate-600">{empty}</p>}{footer && <p className="mt-3 border-t border-white/[.06] pt-3 text-[9px] text-slate-600">{footer}</p>}</article>;
+  return <article className="rounded-xl bg-[#08111f] p-4"><p className="text-[10px] font-bold uppercase tracking-[.14em] text-sky-300">{eyebrow}</p><h4 className="mt-2 text-sm font-semibold text-white">{title}</h4>{items.length ? <ul className="mt-3 space-y-2 text-xs leading-5 text-slate-300">{items.slice(0, 5).map((item) => <li key={item} className="flex gap-2"><span className="text-sky-300">•</span><span>{item}</span></li>)}</ul> : <p className="mt-3 text-xs text-slate-500">{empty}</p>}{footer && <p className="mt-3 border-t border-white/[.06] pt-3 text-[10px] text-slate-500">{footer}</p>}</article>;
 }
 
 function FlowArrow() {
@@ -132,7 +132,7 @@ function FlowArrow() {
 }
 
 function SemanticCell({ label: fieldLabel, value, detail }: { label: string; value: string; detail: string }) {
-  return <div className="bg-[#08111f] p-4"><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">{fieldLabel}</p><p className="mt-2 text-sm font-semibold text-white">{value}</p><p className="mt-1 text-[10px] leading-4 text-slate-600">{detail}</p></div>;
+  return <div className="bg-[#08111f] p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-400">{fieldLabel}</p><p className="mt-2 text-sm font-semibold text-white">{value}</p><p className="mt-1 text-xs leading-5 text-slate-400">{detail}</p></div>;
 }
 
 function QueryFact({ term, value }: { term: string; value: string }) {
