@@ -190,7 +190,7 @@ The root `render.yaml` defines a free native Python Web Service. It does not use
 Root Directory: apps/api
 Language: Python 3
 Build Command: pip install --upgrade pip && pip install .
-Start Command: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+Start Command: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Health Check Path: /health/ready
 Instance Type: Free
 ```
@@ -207,7 +207,7 @@ SIMULATION_TICK_INTERVAL_SECONDS=15
 
 `DATABASE_URL` is server-only and must never be exposed through a `NEXT_PUBLIC_` variable. Render supplies `PORT`; do not set it manually. Multiple allowed browser origins can be supplied as a comma-separated list in `API_CORS_ORIGINS`. Do not use `*` in production.
 
-The free Render service does not provide Shell access or pre-deploy commands, so migrations and seeding are deliberately run from a local terminal against Supabase before the API is deployed. Verify the deployed service at `https://your-render-service.onrender.com/health/ready`.
+The start command applies pending Alembic migrations before accepting traffic, so a deployment cannot run newer API code against an older Supabase schema. Seeding remains an explicit local operation because it creates or replaces portfolio data. Verify the deployed service at `https://your-render-service.onrender.com/health/ready`.
 
 ### 3. Connect the Vercel frontend
 

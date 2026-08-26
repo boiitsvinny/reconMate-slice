@@ -27,10 +27,12 @@ export function ReportsPage() {
   const events = useSimulationEvents();
   const actions = useRecoveryActions();
   const paymentRequests = usePaymentRequests();
-  const queries = [customers, cases, recommendations, recovery, intelligence, latestCycle, events, actions, paymentRequests];
-  const ready = queries.every((query) => query.data !== undefined);
-  const error = queries.find((query) => query.isError)?.error;
+  const requiredQueries = [customers, cases, recommendations, recovery, intelligence, latestCycle, events, actions];
+  const queries = [...requiredQueries, paymentRequests];
+  const ready = requiredQueries.every((query) => query.data !== undefined);
+  const error = requiredQueries.find((query) => query.isError)?.error;
   const errorMessage = error instanceof Error ? error.message : error ? "Unable to load the recovery evidence report." : null;
+  const providerEvidenceUnavailable = paymentRequests.isError;
   const updating = ready && queries.some((query) => query.isFetching);
   const retry = () => Promise.all(queries.map((query) => query.refetch()));
   const selectedTransition = selected
@@ -53,7 +55,8 @@ export function ReportsPage() {
         {!ready && errorMessage && <div className="mt-7 flex flex-col justify-between gap-4 rounded-2xl border border-rose-300/20 bg-rose-300/[.07] p-5 sm:flex-row sm:items-center"><p className="text-sm text-rose-100">{errorMessage}</p><button type="button" onClick={() => void retry()} className="rounded-lg border border-rose-200/25 px-3 py-2 text-xs font-bold text-rose-50">Try again</button></div>}
         {!ready && !errorMessage && <div className="mt-7 h-[660px] animate-pulse rounded-2xl border border-white/[.07] bg-white/[.035]" />}
         {ready && errorMessage && <div className="mt-5 flex flex-col justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 sm:flex-row sm:items-center"><p className="text-xs text-amber-100">Live refresh is delayed. Showing the last successful report data.</p><button type="button" onClick={() => void retry()} className="text-xs font-semibold text-amber-50 underline decoration-amber-200/30 underline-offset-4">Retry refresh</button></div>}
-        {ready && recovery.data && intelligence.data && latestCycle.data !== undefined && events.data && actions.data && paymentRequests.data && (
+        {ready && providerEvidenceUnavailable && <div className="mt-5 flex flex-col justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 sm:flex-row sm:items-center"><p className="text-xs text-amber-100">Payment-provider evidence is temporarily unavailable. The rest of the live recovery report is still current.</p><button type="button" onClick={() => void paymentRequests.refetch()} className="text-xs font-semibold text-amber-50 underline decoration-amber-200/30 underline-offset-4">Retry provider evidence</button></div>}
+        {ready && recovery.data && intelligence.data && latestCycle.data !== undefined && events.data && actions.data && (
           <section className="mt-7 print:mt-4">
             <RecoveryEvidenceReport
               recovery={recovery.data}
@@ -62,7 +65,7 @@ export function ReportsPage() {
               events={events.data}
               queue={queue}
               actions={actions.data}
-              paymentRequests={paymentRequests.data}
+              paymentRequests={paymentRequests.data ?? []}
               onSelectCase={openPreview}
             />
           </section>
