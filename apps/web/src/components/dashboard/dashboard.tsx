@@ -10,13 +10,14 @@ import { formatMoney as money, PriorityCase, SimState, SimulationTickResult } fr
 import { CaseWorkspace } from "./case-workspace";
 import { CustomerPreview, useCasePreview } from "./customer-preview";
 import { LiveEventFeed } from "./live-event-feed";
+import { HomeRecoveryQueue } from "./home-recovery-queue";
 import { OperationalIntelligenceHero } from "./operational-intelligence-hero";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
 import { RecommendationSafety } from "./recommendation-safety";
-import { queryKeys, useCustomers, useInvalidateOperationalData, usePortfolio, usePortfolioIntelligence, useRecovery, useRecoveryQueue, useSimulationEvents, useSimulationState } from "./queries";
+import { queryKeys, useCustomers, useInvalidateOperationalData, useLatestIntelligenceCycle, usePortfolio, usePortfolioIntelligence, useRecovery, useRecoveryQueue, useSimulationEvents, useSimulationState } from "./queries";
 import { CycleFeedback, ResetFeedback, SimulationControl } from "./simulation-control";
-import { TodaysOperationalFocus } from "./todays-operational-focus";
+import { AIPriorities } from "./todays-operational-focus";
 
 export function Dashboard() {
   const { enabled: inspectionEnabled } = useInsightMode();
@@ -36,9 +37,10 @@ export function Dashboard() {
   const simulation = useSimulationState();
   const events = useSimulationEvents();
   const intelligence = usePortfolioIntelligence();
+  const latestIntelligenceCycle = useLatestIntelligenceCycle();
   const recoveryQueue = useRecoveryQueue();
   const queries = [portfolio, recovery, customers, simulation, events];
-  const connectedQueries = [...queries, intelligence, recoveryQueue.cases, recoveryQueue.recommendations];
+  const connectedQueries = [...queries, intelligence, latestIntelligenceCycle, recoveryQueue.cases, recoveryQueue.recommendations];
   const dataReady = Boolean(portfolio.data && recovery.data && customers.data && simulation.data && events.data);
   const queryError = queries.find((query) => query.isError)?.error;
   const errorMessage = queryError instanceof Error ? queryError.message : queryError ? "Unable to connect to ReconMate." : null;
@@ -69,6 +71,7 @@ export function Dashboard() {
         queryKeys.recommendations,
         queryKeys.simulationState,
         queryKeys.simulationEvents,
+        queryKeys.latestIntelligenceCycle,
       ].some((queryKey) => queryClient.getQueryState(queryKey)?.error);
       setLastTick(result);
       setCycleFeedback(buildCycleFeedback(result, refreshFailed));
@@ -106,6 +109,7 @@ export function Dashboard() {
         queryKeys.recommendations,
         queryKeys.simulationState,
         queryKeys.simulationEvents,
+        queryKeys.latestIntelligenceCycle,
       ].some((queryKey) => queryClient.getQueryState(queryKey)?.error);
       const baselineVerified = refreshedState?.cycle === response.state.cycle && refreshedState?.simulation_date === response.state.simulation_date;
       setResetFeedback(refreshFailed || !baselineVerified
@@ -163,7 +167,7 @@ export function Dashboard() {
 
   const names = useMemo(() => new Map(customers.data?.map((customer) => [customer.id, customer.name]) ?? []), [customers.data]);
   const currentCycleEvents = events.data?.filter((event) => event.cycle === simulation.data?.cycle) ?? [];
-  const latestPayment = currentCycleEvents.find((event) => event.metadata.payment_amount)?.metadata.payment_amount;
+  const recoveredThisCycle = currentCycleEvents.reduce((sum, event) => sum + Number(event.metadata.payment_amount ?? 0), 0);
   const tickError = tick.error instanceof Error ? tick.error.message : null;
   const resetError = resetDemo.error instanceof Error ? resetDemo.error.message : null;
   const retry = () => Promise.all(queries.map((query) => query.refetch()));
@@ -183,9 +187,20 @@ export function Dashboard() {
     }
     return result;
   }, [lastTick, recoveryQueue.queue]);
-  const affectedCustomerIds = useMemo(() => new Set(lastTick?.events.flatMap((event) => event.customer_id ? [event.customer_id] : []) ?? []), [lastTick]);
+  const latestCycleSnapshot = lastTick ? {
+    cycle: lastTick.cycle,
+    event_count: lastTick.event_count,
+    customers_affected: lastTick.change_summary.customers_affected,
+    material_customers: lastTick.change_summary.material_customers,
+    recommendations_changed: lastTick.change_summary.recommendations_changed,
+    recommendations_unchanged: lastTick.change_summary.recommendations_unchanged,
+    blockers_added: lastTick.change_summary.blockers_added,
+    blockers_removed: lastTick.change_summary.blockers_removed,
+    transitions: lastTick.intelligence_transitions,
+  } : latestIntelligenceCycle.data ?? null;
+  const visibleTransitions = latestCycleSnapshot?.transitions ?? [];
   const selectedAffected = Boolean(selected && lastTick?.events.some((event) => event.case_id === selected.id || event.customer_id === selected.customerId));
-  const selectedTransition = selected ? lastTick?.intelligence_transitions.find((transition) => transition.entity_type === "RECOVERY_CASE" && transition.entity_id === selected.id) : undefined;
+  const selectedTransition = selected ? visibleTransitions.find((transition) => transition.entity_type === "RECOVERY_CASE" && transition.entity_id === selected.id) : undefined;
   const caseLinksLoading = recoveryQueue.cases.isLoading || recoveryQueue.recommendations.isLoading;
   const caseLinksError = recoveryQueue.cases.isError || recoveryQueue.recommendations.isError;
 
@@ -208,57 +223,49 @@ export function Dashboard() {
         {resetError && <p className="mb-4 rounded-xl border border-rose-300/15 bg-rose-300/[.06] px-4 py-3 text-xs text-rose-100">Reset failed: {resetError}</p>}
         {portfolio.data && recovery.data && customers.data && simulation.data && events.data && (
           <>
-            <section className="flex flex-col justify-between gap-7 pb-8 lg:flex-row lg:items-end">
-              <div className="max-w-3xl">
-                <p className="text-[11px] font-bold uppercase tracking-[.22em] text-sky-300">Operations command center</p>
-                <h1 className="mt-4 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Portfolio Recovery</h1>
-                <p className="mt-4 max-w-2xl text-sm leading-6 text-slate-400">
-                  {portfolio.data.total_customers} active B2B accounts / {portfolio.data.total_invoices} receivables / factual recovery position driven by the virtual operating date.
-                </p>
+            <header className="mb-5 max-w-4xl">
+              <p className="text-[10px] font-bold uppercase tracking-[.2em] text-sky-300">Live revenue recovery</p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Receivables, continuously reassessed</h1>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">ReconMate watches {portfolio.data.total_customers} customer accounts and changes recovery decisions when payment, promise, dispute, and behaviour evidence changes.</p>
+            </header>
+
+            <section aria-label="Top portfolio metrics" className="mb-5">
+              <div className="hide-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-4">
+                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Total outstanding" value={money(portfolio.data.total_outstanding_amount)} detail={`${portfolio.data.total_invoices} live receivables across the portfolio.`} tone="blue" />
+                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Amount at risk" state="Needs attention" value={money(recovery.data.overdue_exposure)} detail="Current overdue exposure—not every balance requires the same action." tone="red" />
+                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Recovered this cycle" state={recoveredThisCycle > 0 ? "Confirmed" : "No payment event"} value={recoveredThisCycle > 0 ? money(recoveredThisCycle) : "—"} detail="Sum of persisted payment events in the current operating cycle." tone="green" />
+                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Active cases" value={String(recovery.data.active_cases ?? recovery.data.total_cases)} detail="Open recovery work currently monitored by ReconMate." tone="amber" />
               </div>
             </section>
 
-            <section aria-label="Portfolio intelligence summary">
+            <section aria-label="ReconMate intelligence summary">
               <OperationalIntelligenceHero
-                key={`intelligence-${intelligence.data?.calculated_at ?? "loading"}`}
                 intelligence={intelligence.data}
+                recovery={recovery.data}
+                latestCycle={latestCycleSnapshot}
+                approvals={recoveryQueue.queue.filter((item) => item.humanApprovalRequired && item.state !== "RESOLVED").length}
+                recoveredThisCycle={recoveredThisCycle > 0 ? money(recoveredThisCycle) : "—"}
+                evaluationUpdatedAt={intelligence.dataUpdatedAt}
                 loading={intelligence.isLoading}
                 error={intelligenceError}
-                totalOutstanding={portfolio.data.total_outstanding_amount}
-                overdueExposure={recovery.data.overdue_exposure}
-                formatMoney={money}
                 synchronizing={tick.isPending || intelligence.isFetching}
-                synchronizedCycle={lastTick?.cycle}
               />
             </section>
 
-            <TodaysOperationalFocus
+            <AIPriorities
               intelligence={intelligence.data}
               loading={intelligence.isLoading}
               error={intelligenceError}
+              transitions={visibleTransitions}
               casesByCustomer={casesByCustomer}
               caseLinksLoading={caseLinksLoading}
               caseLinksError={caseLinksError}
-              affectedCustomerIds={affectedCustomerIds}
               onSelectCase={openPreview}
-              onRetry={() => void intelligence.refetch()}
-              onRetryCaseLinks={() => void Promise.all([recoveryQueue.cases.refetch(), recoveryQueue.recommendations.refetch()])}
             />
 
-            <section aria-label="Important portfolio metrics" className="mt-7">
-              <div className="mb-4 px-1">
-                <p className="text-[10px] font-bold uppercase tracking-[.16em] text-sky-300">Operational position</p>
-                <h2 className="mt-1.5 text-xl font-semibold tracking-[-.025em] text-white">Money and work requiring attention</h2>
-              </div>
-              <div className="hide-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0 xl:grid-cols-4">
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Broken-promise exposure" state="At risk" value={money(recovery.data.broken_promise_exposure)} detail="Outstanding exposure tied to missed payment commitments." tone="amber" />
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovery ready" state="Actionable" value={String(recovery.data.cases_eligible_for_recovery)} detail="Cases whose current facts allow operator recovery work." tone="blue" />
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Recovered this cycle" state={latestPayment ? "Confirmed" : "No payment"} value={latestPayment ? money(latestPayment) : "-"} detail={latestPayment ? "A payment was persisted during the current simulation cycle." : "The current simulation cycle contains no payment event."} impact={latestPayment ? "Confirmed factual recovery" : undefined} tone="green" />
-              <PortfolioMetricCard className="min-w-[78vw] snap-start sm:min-w-0" label="Attention required" state="Review" value={String(recovery.data.cases_requiring_attention ?? recovery.data.cases_eligible_for_recovery)} detail="Cases carrying an active factual attention condition." tone="red" />
-              </div>
-            </section>
+            {intelligence.data && <HomeRecoveryQueue items={recoveryQueue.queue} intelligence={intelligence.data} transitions={visibleTransitions} events={events.data} onSelect={openPreview} />}
 
-            <section aria-label="Portfolio operations" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
+            {inspectionEnabled && <section aria-label="Demo inspection tools" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
               <LiveEventFeed events={events.data} customers={names} onOpenCase={(caseId) => {
                 const item = recoveryQueue.queue.find((candidate) => candidate.id === caseId);
                 if (!item) return false;
@@ -267,9 +274,9 @@ export function Dashboard() {
               }} />
               <aside className="space-y-5">
                 <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
-                {inspectionEnabled && <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} phase={tickPhase} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} onReconcile={reconcile} />}
+                <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} phase={tickPhase} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} onReconcile={reconcile} />
               </aside>
-            </section>
+            </section>}
             {inspectionEnabled && <RecommendationSafety activeDisputes={recovery.data.cases_blocked_by_dispute} activePromises={recovery.data.cases_awaiting_payment} />}
           </>
         )}

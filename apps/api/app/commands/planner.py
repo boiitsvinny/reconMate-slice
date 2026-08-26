@@ -68,7 +68,7 @@ class CommandPlanner:
                 records_inspected=portfolio.customer_count, records_matched=portfolio.customer_count,
                 records_excluded=0, records_returned=len(analyzed),
                 inspection_scope=InspectionScope(customers=portfolio.customer_count),
-                ranking=self._ranking_evidence(analyzed), latest_cycle=tools.latest_cycle_evidence(),
+                ranking=self._ranking_evidence(analyzed), latest_cycle=tools.latest_cycle_evidence(analyzed),
             )
 
         elif intent in {CommandIntentType.PRIORITIZE_CASES, CommandIntentType.REVIEW_BROKEN_PROMISES}:
@@ -185,7 +185,7 @@ class CommandPlanner:
         if evidence.records_inspected == 0 and analyzed:
             evidence = QueryEvidence(
                 records_inspected=len(analyzed), records_matched=len(analyzed), records_returned=len(analyzed),
-                ranking=self._ranking_evidence(analyzed), latest_cycle=tools.latest_cycle_evidence(),
+                ranking=self._ranking_evidence(analyzed), latest_cycle=tools.latest_cycle_evidence(analyzed),
             )
         return PlanningOutput(plan=plan, analyzed_entities=analyzed, understanding_summary=summary, warnings=warnings, query_evidence=evidence)
 
@@ -204,7 +204,7 @@ class CommandPlanner:
             inspection_scope=execution.scope,
             exclusions=[ExclusionCount(reason=reason, count=count) for reason, count in execution.exclusions],
             ranking=self._ranking_evidence(analyzed, stored_priorities),
-            latest_cycle=tools.latest_cycle_evidence(),
+            latest_cycle=tools.latest_cycle_evidence(analyzed),
         )
 
     @staticmethod

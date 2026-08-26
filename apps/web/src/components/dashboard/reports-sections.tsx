@@ -1,0 +1,105 @@
+"use client";
+
+import type { IntelligenceResult, PortfolioIntelligence } from "@/lib/intelligence-api";
+import type { LatestIntelligenceCycle, PriorityCase, Recovery, RecoveryAction, SimulationEvent } from "./data";
+import { formatMoney } from "./data";
+import { buttonStyles, Panel, SectionHeader, StatusPill } from "./ui";
+
+type ReportProps = {
+  recovery: Recovery;
+  intelligence: PortfolioIntelligence;
+  latestCycle: LatestIntelligenceCycle | null;
+  events: SimulationEvent[];
+  queue: PriorityCase[];
+  actions: RecoveryAction[];
+  onSelectCase: (item: PriorityCase) => void;
+};
+
+const label = (value: string) => value.replaceAll("_", " ");
+const riskTone = (level: IntelligenceResult["level"]) => level === "CRITICAL" ? "rose" : level === "HIGH" ? "amber" : level === "MEDIUM" ? "sky" : "slate";
+
+export function RecoveryEvidenceReport(props: ReportProps) {
+  const casesByCustomer = new Map<string, PriorityCase>();
+  const casesById = new Map(props.queue.map((item) => [item.id, item]));
+  for (const item of props.queue) if (!casesByCustomer.has(item.customerId) || item.recommendationPriority === "CRITICAL") casesByCustomer.set(item.customerId, item);
+  const intelligenceByCustomer = new Map(props.intelligence.customers.map((item) => [item.entity_id, item]));
+  return <div className="space-y-6"><ExecutiveSnapshot {...props} /><MaterialChanges {...props} casesByCustomer={casesByCustomer} casesById={casesById} /><DecisionReport {...props} casesByCustomer={casesByCustomer} /><DeliberateRestraint {...props} casesByCustomer={casesByCustomer} /><OperatorActivity {...props} casesById={casesById} /><OutstandingExceptions {...props} intelligenceByCustomer={intelligenceByCustomer} casesById={casesById} /></div>;
+}
+
+function ExecutiveSnapshot({ recovery, intelligence, latestCycle, events, actions }: ReportProps) {
+  const elevated = intelligence.level_counts.CRITICAL + intelligence.level_counts.HIGH;
+  const recovered = events.filter((event) => event.cycle === latestCycle?.cycle).reduce((sum, event) => sum + Number(event.metadata.payment_amount ?? 0), 0);
+  const awaiting = actions.filter((item) => item.status === "PENDING_APPROVAL").length;
+  const executed = actions.filter((item) => item.status === "EXECUTED").length;
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Portfolio position" title="Executive Recovery Snapshot" detail={`Current persisted position evaluated across ${intelligence.customer_count} customer accounts.`} prominent /><div className="grid grid-cols-2 gap-px bg-white/[.06] md:grid-cols-3 xl:grid-cols-6"><ReportMetric label="Overdue exposure" value={formatMoney(recovery.overdue_exposure)} detail="Current amount at risk" tone="rose" /><ReportMetric label="Elevated accounts" value={String(elevated)} detail={`${intelligence.level_counts.CRITICAL} critical · ${intelligence.level_counts.HIGH} high`} tone="amber" /><ReportMetric label="Recovered this cycle" value={recovered ? formatMoney(recovered) : "—"} detail="Persisted payment events" tone="emerald" /><ReportMetric label="Current blockers" value={String(recovery.cases_blocked_by_dispute + recovery.cases_awaiting_payment)} detail={`${recovery.cases_blocked_by_dispute} disputes · ${recovery.cases_awaiting_payment} promises`} tone="sky" /><ReportMetric label="Awaiting approval" value={String(awaiting)} detail="Controlled operator actions" tone="amber" /><ReportMetric label="Executed workflows" value={String(executed)} detail="Internal actions completed" tone="emerald" /></div></Panel>;
+}
+
+function MaterialChanges({ latestCycle, events, casesByCustomer, casesById, onSelectCase }: ReportProps & { casesByCustomer: Map<string, PriorityCase>; casesById: Map<string, PriorityCase> }) {
+  if (!latestCycle) return <Panel className="overflow-hidden"><SectionHeader eyebrow="Material changes" title="No simulation-cycle evidence recorded yet" detail="Current portfolio decisions remain available below; no before/after result is being inferred." prominent /></Panel>;
+  const related = new Map<string, { id: string; type: string; family: string; role: string }>();
+  for (const transition of latestCycle.transitions) for (const event of transition.related_events ?? []) related.set(event.id, event);
+  const cycleEvents = related.size ? [...related.values()] : events.filter((event) => event.cycle === latestCycle.cycle).map((event) => ({ id: event.id, type: event.type, family: "", role: "" }));
+  const paymentEvents = cycleEvents.filter((event) => event.type.includes("PAYMENT")).length;
+  const promiseEvents = cycleEvents.filter((event) => event.type.includes("PROMISE") || event.type.includes("COMMITMENT")).length;
+  const disputeEvents = cycleEvents.filter((event) => event.type.includes("DISPUTE")).length;
+  const examples = [...latestCycle.transitions].filter((item) => item.entity_type === "CUSTOMER").sort((left, right) => Number(right.classifications.includes("RECOMMENDATION_CHANGED")) - Number(left.classifications.includes("RECOMMENDATION_CHANGED")) || Number(right.material) - Number(left.material)).slice(0, 4);
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Material changes" title={`What changed in cycle ${latestCycle.cycle}`} detail="Persisted events are separated from material decision movement." prominent /><div className="grid grid-cols-2 gap-px border-b border-white/[.06] bg-white/[.06] sm:grid-cols-4 xl:grid-cols-8"><ReportMetric label="Accounts reassessed" value={String(latestCycle.customers_affected)} detail="Received factual events" tone="sky" /><ReportMetric label="Decisions changed" value={String(latestCycle.recommendations_changed)} detail="Recommendation moved" tone="rose" /><ReportMetric label="Decisions held" value={String(latestCycle.recommendations_unchanged)} detail="Facts changed; decision held" tone="emerald" /><ReportMetric label="Blockers added" value={String(latestCycle.blockers_added)} detail="New supported constraint" tone="amber" /><ReportMetric label="Blockers removed" value={String(latestCycle.blockers_removed)} detail="Constraint resolved" tone="emerald" /><ReportMetric label="Payment events" value={String(paymentEvents)} detail="Received or applied" tone="emerald" /><ReportMetric label="Promise events" value={String(promiseEvents)} detail="Created or broken" tone="amber" /><ReportMetric label="Dispute events" value={String(disputeEvents)} detail="Opened or resolved" tone="sky" /></div><div className="divide-y divide-white/[.055]">{examples.map((transition) => {
+    const recoveryCase = casesByCustomer.get(transition.entity_id) ?? casesById.get(transition.entity_id);
+    const decisionChanged = transition.classifications.includes("RECOMMENDATION_CHANGED");
+    return <article key={`${transition.entity_type}-${transition.entity_id}`} className="grid gap-4 p-4 sm:p-5 lg:grid-cols-[minmax(190px,.8fr)_minmax(280px,1.25fr)_minmax(260px,1.15fr)_auto] lg:items-center"><div><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold text-white">{transition.entity_name}</h3><StatusPill tone={decisionChanged ? "rose" : "emerald"}>{decisionChanged ? "Decision changed" : "Decision held"}</StatusPill></div><p className="mt-1 text-[10px] text-slate-500">Current intelligence: {transition.current_risk_level} · {transition.current_score}/100</p></div><div><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-600">Decision movement</p><p className="mt-1 text-xs font-semibold text-sky-100">{transition.previous_recommendation ? `${label(transition.previous_recommendation)} → ` : "Previously unavailable → "}{transition.current_recommendation_title}</p><p className="mt-1 text-[10px] tabular-nums text-slate-500">Score {transition.previous_score ?? "—"} → {transition.current_score}</p></div><div><p className="text-xs leading-5 text-slate-300">{transition.what_changed}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">{transition.decision_impact}</p></div>{recoveryCase ? <button type="button" onClick={() => onSelectCase(recoveryCase)} className={buttonStyles.secondary}>Open evidence</button> : <span className="text-[10px] text-slate-600">Portfolio evidence only</span>}</article>;
+  })}{!examples.length && <p className="p-8 text-center text-xs text-slate-500">Cycle events were recorded without customer-level transition evidence.</p>}</div></Panel>;
+}
+
+function DecisionReport({ intelligence, casesByCustomer, onSelectCase }: ReportProps & { casesByCustomer: Map<string, PriorityCase> }) {
+  const groups = [
+    { title: "Escalate", actions: ["ESCALATE"], tone: "rose" as const },
+    { title: "Prioritize / follow up", actions: ["PRIORITIZE_RECOVERY", "FOLLOW_UP"], tone: "amber" as const },
+    { title: "Review dispute", actions: ["REVIEW_DISPUTE"], tone: "sky" as const },
+    { title: "Monitor promise", actions: ["WAIT_FOR_PROMISE"], tone: "emerald" as const },
+    { title: "Routine monitoring", actions: ["MONITOR"], tone: "slate" as const },
+  ].map((group) => ({ ...group, items: intelligence.customers.filter((item) => group.actions.includes(item.recommendation.action)).sort((left, right) => right.score - left.score) }));
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Priority decisions" title="Decisions ReconMate made" detail="Current recommendations grouped by operational meaning, with representative evidence." prominent /><div className="grid gap-px bg-white/[.06] md:grid-cols-2 xl:grid-cols-5">{groups.map((group) => {
+    const example = group.items[0];
+    const recoveryCase = example ? casesByCustomer.get(example.entity_id) : undefined;
+    return <article key={group.title} className="flex min-h-56 flex-col bg-[#08111f] p-4"><div className="flex items-center justify-between gap-2"><StatusPill tone={group.tone}>{group.title}</StatusPill><span className="text-xl font-semibold tabular-nums text-white">{group.items.length}</span></div>{example ? <><p className="mt-4 text-sm font-semibold text-white">{example.entity_name}</p><p className="mt-1 text-[10px] text-slate-500">Current risk: {example.level} · score {example.score}/100</p><p className="mt-3 line-clamp-3 text-xs leading-5 text-slate-300">{example.recommendation.explanation}</p><p className="mt-2 text-[10px] text-slate-500">Evidence: {example.signals[0]?.title ?? "Current receivables state"}</p>{recoveryCase && !recoveryCase.allowed && <p className="mt-1 text-[10px] text-amber-200/70">Blocker: {recoveryCase.reason}</p>}{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="mt-auto pt-4 text-left text-xs font-semibold text-sky-300">Open representative case →</button>}</> : <p className="mt-6 text-xs text-slate-600">No current decisions in this group.</p>}</article>;
+  })}</div></Panel>;
+}
+
+function DeliberateRestraint({ intelligence, casesByCustomer, onSelectCase }: ReportProps & { casesByCustomer: Map<string, PriorityCase> }) {
+  const holds = intelligence.customers.filter((item) => item.recommendation.action === "MONITOR" || item.recommendation.action === "WAIT_FOR_PROMISE").sort((left, right) => Number(right.metrics.overdue_exposure) - Number(left.metrics.overdue_exposure)).slice(0, 4);
+  return <Panel className="overflow-hidden border-emerald-300/15"><SectionHeader eyebrow="Deliberate holds" title="Where ReconMate is intentionally not escalating" detail="Overdue does not automatically mean more customer contact." prominent /><div className="grid gap-px bg-white/[.06] md:grid-cols-2">{holds.map((item) => {
+    const recoveryCase = casesByCustomer.get(item.entity_id);
+    const evidence = [item.metrics.active_promise_count ? "Active promise remains valid" : null, item.metrics.active_dispute_count ? "Active dispute blocks recovery" : null, item.metrics.days_since_last_payment !== null && item.metrics.days_since_last_payment < 30 ? `Payment recorded ${item.metrics.days_since_last_payment} days ago` : null].filter((value): value is string => Boolean(value));
+    return <article key={item.entity_id} className="bg-[#08111f] p-5"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-white">{item.entity_name}</h3><p className="mt-1 text-xs text-slate-500">{formatMoney(item.metrics.overdue_exposure)} overdue · {item.metrics.max_days_overdue} days maximum</p></div><StatusPill tone="emerald">{item.recommendation.title}</StatusPill></div><p className="mt-4 text-xs leading-5 text-slate-300">{item.recommendation.explanation}</p><div className="mt-3 flex flex-wrap gap-1.5">{(evidence.length ? evidence : [item.signals[0]?.title ?? "Current behaviour remains inside monitoring policy"]).map((value) => <span key={value} className="rounded-full border border-emerald-300/12 bg-emerald-300/[.035] px-2.5 py-1 text-[10px] text-emerald-100/75">{value}</span>)}</div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="mt-4 text-xs font-semibold text-sky-300">Review hold evidence →</button>}</article>;
+  })}{!holds.length && <p className="bg-[#08111f] p-8 text-center text-xs text-slate-500 md:col-span-2">No current monitor or wait decisions are recorded.</p>}</div></Panel>;
+}
+
+function OperatorActivity({ actions, casesById, onSelectCase }: ReportProps & { casesById: Map<string, PriorityCase> }) {
+  const counts = new Map<string, number>();
+  for (const item of actions) counts.set(item.status, (counts.get(item.status) ?? 0) + 1);
+  const recent = [...actions].sort((left, right) => new Date(right.created_at ?? 0).getTime() - new Date(left.created_at ?? 0).getTime()).slice(0, 8);
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Operator actions" title="Workflow outcomes" detail="Persisted internal recovery workflow records; these do not imply customer contact or financial movement." prominent /><div className="flex flex-wrap gap-2 border-b border-white/[.06] px-5 py-3">{["PENDING_APPROVAL", "APPROVED", "REJECTED", "HELD", "CANCELLED", "EXECUTED"].map((status) => <span key={status} className="rounded-lg border border-white/[.07] bg-white/[.025] px-2.5 py-1.5 text-[10px] text-slate-400"><strong className="mr-1 text-white">{counts.get(status) ?? 0}</strong>{label(status)}</span>)}</div><div className="divide-y divide-white/[.055]">{recent.map((action) => {
+    const recoveryCase = casesById.get(action.case_id);
+    const timestamp = action.executed_at ?? action.decision_at ?? action.created_at;
+    return <article key={action.id} className="grid gap-3 p-4 sm:p-5 lg:grid-cols-[minmax(180px,.8fr)_minmax(220px,1fr)_140px_minmax(180px,.8fr)_auto] lg:items-center"><div><p className="text-sm font-semibold text-white">{recoveryCase?.customerName ?? `Case ${action.case_id.slice(0, 8)}`}</p><p className="mt-1 text-[10px] text-slate-600">Internal workflow record</p></div><div><p className="text-xs font-semibold text-sky-200">{label(action.recommended_action ?? action.action_type)}</p><p className="mt-1 line-clamp-2 text-[10px] leading-4 text-slate-500">{action.decision_reason ?? action.reason ?? action.recommendation_context?.workflow_effect ?? "No additional operator reason recorded."}</p></div><StatusPill tone={action.status === "EXECUTED" ? "emerald" : action.status === "PENDING_APPROVAL" ? "amber" : action.status === "REJECTED" || action.status === "CANCELLED" ? "rose" : "sky"}>{label(action.status)}</StatusPill><div><p className="text-[10px] text-slate-400">{action.executed_by ?? action.decision_by ?? "System-created record"}</p><p className="mt-1 text-[10px] text-slate-600">{timestamp ? new Date(timestamp).toLocaleString() : "Timestamp unavailable"}</p></div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className={buttonStyles.secondary}>Open case</button>}</article>;
+  })}{!recent.length && <p className="p-8 text-center text-xs text-slate-500">No persisted operator workflow activity is available.</p>}</div></Panel>;
+}
+
+function OutstandingExceptions({ queue, actions, intelligenceByCustomer, casesById, onSelectCase }: ReportProps & { intelligenceByCustomer: Map<string, IntelligenceResult>; casesById: Map<string, PriorityCase> }) {
+  const actionsByCase = new Map<string, RecoveryAction[]>();
+  for (const action of actions) actionsByCase.set(action.case_id, [...(actionsByCase.get(action.case_id) ?? []), action]);
+  const criticalWithoutExecution = queue.filter((item) => intelligenceByCustomer.get(item.customerId)?.level === "CRITICAL" && item.state !== "RESOLVED" && !(actionsByCase.get(item.id) ?? []).some((action) => action.status === "EXECUTED"));
+  const unresolvedPromises = queue.filter((item) => intelligenceByCustomer.get(item.customerId)?.metrics.broken_promise_count && item.state !== "RESOLVED");
+  const disputeBlocked = queue.filter((item) => intelligenceByCustomer.get(item.customerId)?.metrics.active_dispute_count && item.state !== "RESOLVED");
+  const pending = queue.filter((item) => (actionsByCase.get(item.id) ?? []).some((action) => action.status === "PENDING_APPROVAL"));
+  const exceptions = [{ title: "Critical without completed action", items: criticalWithoutExecution, tone: "rose" as const }, { title: "Unresolved broken promises", items: unresolvedPromises, tone: "amber" as const }, { title: "Disputes blocking recovery", items: disputeBlocked, tone: "sky" as const }, { title: "Actions awaiting approval", items: pending, tone: "amber" as const }];
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Outstanding exceptions" title="What remains unresolved" detail="Current supported conditions requiring follow-through or continued monitoring." prominent /><div className="grid gap-px bg-white/[.06] sm:grid-cols-2 xl:grid-cols-4">{exceptions.map((exception) => {
+    const example = exception.items[0];
+    return <article key={exception.title} className="bg-[#08111f] p-4"><div className="flex items-center justify-between gap-2"><StatusPill tone={exception.tone}>{exception.title}</StatusPill><span className="text-2xl font-semibold tabular-nums text-white">{exception.items.length}</span></div>{example ? <><p className="mt-4 text-sm font-semibold text-white">{example.customerName}</p><p className="mt-1 text-[10px] text-slate-500">{example.amount} · {example.daysOverdue} days overdue</p><button type="button" onClick={() => onSelectCase(casesById.get(example.id) ?? example)} className="mt-4 text-xs font-semibold text-sky-300">Inspect exception →</button></> : <p className="mt-5 text-xs text-slate-600">No current exception in this category.</p>}</article>;
+  })}</div></Panel>;
+}
+
+function ReportMetric({ label: metricLabel, value, detail, tone }: { label: string; value: string; detail: string; tone: "rose" | "amber" | "sky" | "emerald" }) {
+  const colors = { rose: "text-rose-200", amber: "text-amber-100", sky: "text-sky-200", emerald: "text-emerald-200" };
+  return <article className="bg-[#08111f] p-4"><p className="text-[9px] font-bold uppercase leading-4 tracking-[.12em] text-slate-500">{metricLabel}</p><p className={`mt-2 text-xl font-semibold tabular-nums ${colors[tone]}`}>{value}</p><p className="mt-1 text-[10px] leading-4 text-slate-600">{detail}</p></article>;
+}

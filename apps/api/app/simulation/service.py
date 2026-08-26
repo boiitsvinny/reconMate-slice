@@ -361,3 +361,28 @@ def simulation_state(db: Session) -> dict[str, Any]:
 def recent_events(db: Session, limit: int = 50) -> list[dict[str, Any]]:
     rows = db.scalars(select(SimulationEvent).order_by(SimulationEvent.occurred_at.desc(), SimulationEvent.cycle.desc()).limit(limit)).all()
     return [{"id": str(item.id), "cycle": item.cycle, "type": item.event_type, "customer_id": str(item.customer_id) if item.customer_id else None, "invoice_id": str(item.invoice_id) if item.invoice_id else None, "case_id": str(item.recovery_case_id) if item.recovery_case_id else None, "metadata": item.metadata_, "occurred_at": item.occurred_at} for item in rows]
+
+
+def latest_intelligence_cycle(db: Session) -> dict[str, Any] | None:
+    """Expose the latest persisted before/after evidence without recalculating it."""
+    latest_cycle = db.scalar(select(SimulationEvent.cycle).order_by(SimulationEvent.cycle.desc()).limit(1))
+    if latest_cycle is None:
+        return None
+    events = db.scalars(select(SimulationEvent).where(SimulationEvent.cycle == latest_cycle)).all()
+    audits = db.scalars(select(AuditEvent).where(
+        AuditEvent.event_type.in_({"SIMULATION_INTELLIGENCE_SUMMARY", "SIMULATION_INTELLIGENCE_TRANSITION"})
+    ).order_by(AuditEvent.occurred_at)).all()
+    relevant = [item for item in audits if (item.payload or {}).get("cycle") == latest_cycle]
+    summary = next(((item.payload or {}) for item in relevant if item.event_type == "SIMULATION_INTELLIGENCE_SUMMARY"), {})
+    transitions = [(item.payload or {}) for item in relevant if item.event_type == "SIMULATION_INTELLIGENCE_TRANSITION"]
+    return {
+        "cycle": latest_cycle,
+        "event_count": len(events),
+        "customers_affected": int(summary.get("customers_affected", len({event.customer_id for event in events if event.customer_id}))),
+        "material_customers": int(summary.get("material_customers", 0)),
+        "recommendations_changed": int(summary.get("recommendations_changed", 0)),
+        "recommendations_unchanged": int(summary.get("recommendations_unchanged", 0)),
+        "blockers_added": int(summary.get("blockers_added", 0)),
+        "blockers_removed": int(summary.get("blockers_removed", 0)),
+        "transitions": transitions,
+    }

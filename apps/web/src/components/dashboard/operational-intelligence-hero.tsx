@@ -1,92 +1,62 @@
 import type { PortfolioIntelligence } from "@/lib/intelligence-api";
-import { Panel, SectionEyebrow, StatusPill } from "./ui";
+import type { LatestIntelligenceCycle, Recovery } from "./data";
+import { Panel, SectionHeader, StatusPill } from "./ui";
 
 type Props = {
   intelligence?: PortfolioIntelligence;
+  recovery: Recovery;
+  latestCycle: LatestIntelligenceCycle | null;
+  approvals: number;
+  recoveredThisCycle: string;
+  evaluationUpdatedAt: number;
   loading: boolean;
   error: string | null;
-  overdueExposure: string;
-  totalOutstanding: string;
-  formatMoney: (value: string | number) => string;
   synchronizing: boolean;
-  synchronizedCycle?: number;
 };
 
-export function OperationalIntelligenceHero({ intelligence, loading, error, overdueExposure, totalOutstanding, formatMoney, synchronizing, synchronizedCycle }: Props) {
-  if (loading) {
-    return (
-      <Panel className="relative overflow-hidden" >
-        <div className="grid animate-pulse gap-8 p-6 sm:p-7 lg:grid-cols-[1.1fr_.9fr]">
-          <div className="space-y-4"><div className="h-3 w-48 rounded bg-white/[.07]" /><div className="h-8 w-full max-w-lg rounded bg-white/[.07]" /><div className="h-4 w-3/4 rounded bg-white/[.04]" /></div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3"><div className="h-20 rounded-xl bg-white/[.04]" /><div className="h-20 rounded-xl bg-white/[.04]" /><div className="h-20 rounded-xl bg-white/[.04]" /></div>
-        </div>
-      </Panel>
-    );
-  }
+export function OperationalIntelligenceHero({ intelligence, recovery, latestCycle, approvals, recoveredThisCycle, evaluationUpdatedAt, loading, error, synchronizing }: Props) {
+  if (loading) return <Panel className="h-52 animate-pulse bg-white/[.035]"><span className="sr-only">Loading ReconMate intelligence</span></Panel>;
 
-  if (!intelligence) {
-    return (
-      <Panel className="border-amber-300/15 p-6 sm:p-7">
-        <SectionEyebrow>Portfolio position</SectionEyebrow>
-        <h2 className="mt-3 text-2xl font-semibold tracking-[-.03em] text-white">{formatMoney(overdueExposure)} is currently overdue</h2>
-        <p className="mt-2 text-sm leading-6 text-slate-400">Live intelligence is temporarily unavailable. Factual exposure remains visible while the next intelligence refresh is attempted.</p>
-        {error && <p className="mt-4 text-xs text-amber-100/75">{error}</p>}
-      </Panel>
-    );
-  }
-
-  const critical = intelligence.level_counts.CRITICAL;
-  const high = intelligence.level_counts.HIGH;
-  const needsAttention = critical + high;
-  const brokenPromises = intelligence.customers.reduce((sum, item) => sum + item.metrics.broken_promise_count, 0);
-  const activeDisputes = intelligence.customers.reduce((sum, item) => sum + item.metrics.active_dispute_count, 0);
-  const activeRecovery = intelligence.customers.reduce((sum, item) => sum + item.metrics.active_recovery_case_count, 0);
-  const headline = critical
-    ? `${critical} critical account${critical === 1 ? "" : "s"} require immediate oversight`
-    : high
-      ? `${high} high-risk account${high === 1 ? "" : "s"} need operator attention`
-      : "No high-risk portfolio conditions require immediate action";
-  const statusTone = critical ? "rose" : high ? "amber" : "emerald";
+  const holds = intelligence?.customers.filter((item) => item.recommendation.action === "MONITOR" || item.recommendation.action === "WAIT_FOR_PROMISE").length ?? 0;
+  const activeCases = recovery.active_cases ?? recovery.total_cases;
+  const evaluatedAt = evaluationUpdatedAt ? new Date(evaluationUpdatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "not yet available";
+  const activity = synchronizing
+    ? "Reassessing the portfolio against new operational facts…"
+    : latestCycle
+      ? `Latest reassessment: cycle ${latestCycle.cycle} · ${latestCycle.event_count} factual event${latestCycle.event_count === 1 ? "" : "s"}`
+      : "Current portfolio evaluation is complete";
 
   return (
-    <Panel className="relative overflow-hidden border-sky-300/15">
-      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-sky-300/70 via-sky-300/20 to-transparent" />
-      <div className="grid gap-7 p-6 sm:p-7 lg:grid-cols-[minmax(0,1.05fr)_minmax(500px,.95fr)] lg:items-center">
-        <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <SectionEyebrow>Live portfolio intelligence</SectionEyebrow>
-            <StatusPill tone={statusTone}>{critical ? "Critical attention" : high ? "Elevated attention" : "Stable"}</StatusPill>
-          </div>
-          <h2 className="mt-3 text-xl font-semibold tracking-[-.025em] text-white sm:text-2xl">Portfolio intelligence</h2>
-          <p className="mt-5 text-[10px] font-bold uppercase tracking-[.16em] text-slate-500">Most important current finding</p>
-          <h3 className="mt-2 max-w-2xl text-2xl font-semibold tracking-[-.035em] text-white sm:text-3xl">{headline}</h3>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-400">
-            {formatMoney(overdueExposure)} overdue from {formatMoney(totalOutstanding)} outstanding. ReconMate evaluated {intelligence.customer_count} accounts using current recovery facts.
-          </p>
-          <p className="mt-3 text-[11px] text-slate-600">Evaluated for {intelligence.calculated_at} / average portfolio score {intelligence.average_score}</p>
-          {synchronizing && <p className="mt-2 animate-pulse text-[11px] font-medium text-sky-200">Re-evaluating intelligence against the new simulation facts...</p>}
-          {!synchronizing && synchronizedCycle !== undefined && <p className="live-enter mt-2 text-[11px] font-medium text-emerald-200">Intelligence synchronized with cycle {synchronizedCycle}.</p>}
-          {error && <p className="mt-2 text-[11px] text-amber-200/75">Live refresh is delayed; showing the last successful intelligence evaluation.</p>}
-        </div>
-        <div aria-label="Attention breakdown" className="grid grid-cols-2 overflow-hidden rounded-2xl border border-white/[.07] bg-black/10 sm:grid-cols-3 xl:grid-cols-6">
-          <AttentionMetric label="Critical" detail="Immediate oversight" value={critical} tone="text-rose-200" />
-          <AttentionMetric label="High risk" detail="Elevated exposure" value={high} tone="text-amber-100" />
-          <AttentionMetric label="Needs attention" detail="Critical + high" value={needsAttention} tone="text-sky-200" />
-          <AttentionMetric label="Broken promises" detail="Missed commitments" value={brokenPromises} tone="text-rose-200" />
-          <AttentionMetric label="Active disputes" detail="Recovery blocked" value={activeDisputes} tone="text-amber-100" />
-          <AttentionMetric label="Active recovery" detail="Open case work" value={activeRecovery} tone="text-emerald-200" />
-        </div>
+    <Panel className="overflow-hidden border-sky-300/15">
+      <SectionHeader
+        eyebrow="Decision system activity"
+        title="ReconMate Intelligence"
+        detail="Current evidence is continuously reassessed before recovery work is recommended."
+        prominent
+        action={<StatusPill tone={synchronizing ? "sky" : "emerald"}>{synchronizing ? "Reassessing" : "Evaluation current"}</StatusPill>}
+      />
+      <div className="grid grid-cols-2 gap-px bg-white/[.06] sm:grid-cols-3 xl:grid-cols-6">
+        <IntelligenceMetric label="Cases monitored" value={String(activeCases)} detail="Active recovery cases" />
+        <IntelligenceMetric label="Reassessed this cycle" value={latestCycle ? String(latestCycle.customers_affected) : "—"} detail="Affected customer records" />
+        <IntelligenceMetric label="Decisions changed" value={latestCycle ? String(latestCycle.recommendations_changed) : "—"} detail="Material recommendation moves" emphasis={Boolean(latestCycle?.recommendations_changed)} />
+        <IntelligenceMetric label="Human approvals" value={String(approvals)} detail="Current controlled actions" />
+        <IntelligenceMetric label="Deliberate holds" value={String(holds)} detail="Monitor or wait decisions" restraint />
+        <IntelligenceMetric label="Recovered this cycle" value={recoveredThisCycle} detail="Persisted payment events" restraint={recoveredThisCycle !== "—"} />
+      </div>
+      <div className="flex flex-col gap-2 border-t border-white/[.06] px-5 py-3 text-[11px] sm:flex-row sm:items-center sm:justify-between">
+        <p className={synchronizing ? "animate-pulse text-sky-200" : "text-slate-400"}>{activity}</p>
+        <p className="text-slate-600">Portfolio evaluation refreshed at {evaluatedAt}{error ? " · refresh delayed" : ""}</p>
       </div>
     </Panel>
   );
 }
 
-function AttentionMetric({ label, detail, value, tone }: { label: string; detail: string; value: number; tone: string }) {
+function IntelligenceMetric({ label, value, detail, emphasis = false, restraint = false }: { label: string; value: string; detail: string; emphasis?: boolean; restraint?: boolean }) {
   return (
-    <div className="min-w-0 border-b border-r border-white/[.055] p-3.5 last:border-r-0 sm:p-4">
-      <p className="text-[9px] font-semibold uppercase leading-3.5 tracking-[.1em] text-slate-400">{label}</p>
-      <p className={`mt-2 text-2xl font-semibold tabular-nums ${tone}`}>{value}</p>
-      <p className="mt-1 text-[9px] leading-3 text-slate-600">{detail}</p>
-    </div>
+    <article className="bg-[#08111f] p-4">
+      <p className="text-[9px] font-bold uppercase leading-4 tracking-[.12em] text-slate-500">{label}</p>
+      <p className={`mt-2 text-2xl font-semibold tabular-nums ${emphasis ? "text-amber-100" : restraint ? "text-emerald-200" : "text-white"}`}>{value}</p>
+      <p className="mt-1 text-[10px] leading-4 text-slate-600">{detail}</p>
+    </article>
   );
 }

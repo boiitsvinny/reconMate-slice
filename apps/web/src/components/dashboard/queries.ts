@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CaseApi, createPriorityQueue, Customer, fetchJson, Invoice, Portfolio, Recommendation, Recovery, SimState, SimulationEvent, Workspace } from "./data";
+import { CaseApi, createPriorityQueue, Customer, fetchJson, Invoice, LatestIntelligenceCycle, Portfolio, Recommendation, Recovery, RecoveryAction, SimState, SimulationEvent, Workspace } from "./data";
 import { getPortfolioIntelligence } from "@/lib/intelligence-api";
 
 export const LIVE_REFRESH_INTERVAL = 15_000;
@@ -16,8 +16,10 @@ export const queryKeys = {
   invoices: ["reconmate", "invoices"] as const,
   cases: ["reconmate", "cases"] as const,
   recommendations: ["reconmate", "recommendations"] as const,
+  actions: ["reconmate", "actions"] as const,
   simulationState: ["reconmate", "simulation-state"] as const,
   simulationEvents: ["reconmate", "simulation-events"] as const,
+  latestIntelligenceCycle: ["reconmate", "latest-intelligence-cycle"] as const,
   workspace: (caseId: string) => ["reconmate", "workspace", caseId] as const,
 };
 
@@ -30,8 +32,10 @@ export const useCustomers = () => useQuery({ queryKey: queryKeys.customers, quer
 export const useInvoices = () => useQuery({ queryKey: queryKeys.invoices, queryFn: () => fetchJson<Invoice[]>("/invoices"), ...liveQuery });
 export const useCases = () => useQuery({ queryKey: queryKeys.cases, queryFn: () => fetchJson<CaseApi[]>("/recovery/cases"), ...liveQuery });
 export const useRecommendations = () => useQuery({ queryKey: queryKeys.recommendations, queryFn: () => fetchJson<Recommendation[]>("/recovery/recommendations"), ...liveQuery });
+export const useRecoveryActions = () => useQuery({ queryKey: queryKeys.actions, queryFn: () => fetchJson<RecoveryAction[]>("/recovery/actions"), ...liveQuery });
 export const useSimulationState = () => useQuery({ queryKey: queryKeys.simulationState, queryFn: () => fetchJson<SimState>("/simulation/state"), ...liveQuery });
 export const useSimulationEvents = () => useQuery({ queryKey: queryKeys.simulationEvents, queryFn: () => fetchJson<SimulationEvent[]>("/simulation/events"), ...liveQuery });
+export const useLatestIntelligenceCycle = () => useQuery({ queryKey: queryKeys.latestIntelligenceCycle, queryFn: () => fetchJson<LatestIntelligenceCycle | null>("/simulation/intelligence/latest"), ...liveQuery });
 export const useCaseWorkspace = (caseId: string) => useQuery({ queryKey: queryKeys.workspace(caseId), queryFn: () => fetchJson<Workspace>(`/recovery/cases/${caseId}/workspace`), refetchInterval: LIVE_REFRESH_INTERVAL, refetchIntervalInBackground: false });
 
 export function useRecoveryQueue() {

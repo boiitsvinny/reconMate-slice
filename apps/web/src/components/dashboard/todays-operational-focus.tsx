@@ -2,114 +2,87 @@
 
 import Link from "next/link";
 import type { IntelligenceResult, PortfolioIntelligence } from "@/lib/intelligence-api";
-import type { PriorityCase } from "./data";
+import type { IntelligenceTransition, PriorityCase } from "./data";
 import { formatMoney } from "./data";
-import { buttonStyles, cx, Panel, SectionHeader, StatusPill } from "./ui";
+import { buttonStyles, Panel, SectionHeader, StatusPill } from "./ui";
 
 type Props = {
   intelligence?: PortfolioIntelligence;
   loading: boolean;
   error: string | null;
+  transitions: IntelligenceTransition[];
   casesByCustomer: Map<string, PriorityCase>;
   caseLinksLoading: boolean;
   caseLinksError: boolean;
-  affectedCustomerIds: Set<string>;
   onSelectCase: (item: PriorityCase) => void;
-  onRetry: () => void;
-  onRetryCaseLinks: () => void;
 };
 
-type FocusLane = "urgent" | "review" | "waiting";
-
-const laneFor = (action: string): FocusLane => {
-  if (action === "REVIEW_DISPUTE") return "review";
-  if (action === "WAIT_FOR_PROMISE" || action === "MONITOR") return "waiting";
-  return "urgent";
-};
-
-const lanePresentation = {
-  urgent: { label: "Action recommended", tone: "rose" as const, border: "border-l-rose-300/70" },
-  review: { label: "Review required", tone: "amber" as const, border: "border-l-amber-300/70" },
-  waiting: { label: "Blocked / waiting", tone: "slate" as const, border: "border-l-slate-400/60" },
-};
-
+const isRestraint = (item: IntelligenceResult) => item.recommendation.action === "MONITOR" || item.recommendation.action === "WAIT_FOR_PROMISE";
 const riskTone = (level: IntelligenceResult["level"]) => level === "CRITICAL" ? "rose" : level === "HIGH" ? "amber" : level === "MEDIUM" ? "sky" : "slate";
+const decisionLabel = (value: string) => value.replaceAll("_", " ");
 
-export function TodaysOperationalFocus({ intelligence, loading, error, casesByCustomer, caseLinksLoading, caseLinksError, affectedCustomerIds, onSelectCase, onRetry, onRetryCaseLinks }: Props) {
-  const items = intelligence?.highest_priority.filter((item) => item.recommendation.action !== "MONITOR").slice(0, 5) ?? [];
+export function AIPriorities({ intelligence, loading, error, transitions, casesByCustomer, caseLinksLoading, caseLinksError, onSelectCase }: Props) {
+  if (loading) return <Panel className="mt-5 h-72 animate-pulse bg-white/[.035]"><span className="sr-only">Loading AI priorities</span></Panel>;
+  if (!intelligence) return <Panel className="mt-5 overflow-hidden border-amber-300/15"><SectionHeader eyebrow="Contextual decisioning" title="AI priorities are temporarily unavailable" detail={error ?? "Current customer intelligence could not be evaluated."} prominent /></Panel>;
+
+  const customers = new Map(intelligence.customers.map((item) => [item.entity_id, item]));
+  const materialTransitions = transitions.filter((item) => item.entity_type === "CUSTOMER" && item.material);
+  const changedPriority = materialTransitions.map((transition) => ({ item: customers.get(transition.entity_id), transition })).find(({ item }) => item && !isRestraint(item));
+  const urgent = changedPriority?.item ?? intelligence.highest_priority.find((item) => !isRestraint(item));
+  const urgentTransition = changedPriority?.item?.entity_id === urgent?.entity_id ? changedPriority?.transition : materialTransitions.find((item) => item.entity_id === urgent?.entity_id);
+  const restraint = [...intelligence.customers]
+    .filter((item) => isRestraint(item) && item.entity_id !== urgent?.entity_id)
+    .sort((left, right) => Number(right.metrics.overdue_exposure) - Number(left.metrics.overdue_exposure))[0];
+  const restraintTransition = materialTransitions.find((item) => item.entity_id === restraint?.entity_id);
 
   return (
-    <Panel className="mt-7 overflow-hidden">
-      <SectionHeader
-        eyebrow="Today's operational focus"
-        title="What needs attention right now"
-        detail={intelligence ? "Backend-ranked accounts, presented in current intelligence priority order." : "Loading the current operational priority list."}
-        prominent
-      />
-      {loading && <FocusLoading />}
-      {!loading && error && !intelligence && (
-        <div className="flex flex-col justify-between gap-4 p-6 sm:flex-row sm:items-center">
-          <div><p className="text-sm font-semibold text-rose-100">Operational focus could not be evaluated</p><p className="mt-1 text-xs leading-5 text-slate-500">{error}</p></div>
-          <button type="button" onClick={onRetry} className={buttonStyles.secondary}>Try intelligence again</button>
-        </div>
-      )}
-      {intelligence && caseLinksError && <div className="flex flex-col justify-between gap-2 border-b border-amber-300/10 bg-amber-300/[.04] px-5 py-3 text-[11px] text-amber-100/75 sm:flex-row sm:items-center"><p>Case workspace links are temporarily unavailable. Intelligence review remains available.</p><button type="button" onClick={onRetryCaseLinks} className="font-semibold text-amber-100 underline decoration-amber-200/30 underline-offset-4">Retry case links</button></div>}
-      {!loading && intelligence && !items.length && (
-        <div className="px-6 py-12 text-center">
-          <div className="mx-auto grid h-10 w-10 place-items-center rounded-full border border-emerald-300/20 bg-emerald-300/[.07] text-emerald-200">✓</div>
-          <p className="mt-4 text-sm font-semibold text-slate-200">No urgent intelligence findings</p>
-          <p className="mx-auto mt-2 max-w-lg text-xs leading-5 text-slate-500">Current recommendations indicate routine monitoring. The portfolio will be evaluated again on the next live refresh.</p>
-        </div>
-      )}
-      {items.length > 0 && (
-        <div className="divide-y divide-white/[.06]">
-          {items.map((item, index) => <FocusItem key={item.entity_id} item={item} index={index} recoveryCase={casesByCustomer.get(item.entity_id)} caseLinkLoading={caseLinksLoading} affected={affectedCustomerIds.has(item.entity_id)} onSelectCase={onSelectCase} />)}
-        </div>
-      )}
+    <Panel className="mt-5 overflow-hidden">
+      <SectionHeader eyebrow="Contextual decisioning" title="AI Priorities" detail="The same overdue condition can produce a different decision when customer evidence differs." prominent />
+      {caseLinksError && <p className="border-b border-amber-300/10 bg-amber-300/[.04] px-5 py-3 text-[11px] text-amber-100/75">Case links are temporarily unavailable; the current decision evidence remains visible.</p>}
+      <div className="grid gap-px bg-white/[.06] xl:grid-cols-2">
+        {urgent && <PriorityDecisionCard kind="priority" item={urgent} transition={urgentTransition} recoveryCase={casesByCustomer.get(urgent.entity_id)} caseLinkLoading={caseLinksLoading} onSelectCase={onSelectCase} />}
+        {restraint && <PriorityDecisionCard kind="restraint" item={restraint} transition={restraintTransition} recoveryCase={casesByCustomer.get(restraint.entity_id)} caseLinkLoading={caseLinksLoading} onSelectCase={onSelectCase} />}
+      </div>
     </Panel>
   );
 }
 
-function FocusItem({ item, index, recoveryCase, caseLinkLoading, affected, onSelectCase }: { item: IntelligenceResult; index: number; recoveryCase?: PriorityCase; caseLinkLoading: boolean; affected: boolean; onSelectCase: (item: PriorityCase) => void }) {
-  const lane = laneFor(item.recommendation.action);
-  const presentation = lanePresentation[lane];
-  const signals = item.signals.slice(0, 2);
+function PriorityDecisionCard({ kind, item, transition, recoveryCase, caseLinkLoading, onSelectCase }: { kind: "priority" | "restraint"; item: IntelligenceResult; transition?: IntelligenceTransition; recoveryCase?: PriorityCase; caseLinkLoading: boolean; onSelectCase: (item: PriorityCase) => void }) {
+  const restraint = kind === "restraint";
+  const evidence = [
+    item.metrics.broken_promise_count ? `${item.metrics.broken_promise_count} broken promise${item.metrics.broken_promise_count === 1 ? "" : "s"}` : null,
+    item.metrics.active_promise_count ? `${item.metrics.active_promise_count} active promise${item.metrics.active_promise_count === 1 ? "" : "s"}` : null,
+    item.metrics.active_dispute_count ? `${item.metrics.active_dispute_count} active dispute${item.metrics.active_dispute_count === 1 ? "" : "s"}` : null,
+    item.metrics.max_days_overdue ? `${item.metrics.max_days_overdue} days overdue` : null,
+    item.metrics.days_since_last_payment === null ? "No payment recorded" : `Payment ${item.metrics.days_since_last_payment} days ago`,
+  ].filter((value): value is string => Boolean(value)).slice(0, 4);
+  const currentDecision = transition?.current_recommendation_title ?? item.recommendation.title;
+  const previousDecision = transition?.previous_recommendation ? decisionLabel(transition.previous_recommendation) : null;
+  const reason = transition?.why_intelligence_changed || item.recommendation.explanation;
 
   return (
-    <article className={cx("border-l-2 px-4 py-4 transition hover:bg-white/[.018] sm:px-5", presentation.border, affected && "live-enter bg-sky-300/[.035]")}> 
-      <div className="grid gap-4 lg:grid-cols-[minmax(210px,.8fr)_minmax(360px,1.55fr)_auto] lg:items-center">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2"><span className="text-[10px] tabular-nums text-slate-600">{String(index + 1).padStart(2, "0")}</span><h3 className="truncate text-sm font-semibold text-white">{item.entity_name}</h3></div>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <StatusPill tone={riskTone(item.level)}>Current account risk: {item.level} / {item.score}</StatusPill>
-            <StatusPill tone={presentation.tone}>{presentation.label}</StatusPill>
-          </div>
-          <p className="mt-2 text-[11px] text-slate-400">{formatMoney(item.metrics.overdue_exposure)} overdue / {item.metrics.max_days_overdue} days maximum</p>
-          {recoveryCase && <p className="mt-1 text-[10px] text-slate-600">Case {recoveryCase.id.slice(0, 8)} / {recoveryCase.state.replaceAll("_", " ")}</p>}
-        </div>
-        <div className="min-w-0">
-          <p className="text-[9px] font-bold uppercase tracking-[.13em] text-sky-300/70">Current recommendation</p>
-          <p className="mt-1 text-sm font-semibold text-sky-100">{item.recommendation.title}</p>
-          <p className="mt-1.5 text-xs leading-5 text-slate-400">{item.recommendation.explanation}</p>
-          {signals.length > 0 && <div className="mt-2.5 flex flex-wrap gap-1.5" aria-label="Important conditions">{signals.map((signal) => <span key={signal.type} title={signal.explanation} className="rounded-full border border-white/[.08] bg-white/[.025] px-2.5 py-1 text-[10px] text-slate-400">{signal.title}</span>)}</div>}
-        </div>
-        <div className="flex lg:justify-end">
-          {caseLinkLoading
-            ? <button type="button" disabled className={`${buttonStyles.secondary} w-full whitespace-nowrap sm:w-auto`}>Connecting case...</button>
-            : recoveryCase
-            ? <button type="button" onClick={() => onSelectCase(recoveryCase)} className={`${buttonStyles.secondary} w-full whitespace-nowrap sm:w-auto`}>Open case</button>
-            : <Link href="/analytics" className={`${buttonStyles.secondary} w-full whitespace-nowrap text-center sm:w-auto`}>Review intelligence</Link>}
-        </div>
+    <article className={`bg-[#08111f] p-5 sm:p-6 ${restraint ? "border-t-2 border-t-emerald-300/35 xl:border-l xl:border-t-0" : "border-t-2 border-t-rose-300/45"}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><p className={`text-[10px] font-bold uppercase tracking-[.14em] ${restraint ? "text-emerald-300" : "text-rose-300"}`}>{restraint ? "Intelligent restraint" : transition ? "Decision changed" : "Operator priority"}</p><h3 className="mt-2 text-xl font-semibold text-white">{item.entity_name}</h3><p className="mt-1 text-sm font-medium tabular-nums text-slate-300">{formatMoney(item.metrics.total_outstanding_amount)} outstanding</p></div>
+        <StatusPill tone={riskTone(item.level)}>{item.level} · {item.score}/100</StatusPill>
+      </div>
+
+      <div className={`mt-5 rounded-xl border p-4 ${restraint ? "border-emerald-300/15 bg-emerald-300/[.035]" : "border-sky-300/15 bg-sky-300/[.035]"}`}>
+        <p className="text-[9px] font-bold uppercase tracking-[.13em] text-slate-500">Recovery decision</p>
+        {previousDecision ? <div className="mt-2 flex flex-wrap items-center gap-2 text-sm font-semibold"><span className="text-slate-500">{previousDecision}</span><span className="text-sky-300">→</span><span className={restraint ? "text-emerald-200" : "text-white"}>{currentDecision}</span></div> : <p className={`mt-2 text-base font-semibold ${restraint ? "text-emerald-200" : "text-white"}`}>{currentDecision}</p>}
+        {transition?.previous_score !== null && transition?.previous_score !== undefined ? <p className="mt-2 text-xs text-slate-400">Priority score <span className="tabular-nums text-slate-500">{transition.previous_score}</span> <span className="mx-1 text-sky-300">→</span> <span className="font-semibold tabular-nums text-white">{transition.current_score}</span></p> : <p className="mt-2 text-xs text-slate-500">Current priority score: {item.score}/100</p>}
+      </div>
+
+      <div className="mt-4">
+        <p className="text-[9px] font-bold uppercase tracking-[.13em] text-slate-500">{transition ? "What changed" : "Why this decision"}</p>
+        <p className="mt-2 text-xs leading-5 text-slate-300">{reason}</p>
+        {restraint && <p className="mt-2 text-xs leading-5 text-emerald-100/70">ReconMate is deliberately holding additional recovery action while the current evidence supports monitoring or the active promise.</p>}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-1.5" aria-label="Decision evidence">{evidence.map((value) => <span key={value} className="rounded-full border border-white/[.08] bg-white/[.025] px-2.5 py-1 text-[10px] text-slate-400">{value}</span>)}</div>
+      <div className="mt-5">
+        {caseLinkLoading ? <button type="button" disabled className={buttonStyles.secondary}>Connecting decision…</button> : recoveryCase ? <button type="button" onClick={() => onSelectCase(recoveryCase)} className={restraint ? buttonStyles.secondary : buttonStyles.primary}>View decision</button> : <Link href="/analytics" className={buttonStyles.secondary}>Analyze decision</Link>}
       </div>
     </article>
-  );
-}
-
-function FocusLoading() {
-  return (
-    <div className="animate-pulse divide-y divide-white/[.055]" role="status">
-      <span className="sr-only">Loading today&apos;s operational focus</span>
-      {Array.from({ length: 3 }, (_, index) => <div key={index} className="grid gap-5 p-5 lg:grid-cols-[.7fr_1.5fr_auto]"><div className="h-14 rounded-xl bg-white/[.045]" /><div className="h-14 rounded-xl bg-white/[.035]" /><div className="h-9 w-24 rounded-lg bg-white/[.04]" /></div>)}
-    </div>
   );
 }

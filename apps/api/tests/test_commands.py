@@ -1,5 +1,6 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -193,7 +194,7 @@ class FakeCommandTools:
         records = self.query_recovery_candidates(query)
         return QueryExecution(records=records, inspected=1, matched=len(records), exclusions=[], scope=InspectionScope(customers=1, invoices=1, promises=1, recovery_cases=1))
 
-    def latest_cycle_evidence(self):
+    def latest_cycle_evidence(self, _results):
         return None
 
     def get_recovery_candidates(self, levels=None, customer_ids=None, top_n=None):
@@ -419,6 +420,67 @@ def test_prioritization_exposes_grounded_query_and_ranking_evidence(monkeypatch)
     assert evidence["ranking"][0]["raw_score"] == CUSTOMER_RESULT.raw_score
     assert "INR 450000 overdue" in evidence["ranking"][0]["facts"][0]
     assert evidence["ranking"][0]["decision"] == CUSTOMER_RESULT.recommendation.title + ": " + CUSTOMER_RESULT.recommendation.explanation
+
+
+def test_latest_cycle_evidence_fails_closed_across_customers_and_cases() -> None:
+    other_customer_id = uuid4()
+    other_case_id = uuid4()
+    selected_event = SimpleNamespace(customer_id=CUSTOMER_ID, recovery_case_id=CASE_ID, invoice_id=INVOICE_ID)
+    unrelated_customer_event = SimpleNamespace(customer_id=other_customer_id, recovery_case_id=other_case_id, invoice_id=uuid4())
+    unrelated_case_event = SimpleNamespace(customer_id=CUSTOMER_ID, recovery_case_id=other_case_id, invoice_id=uuid4())
+    customer_audit = SimpleNamespace(event_type="SIMULATION_INTELLIGENCE_TRANSITION", payload={
+        "cycle": 9, "entity_type": "CUSTOMER", "entity_id": str(CUSTOMER_ID), "entity_name": "Selected customer",
+        "previous_score": 68, "current_score": 88, "previous_recommendation": "FOLLOW_UP",
+        "current_recommendation": "ESCALATE", "classifications": ["RECOMMENDATION_CHANGED"], "material": True,
+    })
+    unrelated_customer_audit = SimpleNamespace(event_type="SIMULATION_INTELLIGENCE_TRANSITION", payload={
+        "cycle": 9, "entity_type": "CUSTOMER", "entity_id": str(other_customer_id), "entity_name": "Unrelated customer",
+        "previous_score": 20, "current_score": 60, "previous_recommendation": "MONITOR",
+        "current_recommendation": "FOLLOW_UP", "classifications": ["RECOMMENDATION_CHANGED"], "material": True,
+    })
+    case_audit = SimpleNamespace(event_type="SIMULATION_INTELLIGENCE_TRANSITION", payload={
+        "cycle": 9, "entity_type": "RECOVERY_CASE", "entity_id": str(CASE_ID), "entity_name": "Selected case",
+        "previous_score": 72, "current_score": 82, "previous_recommendation": "FOLLOW_UP",
+        "current_recommendation": "ESCALATE", "classifications": ["RECOMMENDATION_CHANGED"], "material": True,
+    })
+    unrelated_case_audit = SimpleNamespace(event_type="SIMULATION_INTELLIGENCE_TRANSITION", payload={
+        "cycle": 9, "entity_type": "RECOVERY_CASE", "entity_id": str(other_case_id), "entity_name": "Unrelated case",
+        "previous_score": 30, "current_score": 70, "previous_recommendation": "MONITOR",
+        "current_recommendation": "FOLLOW_UP", "classifications": ["RECOMMENDATION_CHANGED"], "material": True,
+    })
+
+    class Rows(list):
+        def all(self):
+            return self
+
+    class EvidenceSession:
+        def __init__(self):
+            self.results = iter((Rows([selected_event, unrelated_customer_event, unrelated_case_event]), Rows([
+                customer_audit, unrelated_customer_audit, case_audit, unrelated_case_audit,
+            ])))
+
+        def scalar(self, _statement):
+            return 9
+
+        def scalars(self, _statement):
+            return next(self.results)
+
+    customer_tools = object.__new__(CommandTools)
+    customer_tools.db = EvidenceSession()
+    customer_evidence = customer_tools.latest_cycle_evidence([CUSTOMER_RESULT])
+    assert customer_evidence is not None
+    assert customer_evidence.event_count == 2
+    assert customer_evidence.observations == ["Selected customer: recommendation changed from FOLLOW_UP to ESCALATE."]
+    assert "Unrelated customer" not in " ".join(customer_evidence.observations)
+
+    case_tools = object.__new__(CommandTools)
+    case_tools.db = EvidenceSession()
+    case_tools._cases = [_case_candidate().case]
+    case_evidence = case_tools.latest_cycle_evidence([CASE_RESULT])
+    assert case_evidence is not None
+    assert case_evidence.event_count == 1
+    assert case_evidence.observations == ["Selected case: recommendation changed from FOLLOW_UP to ESCALATE."]
+    assert "Unrelated case" not in " ".join(case_evidence.observations)
 
 
 def test_zero_result_query_keeps_truthful_inspection_counts(monkeypatch) -> None:

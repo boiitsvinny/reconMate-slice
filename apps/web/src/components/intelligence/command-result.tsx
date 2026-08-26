@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { CommandIntentType, CommandResult, ContributingFactor, IntelligenceSignal, PriorityLevel } from "@/lib/intelligence-api";
+import type { CommandIntentType, CommandResult, PriorityLevel } from "@/lib/intelligence-api";
 import { ActionProposalCard } from "./action-proposal-card";
 import { useCommandSession } from "./command-session";
-import { useInsightMode } from "./insight-mode";
+import { InvestigationWorkbench } from "./investigation-workbench";
 import { buttonStyles, Panel, SectionHeader, StatusPill } from "@/components/dashboard/ui";
 
 const label = (value: string) => value.replaceAll("_", " ");
@@ -25,7 +25,6 @@ const objectives: Record<CommandIntentType, string> = {
 
 export function CommandResultView({ command, result, onOpenTarget }: { command: string; result: CommandResult; onOpenTarget?: (targetType: string, targetId: string) => boolean }) {
   const { confirmPlan, confirming } = useCommandSession();
-  const { enabled: inspectionEnabled } = useInsightMode();
   const confirmationIds = useMemo(() => result.outcomes.filter((item) => item.status === "AWAITING_CONFIRMATION").map((item) => item.proposal_id), [result.outcomes]);
   const [selected, setSelected] = useState<Set<string>>(new Set(confirmationIds));
   const [reviewing, setReviewing] = useState(false);
@@ -44,6 +43,7 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
     return outcome?.status === "EXECUTED" ? [{ proposal, outcome }] : [];
   });
   const isUnknown = result.interpreted_intent.intent === "UNKNOWN";
+  const showOperationalPlan = result.plan.execution_mode !== "READ_ONLY";
   const selectedCount = selected.size;
   const openTarget = (targetType: string, targetId: string) => {
     const opened = onOpenTarget?.(targetType, targetId) ?? false;
@@ -65,9 +65,11 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
         <InspectionPanel result={result} />
       </section>
 
+      <RankedEvidencePanel result={result} onOpenTarget={onOpenTarget ? openTarget : undefined} />
+
       {result.query_evidence.latest_cycle && <LatestCyclePanel result={result} />}
 
-      <RankedEvidencePanel result={result} onOpenTarget={onOpenTarget ? openTarget : undefined} />
+      <InvestigationWorkbench result={result} onOpenTarget={onOpenTarget ? openTarget : undefined} />
 
       {executedProposals.length > 0 && (
         <Panel className="overflow-hidden border-emerald-300/20 bg-emerald-300/[.035]">
@@ -89,8 +91,8 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
         </Panel>
       )}
 
-      <Panel className="overflow-hidden border-sky-300/15">
-        <SectionHeader eyebrow="Prioritized operational plan" title={`Action plan · ${result.plan.proposed_actions.length} proposal${result.plan.proposed_actions.length === 1 ? "" : "s"}`} detail={result.plan.proposed_actions.length > 4 ? "Ordered results are bounded inside this panel; scroll to review every proposal." : `Plan ${result.plan.plan_id.slice(0, 8)} / ${label(result.plan.execution_mode)}`} prominent action={confirmationIds.length > 0 && !reviewing ? <button type="button" onClick={() => setReviewing(true)} className={buttonStyles.warning}>Review {confirmationIds.length} action{confirmationIds.length === 1 ? "" : "s"}</button> : undefined} />
+      {showOperationalPlan && <Panel className="overflow-hidden border-sky-300/15">
+        <SectionHeader eyebrow="Prepared command output" title={`Bounded work plan · ${result.plan.proposed_actions.length} proposal${result.plan.proposed_actions.length === 1 ? "" : "s"}`} detail={result.plan.proposed_actions.length > 4 ? "Ordered results are bounded inside this panel; scroll to review every proposal." : `Plan ${result.plan.plan_id.slice(0, 8)} / ${label(result.plan.execution_mode)}`} prominent action={confirmationIds.length > 0 && !reviewing ? <button type="button" onClick={() => setReviewing(true)} className={buttonStyles.warning}>Review {confirmationIds.length} action{confirmationIds.length === 1 ? "" : "s"}</button> : undefined} />
         {!result.plan.proposed_actions.length ? (
           <div className="p-10 text-center"><p className="text-sm font-medium text-slate-300">No matching action proposals</p><p className="mt-2 text-xs text-slate-500">No current record matched the interpreted command filters.</p></div>
         ) : (
@@ -117,22 +119,9 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
             <div className="mt-4 flex flex-col gap-2 sm:flex-row"><button type="button" onClick={() => setReviewing(false)} className={`${buttonStyles.secondary} w-full sm:w-auto`}>Cancel review</button><button type="button" disabled={!selectedCount || confirming} onClick={() => void confirmPlan([...selected])} className={`${buttonStyles.warning} w-full sm:w-auto`}>{confirming ? "Confirming safely..." : `Confirm ${selectedCount} selected action${selectedCount === 1 ? "" : "s"}`}</button></div>
           </div>
         )}
-      </Panel>
-
-      {inspectionEnabled && <Panel className="overflow-hidden">
-        <SectionHeader eyebrow="Recommendation evidence" title="Why ReconMate recommends this" detail={`${result.analyzed_entities.length} detailed intelligence record${result.analyzed_entities.length === 1 ? "" : "s"} returned by the command`} prominent />
-        <div className="operational-scrollbar max-h-[34rem] divide-y divide-white/[.06] overflow-y-auto overscroll-contain" role="region" aria-label="Recommendation evidence" tabIndex={0}>
-          {result.analyzed_entities.map((entity) => (
-            <details key={`${entity.entity_type}-${entity.entity_id}`} className="group p-4 sm:p-5" open={result.analyzed_entities.length === 1}>
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/40"><div><p className="text-sm font-semibold text-white">{entity.entity_name}</p><p className="mt-1 text-xs text-slate-500">Current intelligence score {entity.score}/100 / {entity.recommendation.title}</p></div><StatusPill tone={tone(entity.level)}>{entity.level}</StatusPill></summary>
-              <div className="mt-4 grid gap-3 md:grid-cols-2">{(entity.factors.length ? entity.factors : entity.signals).map((factor) => <FactorExplanation key={`${factor.type}-${factor.explanation}`} factor={factor} />)}{!entity.factors.length && !entity.signals.length && <p className="text-xs text-slate-500">No material intelligence factor is currently detected.</p>}</div>
-            </details>
-          ))}
-          {!result.analyzed_entities.length && <p className="p-8 text-center text-xs text-slate-500">No intelligence records matched this command.</p>}
-        </div>
       </Panel>}
 
-      {inspectionEnabled && (result.warnings.length > 0 || result.limitations.length > 0) && (
+      {(result.warnings.length > 0 || result.limitations.length > 0) && (
         <details className="rounded-2xl border border-white/[.08] bg-[#08111f]/80 p-4 sm:p-5"><summary className="cursor-pointer text-sm font-semibold text-slate-300">Notices and operating boundaries ({result.warnings.length + result.limitations.length})</summary><ul className="mt-3 space-y-2 text-xs leading-5 text-slate-500">{[...result.warnings, ...result.limitations].map((item) => <li key={item}>• {item}</li>)}</ul></details>
       )}
     </div>
@@ -155,14 +144,14 @@ function InspectionPanel({ result }: { result: CommandResult }) {
 
 function LatestCyclePanel({ result }: { result: CommandResult }) {
   const cycle = result.query_evidence.latest_cycle!;
-  return <Panel className="overflow-hidden border-cyan-300/15"><SectionHeader eyebrow="Latest-cycle evidence" title="What ReconMate noticed" detail={`Cycle ${cycle.cycle} · ${cycle.event_count} event${cycle.event_count === 1 ? "" : "s"} across ${cycle.customers_affected} customer${cycle.customers_affected === 1 ? "" : "s"}`} prominent /><div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,.72fr)_minmax(0,1.28fr)]"><div className="grid grid-cols-2 gap-3"><Metric label="Material changes" value={String(cycle.material_customers)} /><Metric label="Decisions changed" value={String(cycle.recommendations_changed)} /><Metric label="Decisions held" value={String(cycle.recommendations_unchanged)} /><Metric label="Events observed" value={String(cycle.event_count)} /></div><AnalysisList title="Factual before/after observations" items={cycle.observations} empty="Events were observed, with no material decision change recorded." /></div></Panel>;
+  return <Panel className="overflow-hidden border-cyan-300/15"><SectionHeader eyebrow="Scoped latest-cycle evidence" title="What changed for these returned records" detail={`Cycle ${cycle.cycle} · ${cycle.event_count} provably associated event${cycle.event_count === 1 ? "" : "s"} across ${cycle.customers_affected} returned customer${cycle.customers_affected === 1 ? "" : "s"}`} prominent /><div className="grid gap-4 p-5 lg:grid-cols-[minmax(0,.72fr)_minmax(0,1.28fr)]"><div className="grid grid-cols-2 gap-3"><Metric label="Material changes" value={String(cycle.material_customers)} /><Metric label="Decisions changed" value={String(cycle.recommendations_changed)} /><Metric label="Decisions held" value={String(cycle.recommendations_unchanged)} /><Metric label="Events associated" value={String(cycle.event_count)} /></div><AnalysisList title="Factual before/after observations" items={cycle.observations} empty="Associated events were found without a material decision transition." /></div></Panel>;
 }
 
 function RankedEvidencePanel({ result, onOpenTarget }: { result: CommandResult; onOpenTarget?: (targetType: string, targetId: string) => void }) {
   const evidence = result.query_evidence;
   const names = new Map(result.analyzed_entities.map((entity) => [entity.entity_id, entity.entity_name]));
   if (!evidence.ranking.length) return <Panel className="overflow-hidden"><SectionHeader eyebrow="Query outcome" title={evidence.records_matched === 0 ? "No records matched the structured query" : `${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} counted`} detail={evidence.records_matched === 0 ? `ReconMate inspected ${evidence.records_inspected} records and applied every condition shown above.` : "This count comes from current operational records; no ranked rows were requested."} prominent /></Panel>;
-  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Grounded ranking" title="Why these results ranked here" detail={`${evidence.records_returned} of ${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} returned in query order`} prominent /><div className="divide-y divide-white/[.06]">{evidence.ranking.map((item) => <article key={item.entity_id} className="p-4 sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-300">Rank #{item.rank}</p><h3 className="mt-1 text-base font-semibold text-white">{names.get(item.entity_id) ?? item.entity_id}</h3></div><div className="flex flex-wrap items-center gap-2"><StatusPill tone={tone(item.severity)}>{item.severity}</StatusPill><span className="text-xs text-slate-400">Score {item.score}/100{item.raw_score !== item.score ? ` · raw ${item.raw_score}` : ""}</span></div></div><div className="mt-4 grid gap-4 lg:grid-cols-3"><AnalysisList title="Facts" items={item.facts} empty="No material factual factor was recorded." /><AnalysisList title="Interpretation" items={[...(item.blocker ? [item.blocker] : ["No current action blocker detected"]), ...(item.stored_workflow_priority ? [`Stored workflow priority: ${label(item.stored_workflow_priority)}`] : [])]} empty="" /><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Decision</p><p className="mt-2 text-xs leading-5 text-slate-300">{item.decision}</p>{onOpenTarget && <button type="button" onClick={() => onOpenTarget(result.interpreted_intent.query.entity === "RECOVERY_CASES" ? "RECOVERY_CASE" : "CUSTOMER", item.entity_id)} className="mt-3 text-xs font-semibold text-sky-300 hover:text-sky-200">Open supporting record →</button>}</div></div></article>)}</div></Panel>;
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="What matched" title="Returned records and ranking evidence" detail={`${evidence.records_returned} of ${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} returned in the structured query order`} prominent /><div className="divide-y divide-white/[.06]">{evidence.ranking.map((item) => <article key={item.entity_id} className="p-4 sm:p-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-300">Rank #{item.rank}</p><h3 className="mt-1 text-base font-semibold text-white">{names.get(item.entity_id) ?? item.entity_id}</h3></div><div className="flex flex-wrap items-center gap-2"><StatusPill tone={tone(item.severity)}>{item.severity} risk</StatusPill><span className="text-xs text-slate-400">Current Intelligence Score {item.score}/100{item.raw_score !== item.score ? ` · raw ${item.raw_score}` : ""}</span></div></div><div className="mt-4 grid gap-4 lg:grid-cols-3"><AnalysisList title="Why it matched" items={item.facts} empty="No material factual factor was recorded." /><AnalysisList title="Actionability and workflow state" items={[...(item.blocker ? [item.blocker] : ["No current action blocker detected"]), ...(item.stored_workflow_priority ? [`Stored workflow priority: ${label(item.stored_workflow_priority)}`] : [])]} empty="" /><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Current recommended action</p><p className="mt-2 text-xs leading-5 text-slate-300">{item.decision}</p>{onOpenTarget && <button type="button" onClick={() => onOpenTarget(result.interpreted_intent.query.entity === "RECOVERY_CASES" ? "RECOVERY_CASE" : "CUSTOMER", item.entity_id)} className="mt-3 text-xs font-semibold text-sky-300 hover:text-sky-200">Open supporting record →</button>}</div></div></article>)}</div></Panel>;
 }
 
 function QueryRow({ term, value }: { term: string; value: string }) {
@@ -171,12 +160,6 @@ function QueryRow({ term, value }: { term: string; value: string }) {
 
 function AnalysisList({ title, items, empty }: { title: string; items: string[]; empty: string }) {
   return <div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">{title}</p>{items.length ? <ul className="mt-2 space-y-1.5 text-xs leading-5 text-slate-300">{items.map((item) => <li key={item} className="flex gap-2"><span className="text-sky-300">•</span><span>{item}</span></li>)}</ul> : <p className="mt-2 text-xs leading-5 text-slate-500">{empty}</p>}</div>;
-}
-
-function FactorExplanation({ factor }: { factor: ContributingFactor | IntelligenceSignal }) {
-  const scored = "points" in factor;
-  const impact = scored ? factor.impact : factor.severity;
-  return <article className="rounded-xl border border-white/[.07] bg-white/[.02] p-4"><div className="flex items-center justify-between gap-3"><p className="text-xs font-semibold text-sky-200">{factor.title}</p><StatusPill tone={tone(impact)}>{impact}</StatusPill></div><p className="mt-3 text-xs leading-5 text-slate-300"><span className="font-semibold text-slate-200">Condition found:</span> {factor.explanation}</p><p className="mt-2 text-[11px] leading-5 text-slate-500"><span className="font-semibold text-slate-400">Assessment influence:</span> {scored ? `${factor.points} points in the current priority score.` : "Included as factual evidence in the current recommendation evaluation."}</p></article>;
 }
 
 function queryConditions(result: CommandResult): string[] {

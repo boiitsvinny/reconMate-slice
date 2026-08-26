@@ -113,6 +113,41 @@ def test_material_transition_evidence_is_persisted_append_only() -> None:
     assert db.commits == 1
 
 
+def test_latest_intelligence_cycle_returns_persisted_decision_evidence() -> None:
+    customer_id = uuid4()
+    transition = SimpleNamespace(
+        event_type="SIMULATION_INTELLIGENCE_TRANSITION",
+        payload={"cycle": 7, "entity_type": "CUSTOMER", "entity_id": str(customer_id), "material": True},
+    )
+    summary = SimpleNamespace(
+        event_type="SIMULATION_INTELLIGENCE_SUMMARY",
+        payload={"cycle": 7, "customers_affected": 1, "material_customers": 1, "recommendations_changed": 1, "recommendations_unchanged": 0, "blockers_added": 2, "blockers_removed": 1},
+    )
+    events = [SimpleNamespace(customer_id=customer_id), SimpleNamespace(customer_id=customer_id)]
+
+    class Rows(list):
+        def all(self):
+            return self
+
+    class EvidenceSession:
+        def __init__(self) -> None:
+            self.results = iter((Rows(events), Rows([summary, transition])))
+
+        def scalar(self, _statement):
+            return 7
+
+        def scalars(self, _statement):
+            return next(self.results)
+
+    result = simulation_service.latest_intelligence_cycle(EvidenceSession())  # type: ignore[arg-type]
+    assert result == {
+        "cycle": 7, "event_count": 2, "customers_affected": 1,
+        "material_customers": 1, "recommendations_changed": 1,
+        "recommendations_unchanged": 0, "blockers_added": 2,
+        "blockers_removed": 1, "transitions": [transition.payload],
+    }
+
+
 def test_simulation_reset_reseeds_and_clears_command_plans(monkeypatch) -> None:
     calls: list[str] = []
 

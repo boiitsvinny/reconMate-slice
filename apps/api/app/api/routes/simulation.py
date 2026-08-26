@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.simulation.service import recent_events, reset_simulation, run_tick, simulation_state
+from app.simulation.service import latest_intelligence_cycle, recent_events, reset_simulation, run_tick, simulation_state
 
 router = APIRouter(prefix="/simulation", tags=["simulation"])
 
@@ -36,3 +36,8 @@ def reset(_payload: ResetSimulationRequest, db: Session = Depends(get_db)) -> di
 @router.get("/events")
 def list_events(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)) -> list[dict]:
     return recent_events(db, limit)
+
+
+@router.get("/intelligence/latest")
+def get_latest_intelligence_cycle(db: Session = Depends(get_db)) -> dict | None:
+    return latest_intelligence_cycle(db)

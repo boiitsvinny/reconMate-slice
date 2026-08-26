@@ -224,16 +224,40 @@ class CommandTools:
         )
         return QueryExecution(returned, len(candidates), len(matched), exclusions, scope)
 
-    def latest_cycle_evidence(self) -> LatestCycleEvidence | None:
+    def latest_cycle_evidence(self, results: list[IntelligenceResult]) -> LatestCycleEvidence | None:
+        """Return latest-cycle evidence only when it belongs to the analyzed entities."""
+        if not results:
+            return None
         latest_cycle = self.db.scalar(select(func.max(SimulationEvent.cycle)))
         if latest_cycle is None:
             return None
-        events = list(self.db.scalars(select(SimulationEvent).where(SimulationEvent.cycle == latest_cycle)))
+        customer_ids = {item.entity_id for item in results if item.entity_type == "CUSTOMER"}
+        case_ids = {item.entity_id for item in results if item.entity_type == "RECOVERY_CASE"}
+        invoice_ids: set[str] = set()
+        for case_id in case_ids:
+            case = self.get_case(case_id)
+            if case is not None and case.invoice_id is not None:
+                invoice_ids.add(str(case.invoice_id))
+        all_events = list(self.db.scalars(select(SimulationEvent).where(SimulationEvent.cycle == latest_cycle)))
+        events = [event for event in all_events if (
+            (customer_ids and str(event.customer_id) in customer_ids)
+            or (case_ids and str(event.recovery_case_id) in case_ids)
+            or (invoice_ids and str(event.invoice_id) in invoice_ids)
+        )]
         audits = list(self.db.scalars(select(AuditEvent).where(
             AuditEvent.event_type.in_({"SIMULATION_INTELLIGENCE_SUMMARY", "SIMULATION_INTELLIGENCE_TRANSITION"})
         ).order_by(AuditEvent.occurred_at)))
-        relevant = [audit for audit in audits if (audit.payload or {}).get("cycle") == latest_cycle]
-        summary = next(((audit.payload or {}) for audit in relevant if audit.event_type == "SIMULATION_INTELLIGENCE_SUMMARY"), {})
+        relevant = []
+        for audit in audits:
+            payload = audit.payload or {}
+            if payload.get("cycle") != latest_cycle or audit.event_type != "SIMULATION_INTELLIGENCE_TRANSITION":
+                continue
+            entity_id = str(payload.get("entity_id", ""))
+            entity_type = payload.get("entity_type")
+            if (entity_type == "CUSTOMER" and entity_id in customer_ids) or (entity_type == "RECOVERY_CASE" and entity_id in case_ids):
+                relevant.append(audit)
+        if not events and not relevant:
+            return None
         observations = []
         for audit in relevant:
             if audit.event_type != "SIMULATION_INTELLIGENCE_TRANSITION":
@@ -248,12 +272,13 @@ class CommandTools:
                 observations.append(f"{name}: score changed from {payload.get('previous_score')} to {payload.get('current_score')}; the recommendation remained {current}.")
             else:
                 observations.append(f"{name}: event observed; no material decision change.")
+        scoped_transitions = [audit.payload or {} for audit in relevant]
         return LatestCycleEvidence(
             cycle=latest_cycle, event_count=len(events),
-            customers_affected=int(summary.get("customers_affected", len({str(event.customer_id) for event in events if event.customer_id}))),
-            material_customers=int(summary.get("material_customers", 0)),
-            recommendations_changed=int(summary.get("recommendations_changed", 0)),
-            recommendations_unchanged=int(summary.get("recommendations_unchanged", 0)),
+            customers_affected=len({str(event.customer_id) for event in events if event.customer_id}),
+            material_customers=len({payload.get("entity_id") for payload in scoped_transitions if payload.get("material")}),
+            recommendations_changed=sum("RECOMMENDATION_CHANGED" in payload.get("classifications", []) for payload in scoped_transitions),
+            recommendations_unchanged=sum("RECOMMENDATION_CHANGED" not in payload.get("classifications", []) for payload in scoped_transitions),
             observations=observations[:6],
         )
 
