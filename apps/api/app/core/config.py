@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://reconmate:change-me-for-local-development@localhost:5432/reconmate"
     ai_provider: str = "mock"
     ai_model: str | None = None
+    payment_provider_mode: str = "provider_demo"
+    razorpay_key_id: str | None = None
+    razorpay_key_secret: str | None = None
+    razorpay_webhook_secret: str | None = None
     simulation_tick_interval_seconds: int = 15
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

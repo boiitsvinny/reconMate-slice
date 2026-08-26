@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { useCommandSession } from "@/components/intelligence/command-session";
 import { ReminderArtifact } from "@/components/intelligence/reminder-artifact";
+import { PaymentRequestPanel } from "./payment-request-panel";
 import type { ReminderArtifact as ReminderArtifactData } from "@/lib/intelligence-api";
 import type { IntelligenceTransition, PriorityCase, Workspace } from "./data";
 import { queryKeys, useCaseWorkspace, useInvalidateOperationalData } from "./queries";
@@ -240,6 +241,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                 </div>
               )}
             </section>
+            <PaymentRequestPanel workspace={workspace} />
             {latestPayment && <OutcomeEvidenceChain payment={latestPayment} precedingAction={precedingAction} currentExposure={workspace.invoice?.outstanding_amount ?? "0"} recommendation={workspace.recommendation.recommended_action} />}
           </div>
         )}

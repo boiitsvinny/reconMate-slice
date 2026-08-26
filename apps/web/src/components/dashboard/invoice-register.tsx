@@ -160,6 +160,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
             <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Invoice exposure</dt><dd className="mt-1 font-semibold text-white">{money(previewInvoice.outstanding_amount)}</dd></div>
             <div><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Due date</dt><dd className="mt-1 font-semibold text-white">{previewInvoice.due_date}</dd></div>
             <div className="col-span-2"><dt className="text-[10px] uppercase tracking-[.1em] text-slate-500">Account outstanding</dt><dd className="mt-1 font-semibold text-white">{money(customers.get(previewInvoice.customer_id)?.outstanding_amount ?? "0")}</dd></div>
+            {previewInvoice.latest_payment_amount && <div className="col-span-2 rounded-xl border border-emerald-300/12 bg-emerald-300/[.035] p-3"><dt className="text-[10px] uppercase tracking-[.1em] text-emerald-300">Latest persisted payment</dt><dd className="mt-1 font-semibold text-white">{money(previewInvoice.latest_payment_amount)} · {previewInvoice.latest_payment_date}</dd><dd className="mt-1 break-all text-[10px] text-slate-500">Reference {previewInvoice.latest_payment_reference ?? "not recorded"}</dd></div>}
           </dl>
           <p className="mt-4 text-[10px] leading-4 text-slate-500">Move onto this card to keep it open. Move away and it will fade automatically.</p>
         </aside>

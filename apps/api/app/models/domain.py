@@ -275,6 +275,57 @@ class RecoveryAction(Base):
     recovery_case: Mapped[RecoveryCase] = relationship(back_populates="actions")
 
 
+class ExternalPaymentRequest(Base):
+    """Operator-approved request sent across the payment-provider boundary."""
+
+    __tablename__ = "external_payment_requests"
+    __table_args__ = (
+        CheckConstraint("requested_amount > 0", name="external_payment_request_amount_positive"),
+        CheckConstraint("paid_amount >= 0 AND paid_amount <= requested_amount", name="external_payment_request_paid_amount_valid"),
+        UniqueConstraint("provider", "provider_reference", name="external_payment_request_provider_reference"),
+        Index("ix_external_payment_requests_case_created_at", "recovery_case_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    recovery_case_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("recovery_cases.id", ondelete="RESTRICT"), nullable=False, index=True)
+    customer_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("customers.id", ondelete="RESTRICT"), nullable=False, index=True)
+    invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider_mode: Mapped[str] = mapped_column(String(30), nullable=False)
+    provider_reference: Mapped[str | None] = mapped_column(String(100), index=True)
+    provider_url: Mapped[str | None] = mapped_column(String(2048))
+    requested_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=Decimal("0"), server_default="0")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, default="PENDING_PROVIDER", server_default="PENDING_PROVIDER", index=True)
+    purpose: Mapped[str] = mapped_column(String(255), nullable=False)
+    operator_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class ProviderEvent(Base):
+    """Idempotency and evidence record for an inbound provider event."""
+
+    __tablename__ = "provider_events"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_event_id", name="provider_event_identity"),
+        UniqueConstraint("provider", "provider_payment_reference", name="provider_payment_identity"),
+        Index("ix_provider_events_request_received_at", "payment_request_id", "received_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    payment_request_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("external_payment_requests.id", ondelete="RESTRICT"), nullable=False, index=True)
+    payment_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("payments.id", ondelete="RESTRICT"), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+    provider_event_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    provider_payment_reference: Mapped[str] = mapped_column(String(255), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class AuditEvent(Base):
     """Append-only event history. Application code must insert, never update or delete."""
 

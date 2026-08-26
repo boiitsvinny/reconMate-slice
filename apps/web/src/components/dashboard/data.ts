@@ -78,18 +78,24 @@ export type RecoveryAction = {
   operator_note: string | null;
   created_at: string | null;
 };
-export type Invoice = { id: string; invoice_number: string; customer_id: string; issue_date: string; due_date: string; original_amount: string; outstanding_amount: string; status: string; source: "CSV_IMPORT" | "DEMO_SANDBOX" };
+export type ExternalPaymentRequest = { id: string; case_id: string; customer_id: string; invoice_id: string; provider: string; provider_mode: "DEMO" | "TEST"; provider_reference: string | null; provider_url: string | null; requested_amount: string; paid_amount: string; status: string; purpose: string; operator_id: string; failure_reason: string | null; created_at: string | null };
+export type ProviderEventEvidence = { id: string; payment_request_id: string; provider_event_id: string; provider_payment_reference: string; event_type: string; evidence: { chronology?: string; outstanding_before?: string; outstanding_after?: string; score_before?: number; score_after?: number; recommendation_before?: string; recommendation_after?: string }; received_at: string };
+export type ProviderMode = { provider: string; mode: "DEMO" | "TEST"; label: string };
+export type Invoice = { id: string; invoice_number: string; customer_id: string; issue_date: string; due_date: string; original_amount: string; outstanding_amount: string; status: string; source: "CSV_IMPORT" | "DEMO_SANDBOX"; latest_payment_amount: string | null; latest_payment_date: string | null; latest_payment_reference: string | null };
 export type PriorityCase = { id: string; customerId: string; customerName: string; customerReference: string; amount: string; exposure: number; state: string; daysOverdue: number; promiseSignal: string; allowed: boolean; reason: string; recommendedAction: string; recommendationPriority: Recommendation["priority"]; recommendationReason: string; humanApprovalRequired: boolean };
 export type Workspace = {
-  customer: { name: string; strategic: boolean };
+  case_id: string;
+  customer: { id: string; name: string; strategic: boolean };
   workflow: { stored_priority: string; recovery_state: string; opened_at: string | null; updated_at: string | null };
-  invoice: { number: string; status: string; outstanding_amount: string; due_date: string } | null;
+  invoice: { id: string; number: string; status: string; outstanding_amount: string; due_date: string } | null;
   recommendation: { recommended_action: string; priority: string; factual_reasons: string[]; blockers: string[]; relevant_days_overdue: number; human_approval_required: boolean; operator_explanation: string; operator_next_step: string; workflow_effect: string; communication_signals: { intent: string; confidence: string | null }[] };
   intelligence: { score: number; raw_score: number; calculated_at: string; level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; signals: { title: string; explanation: string; severity: string }[]; factors: { title: string; explanation: string; points: number; impact: string }[] };
   promises: { status: string; promised_amount: string; promised_date: string }[];
   payments?: { id: string; amount: string; payment_date: string; reference: string | null }[];
   communications: { id: string; direction: string; content: string; occurred_at: string; analyses: { intent?: string }[] }[];
   actions: { id: string; action_type: string; status: string; approval_status: string; recommended_action: string | null; human_approval_required: boolean; recommendation_context: { workflow_effect?: string; operator_next_step?: string; blockers?: string[] } | null; decision_by: string | null; decision_reason: string | null; decision_at: string | null; executed_at: string | null; created_at: string | null }[];
+  external_payment_requests?: ExternalPaymentRequest[];
+  provider_events?: ProviderEventEvidence[];
   audit_events: { id: string; event_type: string; occurred_at: string }[];
 };
 

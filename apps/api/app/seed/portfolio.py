@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.models.domain import (
     ApprovalStatus, AuditEvent, Communication, CommunicationChannel,
-    CommunicationDirection, Customer, Invoice, InvoiceStatus, Payment,
+    CommunicationDirection, Customer, ExternalPaymentRequest, Invoice, InvoiceStatus, Payment, ProviderEvent,
     PromiseStatus, PromiseToPay, RecoveryAction, RecoveryActionStatus,
     RecoveryActionType, RecoveryCase, RecoveryPriority, RecoveryState,
     SimulationEvent, SimulationState,
@@ -144,7 +144,7 @@ def _money(value: int | Decimal) -> Decimal:
 
 def reset_database(session: Session) -> None:
     from app.models.domain import CommunicationAnalysis
-    for model in (SimulationEvent, AuditEvent, RecoveryAction, RecoveryCase, PromiseToPay, Payment, CommunicationAnalysis, Communication, Invoice, Customer, SimulationState):
+    for model in (SimulationEvent, ProviderEvent, ExternalPaymentRequest, AuditEvent, RecoveryAction, RecoveryCase, PromiseToPay, Payment, CommunicationAnalysis, Communication, Invoice, Customer, SimulationState):
         session.execute(delete(model))
     session.flush()
 

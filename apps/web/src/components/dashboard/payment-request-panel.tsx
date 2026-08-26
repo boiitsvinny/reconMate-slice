@@ -1,0 +1,64 @@
+"use client";
+
+import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { apiFetch } from "@/lib/api";
+import type { ExternalPaymentRequest, ProviderEventEvidence, Workspace } from "./data";
+import { useInvalidateOperationalData, useProviderMode } from "./queries";
+import { buttonStyles, StatusPill } from "./ui";
+
+const supported = new Set(["SEND_PAYMENT_REMINDER", "REQUEST_PAYMENT_DATE"]);
+const label = (value: string) => value.replaceAll("_", " ");
+const money = (value: string | number) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Number(value));
+
+export function PaymentRequestPanel({ workspace }: { workspace: Workspace }) {
+  const [reviewing, setReviewing] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const providerMode = useProviderMode();
+  const invalidate = useInvalidateOperationalData();
+  const requests = workspace.external_payment_requests ?? [];
+  const latest = requests[0];
+  const visibleRequest = latest?.status === "FAILED" && reviewing ? undefined : latest;
+  const latestEvent = (workspace.provider_events ?? []).find((item) => item.payment_request_id === latest?.id);
+  const eligible = Boolean(workspace.invoice && supported.has(workspace.recommendation.recommended_action) && workspace.recommendation.blockers.length === 0);
+
+  const mutation = useMutation({
+    mutationFn: async ({ path, body }: { path: string; body: Record<string, unknown> }) => {
+      const response = await apiFetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }, 30_000);
+      const result = await response.json().catch(() => null) as { detail?: string } | null;
+      if (!response.ok) throw new Error(result?.detail ?? "The provider operation failed safely.");
+      return result;
+    },
+    onSuccess: async () => { setConfirmed(false); setReviewing(false); await invalidate(); },
+  });
+  const error = mutation.error instanceof Error ? mutation.error.message : providerMode.error instanceof Error ? providerMode.error.message : null;
+  const create = () => {
+    if (!workspace.invoice || !confirmed || mutation.isPending) return;
+    mutation.mutate({ path: `/payment-provider/cases/${workspace.case_id}/requests`, body: { operator_id: "web-operator", requested_amount: workspace.invoice.outstanding_amount, purpose: `Payment request for invoice ${workspace.invoice.number}`, operator_confirmed: true } });
+  };
+  const applyDemoPayment = () => {
+    if (!latest?.provider_reference || mutation.isPending || !window.confirm("Record this deterministic Provider Demo Mode payment event? This will persist a real local payment fact and reduce the invoice outstanding amount.")) return;
+    const remaining = Number(latest.requested_amount) - Number(latest.paid_amount);
+    mutation.mutate({ path: "/payment-provider/events/demo", body: { event_id: `demo_event_${latest.id}`, provider_reference: latest.provider_reference, payment_reference: `demo_payment_${latest.id}`, amount: remaining.toFixed(2), payment_date: workspace.intelligence.calculated_at, event_type: "payment_request.paid" } });
+  };
+
+  return <section className="rounded-2xl border border-violet-300/15 bg-violet-300/[.025] p-5">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.15em] text-violet-300">External execution boundary</p><h3 className="mt-1.5 text-lg font-semibold text-white">Operator-approved payment request</h3><p className="mt-1 text-xs leading-5 text-slate-400">A payment request is an external action, not a payment. Financial state changes only after a validated provider event.</p></div><StatusPill tone={providerMode.data?.mode === "TEST" ? "sky" : "amber"}>{providerMode.data?.label ?? "Provider mode loading"}</StatusPill></div>
+    {error && <div role="alert" className="mt-4 rounded-xl border border-rose-300/20 bg-rose-300/[.06] p-3 text-xs text-rose-100"><p>{error}</p><button type="button" onClick={() => { mutation.reset(); void providerMode.refetch(); }} className="mt-2 font-semibold underline">Retry</button></div>}
+    {visibleRequest ? <ExistingRequest request={visibleRequest} event={latestEvent} busy={mutation.isPending} onApplyDemo={applyDemoPayment} onRetry={() => setReviewing(true)} /> : eligible ? reviewing ? <div className="mt-4 rounded-xl border border-white/[.08] bg-black/10 p-4">
+      <div className="grid gap-3 text-xs sm:grid-cols-2"><Fact term="Customer" value={workspace.customer.name} /><Fact term="Related invoice" value={workspace.invoice?.number ?? "Unavailable"} /><Fact term="Outstanding amount" value={workspace.invoice ? money(workspace.invoice.outstanding_amount) : "Unavailable"} /><Fact term="Proposed amount" value={workspace.invoice ? money(workspace.invoice.outstanding_amount) : "Unavailable"} /><Fact term="Payment provider" value={providerMode.data?.mode === "TEST" ? "Razorpay / test mode" : "Provider Demo Mode"} /><Fact term="Purpose" value={`Request payment for ${workspace.invoice?.number}`} /><Fact term="Actionability" value="No current blocker detected" /><Fact term="Approval" value="Explicit operator confirmation required" /></div>
+      <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-violet-300/15 bg-violet-300/[.04] p-3 text-xs leading-5 text-slate-300"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} className="mt-1" />I reviewed the customer, invoice, amount, provider mode, and blockers. Create this external payment request.</label>
+      <div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={mutation.isPending} onClick={() => { setReviewing(false); setConfirmed(false); }} className={buttonStyles.secondary}>Cancel</button><button type="button" disabled={!confirmed || mutation.isPending || !providerMode.data} onClick={create} className={buttonStyles.primary}>{mutation.isPending ? "Creating provider action…" : "Create payment request"}</button></div>
+    </div> : <button type="button" disabled={!providerMode.data || mutation.isPending} onClick={() => setReviewing(true)} className={`${buttonStyles.primary} mt-4`}>Review payment request</button> : <p className="mt-4 rounded-xl border border-white/[.07] bg-black/10 p-4 text-xs leading-5 text-slate-400">No payment request is available for the current decision. Dispute review, promise holds, monitoring, escalation, resolved cases, and blocked recovery states remain internal or advisory.</p>}
+  </section>;
+}
+
+function ExistingRequest({ request, event, busy, onApplyDemo, onRetry }: { request: ExternalPaymentRequest; event?: ProviderEventEvidence; busy: boolean; onApplyDemo: () => void; onRetry: () => void }) {
+  const evidence = event?.evidence;
+  return <div className="mt-4 space-y-4"><div className="rounded-xl border border-white/[.08] bg-black/10 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-white">{request.provider_mode === "TEST" ? "Razorpay payment request" : "Provider demo payment request"}</p><StatusPill tone={request.status === "FAILED" ? "rose" : request.status === "PAID" ? "emerald" : "sky"}>{label(request.status)}</StatusPill></div><div className="mt-3 grid gap-3 text-xs sm:grid-cols-2"><Fact term="Provider reference" value={request.provider_reference ?? "Not issued"} /><Fact term="Requested amount" value={money(request.requested_amount)} /><Fact term="Recorded payment" value={money(request.paid_amount)} /><Fact term="Operator" value={request.operator_id} /></div>{request.failure_reason && <p className="mt-3 text-xs text-rose-200">Provider failure: {request.failure_reason}</p>}{request.provider_url && <a href={request.provider_url} target="_blank" rel="noreferrer" className="mt-3 inline-block text-xs font-semibold text-sky-300">Open provider test link ↗</a>}{request.status === "FAILED" && <button type="button" disabled={busy} onClick={onRetry} className={`${buttonStyles.secondary} mt-4`}>Review a new request</button>}{request.provider_mode === "DEMO" && ["ACTIVE", "PARTIALLY_PAID"].includes(request.status) && <button type="button" disabled={busy} onClick={onApplyDemo} className={`${buttonStyles.success} mt-4`}>{busy ? "Applying provider event…" : "Record demo payment event"}</button>}</div>
+    {evidence && <div className="grid gap-2 sm:grid-cols-2"><Evidence title="External event" detail={event?.provider_payment_reference ?? "Persisted provider event"} /><Evidence title="Financial state" detail={`${money(evidence.outstanding_before ?? 0)} → ${money(evidence.outstanding_after ?? 0)} outstanding`} /><Evidence title="Reassessment" detail={`Score ${evidence.score_before ?? "—"} → ${evidence.score_after ?? "—"}`} /><Evidence title="Current decision" detail={`${label(evidence.recommendation_before ?? "unknown")} → ${label(evidence.recommendation_after ?? "unknown")}`} /><p className="sm:col-span-2 text-[11px] leading-5 text-slate-500">{evidence.chronology}</p></div>}
+  </div>;
+}
+
+function Fact({ term, value }: { term: string; value: string }) { return <div><p className="text-slate-500">{term}</p><p className="mt-1 font-medium text-slate-200">{value}</p></div>; }
+function Evidence({ title, detail }: { title: string; detail: string }) { return <div className="rounded-xl border border-white/[.07] bg-black/10 p-3"><p className="text-[10px] font-bold uppercase tracking-[.1em] text-slate-500">{title}</p><p className="mt-1.5 text-xs leading-5 text-slate-200">{detail}</p></div>; }

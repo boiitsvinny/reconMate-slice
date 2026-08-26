@@ -38,6 +38,9 @@ class InvoiceItem(BaseModel):
     status: str
     customer_id: UUID
     source: str
+    latest_payment_amount: Decimal | None
+    latest_payment_date: date | None
+    latest_payment_reference: str | None
 
 
 class PaymentItem(BaseModel):
@@ -102,11 +105,15 @@ class PortfolioSummary(BaseModel):
 
 
 def _invoice_item(invoice: Invoice, imported_ids: set[UUID] | None = None) -> InvoiceItem:
+    latest_payment = max(invoice.payments, key=lambda item: (item.payment_date, str(item.id)), default=None)
     return InvoiceItem(id=invoice.id, invoice_number=invoice.invoice_number, issue_date=invoice.issue_date,
                        due_date=invoice.due_date, original_amount=invoice.original_amount,
                        outstanding_amount=invoice.outstanding_amount, status=invoice.status.value,
                        customer_id=invoice.customer_id,
-                       source="CSV_IMPORT" if imported_ids and invoice.id in imported_ids else "DEMO_SANDBOX")
+                       source="CSV_IMPORT" if imported_ids and invoice.id in imported_ids else "DEMO_SANDBOX",
+                       latest_payment_amount=latest_payment.amount if latest_payment else None,
+                       latest_payment_date=latest_payment.payment_date if latest_payment else None,
+                       latest_payment_reference=latest_payment.reference if latest_payment else None)
 
 
 @router.get("/customers", response_model=list[CustomerItem], summary="List portfolio customers")
@@ -154,7 +161,7 @@ def get_customer(customer_id: UUID, db: Session = Depends(get_db)) -> CustomerDe
 
 @router.get("/invoices", response_model=list[InvoiceItem], summary="List invoices")
 def list_invoices(customer_id: UUID | None = Query(default=None), db: Session = Depends(get_db)) -> list[InvoiceItem]:
-    query = select(Invoice).order_by(Invoice.due_date, Invoice.invoice_number)
+    query = select(Invoice).options(selectinload(Invoice.payments)).order_by(Invoice.due_date, Invoice.invoice_number)
     if customer_id is not None:
         query = query.where(Invoice.customer_id == customer_id)
     invoices = list(db.scalars(query))

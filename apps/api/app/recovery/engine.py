@@ -167,7 +167,7 @@ def _audit_once(session: Session, entity_type: str, entity_id: uuid.UUID, event_
                                actor_type="system", payload=payload, occurred_at=occurred_at))
 
 
-def synchronize_recovery_states(session: Session, simulation_date: date) -> dict[str, int]:
+def synchronize_recovery_states(session: Session, simulation_date: date, *, commit: bool = True) -> dict[str, int]:
     """Apply only factual case-state changes and append auditable transition events."""
     cases = session.scalars(select(RecoveryCase).options(
         selectinload(RecoveryCase.customer), selectinload(RecoveryCase.invoice).selectinload(Invoice.payments),
@@ -208,7 +208,8 @@ def synchronize_recovery_states(session: Session, simulation_date: date) -> dict
                 "from_state": previous_state, "to_state": evaluation.derived_state,
                 "reason": evaluation.next_factual_condition,
             }, occurred_at=occurred_at))
-    session.commit()
+    if commit:
+        session.commit()
     return {"cases_evaluated": len(cases), "cases_changed": changed}
 
 

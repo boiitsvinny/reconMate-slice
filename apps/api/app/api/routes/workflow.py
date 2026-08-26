@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
 from app.intelligence.operational_service import evaluate_case_intelligence
-from app.models.domain import AuditEvent, Communication, Customer, Invoice, PromiseToPay, RecoveryAction, RecoveryCase, SimulationState
+from app.models.domain import AuditEvent, Communication, Customer, ExternalPaymentRequest, Invoice, PromiseToPay, ProviderEvent, RecoveryAction, RecoveryCase, SimulationState
 from app.recommendations.service import recommend_case
 from app.workflow.schemas import CreateActionRequest, OperatorDecisionRequest, RecoveryActionResponse
 from app.workflow.service import approve_action, cancel_action, create_action, execute_action, hold_action, reject_action
@@ -123,6 +123,8 @@ def case_workspace(case_id: UUID, db: Session = Depends(get_db)) -> dict[str, An
     if case is None: raise HTTPException(status_code=404, detail="Recovery case not found.")
     simulation_date = _simulation_date(db)
     events = db.scalars(select(AuditEvent).where((AuditEvent.entity_type == "RecoveryCase") & (AuditEvent.entity_id == case.id)).order_by(AuditEvent.occurred_at.desc())).all()
+    payment_requests = list(db.scalars(select(ExternalPaymentRequest).where(ExternalPaymentRequest.recovery_case_id == case.id).order_by(ExternalPaymentRequest.created_at.desc())))
+    provider_events = list(db.scalars(select(ProviderEvent).where(ProviderEvent.payment_request_id.in_([item.id for item in payment_requests])).order_by(ProviderEvent.received_at.desc()))) if payment_requests else []
     return {
         "case_id": str(case.id), "customer": {"id": str(case.customer.id), "name": case.customer.name, "strategic": bool(case.customer.is_strategic_account)},
         "workflow": {"stored_priority": case.priority.value, "recovery_state": case.current_state.value, "opened_at": case.opened_at, "updated_at": case.updated_at},
@@ -133,5 +135,7 @@ def case_workspace(case_id: UUID, db: Session = Depends(get_db)) -> dict[str, An
         "payments": [{"id": str(item.id), "amount": item.amount, "payment_date": item.payment_date, "reference": item.reference} for item in sorted(case.invoice.payments, key=lambda item: item.payment_date, reverse=True)] if case.invoice else [],
         "communications": [{"id": str(item.id), "direction": item.direction.value, "content": item.content, "occurred_at": item.occurred_at, "analyses": [analysis.result for analysis in item.analyses]} for item in sorted(case.customer.communications, key=lambda item: item.occurred_at, reverse=True)],
         "actions": [_action_response(item).model_dump(mode="json") for item in case.actions],
+        "external_payment_requests": [{"id": str(item.id), "provider": item.provider, "provider_mode": item.provider_mode, "provider_reference": item.provider_reference, "provider_url": item.provider_url, "requested_amount": item.requested_amount, "paid_amount": item.paid_amount, "status": item.status, "purpose": item.purpose, "operator_id": item.operator_id, "failure_reason": item.failure_reason, "created_at": item.created_at} for item in payment_requests],
+        "provider_events": [{"id": str(item.id), "payment_request_id": str(item.payment_request_id), "provider_event_id": item.provider_event_id, "provider_payment_reference": item.provider_payment_reference, "event_type": item.event_type, "evidence": item.evidence, "received_at": item.received_at} for item in provider_events],
         "audit_events": [{"id": str(item.id), "event_type": item.event_type, "payload": item.payload, "occurred_at": item.occurred_at} for item in events],
     }
