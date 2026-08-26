@@ -15,7 +15,6 @@ import {
   useSimulationEvents,
 } from "./queries";
 import { RecoveryEvidenceReport } from "./reports-sections";
-import { buttonStyles } from "./ui";
 
 export function ReportsPage() {
   const [selected, setSelected] = useState<PriorityCase | null>(null);
@@ -49,7 +48,6 @@ export function ReportsPage() {
             <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Portfolio Recovery Report</h1>
             <p className="mt-3 text-sm leading-6 text-slate-300/80">A decision and outcome record of the current portfolio: what changed, how ReconMate responded, where operators acted, and what remains unresolved.</p>
           </div>
-          {ready && !errorMessage && <button type="button" onClick={() => window.print()} className={`${buttonStyles.secondary} print:hidden`}>Print report</button>}
         </header>
 
         {!ready && errorMessage && <div className="mt-7 flex flex-col justify-between gap-4 rounded-2xl border border-rose-300/20 bg-rose-300/[.07] p-5 sm:flex-row sm:items-center"><p className="text-sm text-rose-100">{errorMessage}</p><button type="button" onClick={() => void retry()} className="rounded-lg border border-rose-200/25 px-3 py-2 text-xs font-bold text-rose-50">Try again</button></div>}
