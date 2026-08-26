@@ -236,6 +236,7 @@ def recovery_summary(session: Session, simulation_date: date) -> dict[str, int |
         "cases_blocked_by_dispute": sum(item.active_dispute for item in evaluations),
         "cases_awaiting_payment": sum(item.derived_state == RecoveryState.PROMISE_MONITORING.value for item in evaluations),
         "cases_requiring_attention": sum(item.next_factual_condition != "No additional deterministic condition currently requires attention." for item in evaluations),
+        "open_cases": sum(item.derived_state not in {RecoveryState.RESOLVED.value, RecoveryState.CLOSED.value} for item in evaluations),
         "active_cases": sum(item.derived_state == RecoveryState.IN_PROGRESS.value for item in evaluations),
         "escalated_cases": sum(item.derived_state == RecoveryState.ESCALATED.value for item in evaluations),
         "on_hold_cases": sum(item.derived_state == RecoveryState.AWAITING_CUSTOMER.value for item in evaluations),

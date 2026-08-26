@@ -277,7 +277,7 @@ def test_interpreter_handles_competing_operational_intents_safely() -> None:
     assert result.guidance and "could mean" in result.guidance
 
 
-def test_risk_ranking_paraphrases_produce_equivalent_structured_queries() -> None:
+def test_high_risk_filter_is_distinct_from_riskiest_ranking() -> None:
     interpreter = RuleBasedCommandInterpreter()
     commands = (
         "Show top 5 high-risk customers",
@@ -287,7 +287,37 @@ def test_risk_ranking_paraphrases_produce_equivalent_structured_queries() -> Non
     queries = [interpreter.interpret(CommandRequest(command=command)).query for command in commands]
     assert all(query.entity is QueryEntity.CUSTOMERS for query in queries)
     assert all(query.limit == 5 and query.sort_by is QuerySort.RISK_SCORE and query.descending for query in queries)
-    assert queries[0] == queries[1] == queries[2]
+    assert queries[0].risk_levels == [PriorityLevel.HIGH, PriorityLevel.CRITICAL]
+    assert queries[1].risk_levels == []
+    assert queries[2].risk_levels == []
+    assert queries[1] == queries[2]
+
+
+@pytest.mark.parametrize(("command", "levels", "sort_by"), [
+    ("Show the 5 riskiest customers", [], QuerySort.RISK_SCORE),
+    ("Show 5 high-risk customers", [PriorityLevel.HIGH, PriorityLevel.CRITICAL], QuerySort.RISK_SCORE),
+    ("Show critical customers", [PriorityLevel.CRITICAL], QuerySort.RISK_SCORE),
+    ("Show low-risk customers", [PriorityLevel.LOW], QuerySort.RISK_SCORE),
+    ("Show customers with the highest score", [], QuerySort.RISK_SCORE),
+    ("Show customers with the highest exposure", [], QuerySort.TOTAL_EXPOSURE),
+])
+def test_risk_and_ranking_phrases_have_explicit_semantics(command: str, levels: list[PriorityLevel], sort_by: QuerySort) -> None:
+    query = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command)).query
+    assert query.risk_levels == levels
+    assert query.sort_by is sort_by
+    assert query.descending is True
+
+
+def test_ranking_ties_use_raw_score_then_stable_domain_facts() -> None:
+    lower_raw = CUSTOMER_RESULT.model_copy(update={"entity_id": "b", "score": 100, "raw_score": 106})
+    higher_raw = CUSTOMER_RESULT.model_copy(update={"entity_id": "c", "score": 100, "raw_score": 110})
+    same_raw_lower_id = CUSTOMER_RESULT.model_copy(update={"entity_id": "a", "score": 100, "raw_score": 106})
+    query = StructuredQuery(sort_by=QuerySort.RISK_SCORE, descending=True)
+    ranked = sorted([lower_raw, higher_raw, same_raw_lower_id], key=lambda item: CommandTools._ranking_key(item, query))
+    assert [item.entity_id for item in ranked] == ["c", "a", "b"]
+    assert CommandTools.ranking_policy(query)[:2] == [
+        "Displayed intelligence score (highest first)", "Raw intelligence score (highest first)",
+    ]
 
 
 @pytest.mark.parametrize(("command", "expected"), [

@@ -19,6 +19,7 @@ from app.commands.schemas import (
     ProposalActionType,
     QueryEvidence,
     RankingEvidence,
+    StructuredQuery,
 )
 from app.commands.tools import CaseCandidate, CommandTools, QueryExecution
 from app.intelligence.operational_schemas import IntelligenceResult, PriorityLevel
@@ -68,6 +69,7 @@ class CommandPlanner:
                 records_inspected=portfolio.customer_count, records_matched=portfolio.customer_count,
                 records_excluded=0, records_returned=len(analyzed),
                 inspection_scope=InspectionScope(customers=portfolio.customer_count),
+                ranking_policy=CommandTools.ranking_policy(StructuredQuery()),
                 ranking=self._ranking_evidence(analyzed), latest_cycle=tools.latest_cycle_evidence(analyzed),
             )
 
@@ -86,7 +88,7 @@ class CommandPlanner:
                 else:
                     actions.extend(self._case_analysis_action(plan_id, item.intelligence, item.case) for item in candidates)
                 stored = {item.intelligence.entity_id: item.case.priority.value for item in candidates}
-                evidence = self._execution_evidence(execution, analyzed, tools, stored)
+                evidence = self._execution_evidence(execution, analyzed, tools, query, stored)
             else:
                 execution = tools.execute_customer_query(query)
                 analyzed = execution.records
@@ -97,7 +99,7 @@ class CommandPlanner:
                     analyzed = []
                 else:
                     actions.extend(self._customer_review(plan_id, item) for item in analyzed)
-                evidence = self._execution_evidence(execution, analyzed, tools)
+                evidence = self._execution_evidence(execution, analyzed, tools, query)
 
         elif intent is CommandIntentType.CUSTOMER_ANALYSIS:
             result = tools.get_customer_intelligence(request.context_customer_id) if request.context_customer_id else None
@@ -194,6 +196,7 @@ class CommandPlanner:
         execution: QueryExecution,
         analyzed: list[IntelligenceResult],
         tools: CommandTools,
+        query: StructuredQuery,
         stored_priorities: dict[str, str] | None = None,
     ) -> QueryEvidence:
         return QueryEvidence(
@@ -202,6 +205,7 @@ class CommandPlanner:
             records_excluded=execution.inspected - execution.matched,
             records_returned=len(analyzed),
             inspection_scope=execution.scope,
+            ranking_policy=CommandTools.ranking_policy(query),
             exclusions=[ExclusionCount(reason=reason, count=count) for reason, count in execution.exclusions],
             ranking=self._ranking_evidence(analyzed, stored_priorities),
             latest_cycle=tools.latest_cycle_evidence(analyzed),

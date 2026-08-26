@@ -232,9 +232,9 @@ export function Dashboard() {
             <section aria-label="Top portfolio metrics" className="mb-5">
               <div className="hide-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-4">
                 <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Total outstanding" value={money(portfolio.data.total_outstanding_amount)} detail={`${portfolio.data.total_invoices} live receivables across the portfolio.`} tone="blue" />
-                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Amount at risk" state="Needs attention" value={money(recovery.data.overdue_exposure)} detail="Current overdue exposure—not every balance requires the same action." tone="red" emphasis />
+                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Overdue exposure" state="Past due" value={money(recovery.data.overdue_exposure)} detail="Outstanding receivables past their due date; not every balance requires the same action." tone="red" emphasis />
                 <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Recovered this cycle" state={recoveredThisCycle > 0 ? "Confirmed" : "No payment event"} value={recoveredThisCycle > 0 ? money(recoveredThisCycle) : "—"} detail="Sum of persisted payment events in the current operating cycle." tone="green" />
-                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Active cases" value={String(recovery.data.active_cases ?? recovery.data.total_cases)} detail="Open recovery work currently monitored by ReconMate." tone="amber" />
+                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Open recovery cases" value={String(recovery.data.open_cases ?? recovery.data.total_cases)} detail="Cases not currently resolved or closed." tone="amber" />
               </div>
             </section>
 
@@ -243,7 +243,7 @@ export function Dashboard() {
                 intelligence={intelligence.data}
                 recovery={recovery.data}
                 latestCycle={latestCycleSnapshot}
-                approvals={recoveryQueue.queue.filter((item) => item.humanApprovalRequired && item.state !== "RESOLVED").length}
+                approvalRequired={recoveryQueue.queue.filter((item) => item.humanApprovalRequired && item.state !== "RESOLVED").length}
                 recoveredThisCycle={recoveredThisCycle > 0 ? money(recoveredThisCycle) : "—"}
                 evaluationUpdatedAt={intelligence.dataUpdatedAt}
                 loading={intelligence.isLoading}

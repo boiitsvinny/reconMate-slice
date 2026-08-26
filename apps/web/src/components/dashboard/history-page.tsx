@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { AppHeader } from "@/components/layout/app-header";
 import { InvoiceRegister } from "./invoice-register";
+import { ReceivableImport } from "./receivable-import";
 import { useCustomers, useInvoices, usePortfolioIntelligence } from "./queries";
 
 export function HistoryPage() {
@@ -20,10 +21,11 @@ export function HistoryPage() {
     <main className="workspace-history min-h-screen overflow-x-hidden">
       <AppHeader connected={ready && !errorMessage && !intelligenceError} updating={ready && !errorMessage && !intelligenceError && (customers.isFetching || invoices.isFetching || intelligence.isFetching)} />
       <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
-        <header className="max-w-3xl">
-          <p className="text-[11px] font-bold uppercase tracking-[.22em] text-sky-200">Authoritative receivables ledger</p>
+        <header className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+          <div className="max-w-3xl"><p className="text-[11px] font-bold uppercase tracking-[.22em] text-sky-200">Authoritative receivables ledger</p>
           <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Invoice Record Ledger</h1>
-          <p className="mt-3 text-sm leading-6 text-slate-300/90">Review every live invoice record in the operational source of truth. Select a row to inspect its factual invoice and customer profile.</p>
+          <p className="mt-3 text-sm leading-6 text-slate-300/90">Review every live invoice record in the operational source of truth. Select a row to inspect its factual invoice and customer profile.</p></div>
+          <ReceivableImport onImported={() => Promise.all([customers.refetch(), invoices.refetch(), intelligence.refetch()])} />
         </header>
         {!ready && errorMessage && <PageError message={errorMessage} onRetry={async () => { await Promise.all([customers.refetch(), invoices.refetch()]); }} />}
         {!ready && !errorMessage && <PageSkeleton />}

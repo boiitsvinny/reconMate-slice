@@ -279,6 +279,7 @@ class QueryEvidence(BaseModel):
     records_excluded: int = 0
     records_returned: int = 0
     inspection_scope: InspectionScope = Field(default_factory=InspectionScope)
+    ranking_policy: list[str] = Field(default_factory=list)
     exclusions: list[ExclusionCount] = Field(default_factory=list)
     ranking: list[RankingEvidence] = Field(default_factory=list)
     latest_cycle: LatestCycleEvidence | None = None

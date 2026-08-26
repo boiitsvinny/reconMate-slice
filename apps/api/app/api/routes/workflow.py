@@ -130,6 +130,7 @@ def case_workspace(case_id: UUID, db: Session = Depends(get_db)) -> dict[str, An
         "intelligence": evaluate_case_intelligence(case, simulation_date).model_dump(mode="json"),
         "invoice": None if case.invoice is None else {"id": str(case.invoice.id), "number": case.invoice.invoice_number, "status": case.invoice.status.value, "outstanding_amount": case.invoice.outstanding_amount, "due_date": case.invoice.due_date},
         "promises": [{"id": str(item.id), "status": item.status.value, "promised_amount": item.promised_amount, "promised_date": item.promised_date} for item in case.invoice.promises_to_pay] if case.invoice else [],
+        "payments": [{"id": str(item.id), "amount": item.amount, "payment_date": item.payment_date, "reference": item.reference} for item in sorted(case.invoice.payments, key=lambda item: item.payment_date, reverse=True)] if case.invoice else [],
         "communications": [{"id": str(item.id), "direction": item.direction.value, "content": item.content, "occurred_at": item.occurred_at, "analyses": [analysis.result for analysis in item.analyses]} for item in sorted(case.customer.communications, key=lambda item: item.occurred_at, reverse=True)],
         "actions": [_action_response(item).model_dump(mode="json") for item in case.actions],
         "audit_events": [{"id": str(item.id), "event_type": item.event_type, "payload": item.payload, "occurred_at": item.occurred_at} for item in events],

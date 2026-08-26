@@ -124,6 +124,7 @@ export type QueryEvidence = {
     recovery_cases: number;
     latest_cycle_events: number;
   };
+  ranking_policy: string[];
   exclusions: { reason: string; count: number }[];
   ranking: {
     entity_id: string;

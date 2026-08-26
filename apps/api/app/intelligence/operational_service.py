@@ -410,7 +410,10 @@ def evaluate_portfolio_intelligence(
 ) -> PortfolioIntelligence:
     """Evaluate and rank every customer using fresh current-state facts."""
     results = [evaluate_customer_intelligence(customer, calculated_at, policy) for customer in customers]
-    results.sort(key=lambda item: (-item.score, -item.metrics.overdue_exposure, item.entity_name, item.entity_id))
+    results.sort(key=lambda item: (
+        -item.score, -item.raw_score, -item.metrics.overdue_exposure,
+        -item.metrics.max_days_overdue, item.entity_id,
+    ))
     counts = {level: sum(result.level is level for result in results) for level in PriorityLevel}
     average = (
         Decimal(sum(result.score for result in results)) / Decimal(len(results))

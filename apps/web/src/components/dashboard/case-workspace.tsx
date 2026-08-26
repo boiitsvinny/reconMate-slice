@@ -7,7 +7,7 @@ import { apiFetch } from "@/lib/api";
 import { useCommandSession } from "@/components/intelligence/command-session";
 import { ReminderArtifact } from "@/components/intelligence/reminder-artifact";
 import type { ReminderArtifact as ReminderArtifactData } from "@/lib/intelligence-api";
-import type { IntelligenceTransition, PriorityCase } from "./data";
+import type { IntelligenceTransition, PriorityCase, Workspace } from "./data";
 import { queryKeys, useCaseWorkspace, useInvalidateOperationalData } from "./queries";
 import { buttonStyles, cx, StatusPill } from "./ui";
 
@@ -64,6 +64,10 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
     if (!current) return candidate;
     return new Date(candidate.created_at ?? 0).getTime() > new Date(current.created_at ?? 0).getTime() ? candidate : current;
   }, workspace.actions[0]);
+  const latestPayment = workspace?.payments?.[0];
+  const precedingAction = latestPayment ? workspace?.actions
+    .filter((candidate) => candidate.status === "EXECUTED" && candidate.executed_at && candidate.executed_at.slice(0, 10) <= latestPayment.payment_date)
+    .sort((left, right) => new Date(right.executed_at ?? 0).getTime() - new Date(left.executed_at ?? 0).getTime())[0] : undefined;
   const queryError = workspaceQuery.error instanceof Error ? workspaceQuery.error.message : null;
   const mutationError = action.error instanceof Error ? action.error.message : null;
   const error = mutationError ?? (!workspace ? queryError : null);
@@ -236,11 +240,22 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                 </div>
               )}
             </section>
+            {latestPayment && <OutcomeEvidenceChain payment={latestPayment} precedingAction={precedingAction} currentExposure={workspace.invoice?.outstanding_amount ?? "0"} recommendation={workspace.recommendation.recommended_action} />}
           </div>
         )}
       </section>
     </div>
   );
+}
+
+function OutcomeEvidenceChain({ payment, precedingAction, currentExposure, recommendation }: { payment: NonNullable<Workspace["payments"]>[number]; precedingAction?: Workspace["actions"][number]; currentExposure: string; recommendation: string }) {
+  const steps = [
+    precedingAction ? { eyebrow: "Action", title: actionName(precedingAction), detail: `Internal workflow recorded as executed ${new Date(precedingAction.executed_at ?? precedingAction.created_at ?? 0).toLocaleString()}.` } : null,
+    { eyebrow: "Observed event", title: money(payment.amount) + " payment recorded", detail: `${precedingAction ? "Payment received after the internal action; chronology does not prove causation." : "Persisted payment fact"} · ${payment.payment_date}${payment.reference ? ` · ${payment.reference}` : ""}` },
+    { eyebrow: "Current factual state", title: money(currentExposure) + " outstanding", detail: "Current invoice exposure after persisted payment records." },
+    { eyebrow: "Current decision", title: label(recommendation), detail: "Recommendation recalculated from the current persisted facts and blockers." },
+  ].filter((step): step is { eyebrow: string; title: string; detail: string } => Boolean(step));
+  return <section className="rounded-2xl border border-emerald-300/15 bg-emerald-300/[.025] p-5"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-emerald-300">Observed operational sequence</p><h3 className="mt-1.5 text-lg font-semibold text-white">Outcome and reassessment evidence</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">{steps.map((step, index) => <div key={step.eyebrow} className="relative rounded-xl border border-white/[.07] bg-black/10 p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">{index + 1}. {step.eyebrow}</p><p className="mt-2 text-sm font-semibold text-white">{step.title}</p><p className="mt-1 text-xs leading-5 text-slate-400">{step.detail}</p></div>)}</div></section>;
 }
 
 function Card({ label, value }: { label: string; value: string }) {

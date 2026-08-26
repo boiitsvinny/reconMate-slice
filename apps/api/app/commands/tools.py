@@ -173,7 +173,7 @@ class CommandTools:
             contexts.append((result, partial, recent, blocked, monitoring, actionable, latest_ids is None or result.entity_id in latest_ids))
         remaining, exclusions = self._apply_predicates(query, contexts)
         matched = [item[0] for item in remaining]
-        matched.sort(key=lambda item: self._sort_key(item, query.sort_by), reverse=query.descending)
+        matched.sort(key=lambda item: self._ranking_key(item, query))
         returned = matched if query.count_only or query.limit is None else matched[:query.limit]
         customers = self.customers()
         scope = InspectionScope(
@@ -213,7 +213,7 @@ class CommandTools:
             candidate_by_entity[effective_result.entity_id] = candidate
         remaining, exclusions = self._apply_predicates(query, contexts)
         matched = [candidate_by_entity[item[0].entity_id] for item in remaining]
-        matched.sort(key=lambda item: self._sort_key(item.intelligence, query.sort_by), reverse=query.descending)
+        matched.sort(key=lambda item: self._ranking_key(item.intelligence, query))
         returned = matched if query.count_only or query.limit is None else matched[:query.limit]
         customers = {str(candidate.case.customer_id): candidate.case.customer for candidate in candidates}
         scope = InspectionScope(
@@ -373,6 +373,36 @@ class CommandTools:
         if sort_by is QuerySort.LAST_PAYMENT:
             return result.metrics.days_since_last_payment if result.metrics.days_since_last_payment is not None else 10**9
         return result.score
+
+    @classmethod
+    def _ranking_key(cls, result: IntelligenceResult, query: StructuredQuery):
+        """One deterministic comparator shared by customer and case queries."""
+        primary = cls._sort_key(result, query.sort_by)
+        direction = Decimal("-1") if query.descending else Decimal("1")
+        return (
+            Decimal(primary) * direction,
+            -result.raw_score,
+            -result.metrics.overdue_exposure,
+            -result.metrics.max_days_overdue,
+            result.entity_id,
+        )
+
+    @staticmethod
+    def ranking_policy(query: StructuredQuery) -> list[str]:
+        primary = {
+            QuerySort.RISK_SCORE: "Displayed intelligence score",
+            QuerySort.TOTAL_EXPOSURE: "Total outstanding exposure",
+            QuerySort.OVERDUE_EXPOSURE: "Overdue exposure",
+            QuerySort.DAYS_OVERDUE: "Oldest overdue age",
+            QuerySort.LAST_PAYMENT: "Payment recency",
+        }[query.sort_by]
+        return [
+            f"{primary} ({'highest first' if query.descending else 'lowest first'})",
+            "Raw intelligence score (highest first)",
+            "Overdue exposure (highest first)",
+            "Oldest overdue age (highest first)",
+            "Stable entity identifier",
+        ]
 
     def get_recovery_candidates(
         self,

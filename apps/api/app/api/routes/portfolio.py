@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.session import get_db
-from app.models.domain import Communication, Customer, Invoice, Payment, PromiseToPay, RecoveryCase, SimulationState
+from app.models.domain import AuditEvent, Communication, Customer, Invoice, Payment, PromiseToPay, RecoveryCase, SimulationState
 from app.seed.portfolio import portfolio_summary
 
 router = APIRouter(tags=["portfolio"])
@@ -37,6 +37,7 @@ class InvoiceItem(BaseModel):
     outstanding_amount: Decimal
     status: str
     customer_id: UUID
+    source: str
 
 
 class PaymentItem(BaseModel):
@@ -100,11 +101,12 @@ class PortfolioSummary(BaseModel):
     recovery_cases: int
 
 
-def _invoice_item(invoice: Invoice) -> InvoiceItem:
+def _invoice_item(invoice: Invoice, imported_ids: set[UUID] | None = None) -> InvoiceItem:
     return InvoiceItem(id=invoice.id, invoice_number=invoice.invoice_number, issue_date=invoice.issue_date,
                        due_date=invoice.due_date, original_amount=invoice.original_amount,
                        outstanding_amount=invoice.outstanding_amount, status=invoice.status.value,
-                       customer_id=invoice.customer_id)
+                       customer_id=invoice.customer_id,
+                       source="CSV_IMPORT" if imported_ids and invoice.id in imported_ids else "DEMO_SANDBOX")
 
 
 @router.get("/customers", response_model=list[CustomerItem], summary="List portfolio customers")
@@ -130,10 +132,14 @@ def get_customer(customer_id: UUID, db: Session = Depends(get_db)) -> CustomerDe
     )
     if customer is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found.")
+    imported_ids = set(db.scalars(select(AuditEvent.entity_id).where(
+        AuditEvent.entity_type == "Invoice", AuditEvent.event_type == "RECEIVABLE_IMPORTED",
+        AuditEvent.entity_id.in_([item.id for item in customer.invoices]),
+    ))) if customer.invoices else set()
     return CustomerDetail(
         id=customer.id, name=customer.name, account_reference=customer.account_reference,
         segment=customer.segment, is_strategic_account=customer.is_strategic_account,
-        invoices=[_invoice_item(invoice) for invoice in sorted(customer.invoices, key=lambda item: item.due_date)],
+        invoices=[_invoice_item(invoice, imported_ids) for invoice in sorted(customer.invoices, key=lambda item: item.due_date)],
         promises_to_pay=[PromiseItem(id=item.id, invoice_id=item.invoice_id, promised_amount=item.promised_amount,
                                      promised_date=item.promised_date, status=item.status.value, confidence=item.confidence)
                          for item in sorted(customer.promises_to_pay, key=lambda item: item.promised_date)],
@@ -151,7 +157,12 @@ def list_invoices(customer_id: UUID | None = Query(default=None), db: Session = 
     query = select(Invoice).order_by(Invoice.due_date, Invoice.invoice_number)
     if customer_id is not None:
         query = query.where(Invoice.customer_id == customer_id)
-    return [_invoice_item(invoice) for invoice in db.scalars(query)]
+    invoices = list(db.scalars(query))
+    imported_ids = set(db.scalars(select(AuditEvent.entity_id).where(
+        AuditEvent.entity_type == "Invoice", AuditEvent.event_type == "RECEIVABLE_IMPORTED",
+        AuditEvent.entity_id.in_([item.id for item in invoices]),
+    ))) if invoices else set()
+    return [_invoice_item(invoice, imported_ids) for invoice in invoices]
 
 
 @router.get("/portfolio/summary", response_model=PortfolioSummary, summary="Return factual portfolio metrics")

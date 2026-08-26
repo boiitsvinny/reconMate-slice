@@ -169,19 +169,19 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         for word, level in (("critical", PriorityLevel.CRITICAL), ("medium", PriorityLevel.MEDIUM), ("low", PriorityLevel.LOW)):
             if re.search(rf"\b{word}(?: risk| priority)?\b", text):
                 levels.append(level)
-        # Superlative risk wording means sort, not a hidden filter. Explicit
-        # "high only" or non-superlative high-risk wording remains a band filter.
-        if re.search(r"\bhigh(?: risk| priority)\b", text) and not any(word in text for word in ("highest", "riskiest", "top")):
+        # A named high-risk band remains a filter even when the operator also
+        # asks for the top N. Superlatives such as "riskiest" only request order.
+        if re.search(r"\bhigh(?: risk| priority)\b", text):
             levels.extend(level for level in (PriorityLevel.HIGH, PriorityLevel.CRITICAL) if level not in levels)
         return levels
 
     @staticmethod
     def _limit(text: str) -> int | None:
-        digit = re.search(r"\b(?:top|first|limit)\s+(\d{1,3})\b|\b(\d{1,3})\s+(?:riskiest|highest|lowest|customers?|accounts?|cases?)\b", text)
+        digit = re.search(r"\b(?:top|first|limit)\s+(\d{1,3})\b|\b(\d{1,3})\s+(?:(?:high|low|critical)(?: risk)? )?(?:riskiest|highest|lowest|customers?|accounts?|cases?)\b", text)
         if digit:
             return min(int(digit.group(1) or digit.group(2)), 50)
         for word, value in sorted(_NUMBER_WORDS.items(), key=lambda item: -len(item[0])):
-            if re.search(rf"\b(?:top\s+)?{re.escape(word)}\s+(?:riskiest|highest|lowest|customers?|accounts?|cases?)\b", text):
+            if re.search(rf"\b(?:top\s+)?{re.escape(word)}\s+(?:(?:high|low|critical)(?: risk)? )?(?:riskiest|highest|lowest|customers?|accounts?|cases?)\b", text):
                 return value
         return None
 

@@ -107,7 +107,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
       <div className="divide-y divide-white/[.055] md:hidden">
         {rows.map((invoice) => (
           <button type="button" key={invoice.id} onClick={(event) => openPreview(invoice, event.clientX, event.clientY)} className="interactive-row flex w-full items-start justify-between gap-4 p-4 text-left active:bg-sky-400/[.07]">
-            <div className="min-w-0"><p className="truncate text-sm font-semibold text-white">{invoice.invoice_number}</p><p className="mt-1 truncate text-[13px] text-slate-300">{customers.get(invoice.customer_id)?.name ?? "Portfolio account"}</p><p className="mt-2 text-xs text-slate-400">Due {invoice.due_date}</p></div>
+            <div className="min-w-0"><div className="flex items-center gap-2"><p className="truncate text-sm font-semibold text-white">{invoice.invoice_number}</p>{invoice.source === "CSV_IMPORT" && <StatusPill tone="sky">Imported</StatusPill>}</div><p className="mt-1 truncate text-[13px] text-slate-300">{customers.get(invoice.customer_id)?.name ?? "Portfolio account"}</p><p className="mt-2 text-xs text-slate-400">Due {invoice.due_date}</p></div>
             <div className="flex shrink-0 flex-col items-end gap-2"><p className="text-sm font-semibold tabular-nums text-white">{money(invoice.outstanding_amount)}</p><div className="flex flex-wrap justify-end gap-1.5"><StatusPill tone={statusTone(invoice.status)}>{invoice.status}</StatusPill>{riskAvailable && <StatusPill tone={riskTone(riskByCustomer.get(invoice.customer_id)?.level)}>{riskByCustomer.get(invoice.customer_id)?.level ?? "LOW"} risk</StatusPill>}</div></div>
           </button>
         ))}
@@ -126,7 +126,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
           {rows.map((invoice) => (
             <button type="button" key={invoice.id} onClick={(event) => openPreview(invoice, event.clientX, event.clientY)} className="interactive-row grid w-full grid-cols-[1.15fr_1fr_.7fr_.75fr_.72fr_.72fr] gap-4 border-b border-white/[.045] px-5 py-4 text-left text-sm last:border-b-0 focus:bg-sky-400/[.06] focus:outline-none">
               <div>
-                <p className="font-medium text-slate-200">{invoice.invoice_number}</p>
+                <div className="flex items-center gap-2"><p className="font-medium text-slate-200">{invoice.invoice_number}</p>{invoice.source === "CSV_IMPORT" && <StatusPill tone="sky">Imported</StatusPill>}</div>
                 <p className="mt-0.5 text-[11px] text-slate-500">Issued {invoice.issue_date}</p>
               </div>
               <p className="truncate text-slate-300">{customers.get(invoice.customer_id)?.name ?? "Portfolio account"}</p>
@@ -149,7 +149,7 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
           style={{ left: Math.max(12, preview.x), top: Math.max(12, preview.y) }}
         >
           <div className="flex items-start justify-between gap-4">
-            <div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-sky-300">Invoice profile</p><h3 className="mt-1 text-base font-semibold text-white">{previewInvoice.invoice_number}</h3></div>
+            <div><p className="text-[10px] font-bold uppercase tracking-[.16em] text-sky-300">Invoice profile</p><div className="mt-1 flex items-center gap-2"><h3 className="text-base font-semibold text-white">{previewInvoice.invoice_number}</h3>{previewInvoice.source === "CSV_IMPORT" && <StatusPill tone="sky">CSV import</StatusPill>}</div></div>
             <div className="flex items-center gap-2"><StatusPill tone={statusTone(previewInvoice.status)}>{previewInvoice.status}</StatusPill><button type="button" onClick={() => closePreview(0)} aria-label="Close invoice profile" className="grid h-7 w-7 place-items-center rounded-full border border-white/10 text-sm text-slate-400 hover:text-white">×</button></div>
           </div>
           <div className="mt-4 rounded-xl border border-white/[.07] bg-white/[.03] p-4">

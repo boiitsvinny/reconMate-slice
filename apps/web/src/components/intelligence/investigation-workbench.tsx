@@ -61,9 +61,9 @@ function ComparisonPanel({ result }: { result: CommandResult }) {
   useEffect(() => { setLeftId(entities[0]?.entity_id || ""); setRightId(entities[1]?.entity_id || entities[0]?.entity_id || ""); }, [result.plan_id, entities]);
   const left = entities.find((item) => item.entity_id === leftId) || entities[0];
   const right = entities.find((item) => item.entity_id === rightId) || entities[1];
-  const explanation = useMemo(() => left && right ? comparisonExplanation(left, right, result) : "", [left, right, result]);
+  const explanation = useMemo(() => left && right ? comparisonExplanation(left, right, result) : { ranking: "", actionability: "" }, [left, right, result]);
   if (!left || !right) return null;
-  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Why one result ranks above another" title={"Compare " + left.entity_name + " with " + right.entity_name} detail="A factual comparison using only records returned by this command." prominent /><div className="grid gap-3 border-b border-white/[.06] p-4 sm:grid-cols-2"><CompareSelect label="First returned result" value={left.entity_id} entities={entities} onChange={setLeftId} /><CompareSelect label="Compare with" value={right.entity_id} entities={entities} onChange={setRightId} /></div><div className="grid gap-px bg-white/[.06] lg:grid-cols-2"><ComparisonSide entity={left} /><ComparisonSide entity={right} /></div><p className="border-t border-white/[.06] px-5 py-4 text-xs leading-5 text-slate-300"><span className="font-semibold text-sky-200">Ranking explanation:</span> {explanation}</p></Panel>;
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Why one result ranks above another" title={"Compare " + left.entity_name + " with " + right.entity_name} detail="A factual comparison using only records returned by this command." prominent /><div className="grid gap-3 border-b border-white/[.06] p-4 sm:grid-cols-2"><CompareSelect label="First returned result" value={left.entity_id} entities={entities} onChange={setLeftId} /><CompareSelect label="Compare with" value={right.entity_id} entities={entities} onChange={setRightId} /></div><div className="grid gap-px bg-white/[.06] lg:grid-cols-2"><ComparisonSide entity={left} /><ComparisonSide entity={right} /></div><div className="space-y-3 border-t border-white/[.06] px-5 py-4 text-[13px] leading-5 text-slate-300"><p><span className="font-semibold text-sky-200">Ranking:</span> {explanation.ranking}</p><p><span className="font-semibold text-emerald-200">Operational actionability:</span> {explanation.actionability}</p>{result.query_evidence.ranking_policy.length > 0 && <p className="text-xs text-slate-500">Comparator: {result.query_evidence.ranking_policy.join(" → ")}.</p>}</div></Panel>;
 }
 
 function CompareSelect({ label: fieldLabel, value, entities, onChange }: { label: string; value: string; entities: IntelligenceResult[]; onChange: (value: string) => void }) {
@@ -72,7 +72,7 @@ function CompareSelect({ label: fieldLabel, value, entities, onChange }: { label
 
 function ComparisonSide({ entity }: { entity: IntelligenceResult }) {
   const actionability = actionabilityFor(entity);
-  return <article className="bg-[#08111f] p-5"><div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-white">{entity.entity_name}</h3><p className="mt-1 text-[10px] text-slate-500">{formatMoney(entity.metrics.overdue_exposure)} overdue · {entity.metrics.max_days_overdue} days</p></div><StatusPill tone={tone(entity.level)}>{entity.score}/100 · {entity.level}</StatusPill></div><dl className="mt-4 grid grid-cols-2 gap-3 text-xs"><QueryFact term="Broken promises" value={String(entity.metrics.broken_promise_count)} /><QueryFact term="Active promises" value={String(entity.metrics.active_promise_count)} /><QueryFact term="Active disputes" value={String(entity.metrics.active_dispute_count)} /><QueryFact term="Actionability" value={actionability.label} /></dl><p className="mt-4 text-xs leading-5 text-slate-300">{entity.recommendation.title}</p>{actionability.blocker && <p className="mt-1 text-[10px] leading-4 text-amber-200/70">Blocker: {actionability.blocker}</p>}</article>;
+  return <article className="bg-[#08111f] p-5"><div className="flex items-start justify-between gap-3"><div><h3 className="text-base font-semibold text-white">{entity.entity_name}</h3><p className="mt-1 text-xs text-slate-400">{formatMoney(entity.metrics.overdue_exposure)} overdue · {entity.metrics.max_days_overdue} days</p></div><StatusPill tone={tone(entity.level)}>{entity.level} risk</StatusPill></div><dl className="mt-5 grid grid-cols-2 gap-4 text-xs sm:grid-cols-3"><QueryFact term="Displayed score" value={`${entity.score}/100`} /><QueryFact term="Raw score" value={String(entity.raw_score)} /><QueryFact term="Risk band" value={entity.level} /><QueryFact term="Overdue exposure" value={formatMoney(entity.metrics.overdue_exposure)} /><QueryFact term="Oldest overdue" value={`${entity.metrics.max_days_overdue} days`} /><QueryFact term="Payment recency" value={entity.metrics.days_since_last_payment === null ? "No payment recorded" : `${entity.metrics.days_since_last_payment} days ago`} /><QueryFact term="Broken promises" value={String(entity.metrics.broken_promise_count)} /><QueryFact term="Active promises" value={String(entity.metrics.active_promise_count)} /><QueryFact term="Active disputes" value={String(entity.metrics.active_dispute_count)} /><QueryFact term="Actionability" value={actionability.label} /><QueryFact term="Blocker" value={actionability.blocker ?? "None detected"} /><QueryFact term="Recommendation" value={entity.recommendation.title} /></dl></article>;
 }
 
 function comparisonExplanation(left: IntelligenceResult, right: IntelligenceResult, result: CommandResult) {
@@ -85,12 +85,28 @@ function comparisonExplanation(left: IntelligenceResult, right: IntelligenceResu
     LAST_PAYMENT: [left.metrics.days_since_last_payment === null ? 10 ** 9 : left.metrics.days_since_last_payment, right.metrics.days_since_last_payment === null ? 10 ** 9 : right.metrics.days_since_last_payment, "payment inactivity"],
   } as const;
   const [leftValue, rightValue, basis] = values[query.sort_by];
-  const facts = [];
-  if (left.metrics.broken_promise_count !== right.metrics.broken_promise_count) facts.push(left.entity_name + " has " + left.metrics.broken_promise_count + " broken promise(s) versus " + right.metrics.broken_promise_count);
-  if (left.metrics.max_days_overdue !== right.metrics.max_days_overdue) facts.push("its oldest balance is " + left.metrics.max_days_overdue + " days overdue versus " + right.metrics.max_days_overdue);
-  const rightBlocker = actionabilityFor(right).blocker;
-  if (rightBlocker) facts.push(right.entity_name + " is currently restrained because " + rightBlocker.toLowerCase());
-  return "This query orders by " + (query.descending ? "highest " : "lowest ") + basis + "; the compared values are " + formatComparisonValue(query.sort_by, leftValue) + " and " + formatComparisonValue(query.sort_by, rightValue) + ". " + (facts.length ? facts.join("; ") + "." : "The remaining factual differences are shown above.");
+  const ranks = new Map(result.query_evidence.ranking.map((item) => [item.entity_id, item.rank]));
+  const leftFirst = (ranks.get(left.entity_id) ?? Number.MAX_SAFE_INTEGER) < (ranks.get(right.entity_id) ?? Number.MAX_SAFE_INTEGER);
+  const higher = leftFirst ? left : right;
+  const lower = leftFirst ? right : left;
+  const primaryDifferent = leftValue !== rightValue;
+  let ranking: string;
+  if (primaryDifferent) {
+    ranking = `${higher.entity_name} ranks first because the query orders by ${query.descending ? "highest" : "lowest"} ${basis}; the compared values are ${formatComparisonValue(query.sort_by, leftValue)} and ${formatComparisonValue(query.sort_by, rightValue)}.`;
+  } else if (left.raw_score !== right.raw_score) {
+    const capped = left.score === 100 && right.score === 100;
+    ranking = `${capped ? "Both accounts display 100/100 because their scores are capped. " : "The primary displayed scores are tied. "}${higher.entity_name} ranks above ${lower.entity_name} because its raw intelligence score is ${higher.raw_score} versus ${lower.raw_score}.`;
+  } else if (left.metrics.overdue_exposure !== right.metrics.overdue_exposure) {
+    ranking = `The primary value and raw score are tied. ${higher.entity_name} ranks above ${lower.entity_name} on overdue exposure: ${formatMoney(higher.metrics.overdue_exposure)} versus ${formatMoney(lower.metrics.overdue_exposure)}.`;
+  } else if (left.metrics.max_days_overdue !== right.metrics.max_days_overdue) {
+    ranking = `The primary value, raw score, and overdue exposure are tied. ${higher.entity_name} ranks above ${lower.entity_name} because its oldest overdue balance is ${higher.metrics.max_days_overdue} days versus ${lower.metrics.max_days_overdue}.`;
+  } else {
+    ranking = "All financial ranking fields are tied; the stable entity identifier provides deterministic final ordering.";
+  }
+  const leftAction = actionabilityFor(left);
+  const rightAction = actionabilityFor(right);
+  const actionability = `${left.entity_name} is ${leftAction.label.toLowerCase()}${leftAction.blocker ? ` because ${leftAction.blocker.toLowerCase()}` : " with no current blocker"}; ${right.entity_name} is ${rightAction.label.toLowerCase()}${rightAction.blocker ? ` because ${rightAction.blocker.toLowerCase()}` : " with no current blocker"}.`;
+  return { ranking, actionability };
 }
 
 function formatComparisonValue(sort: CommandResult["interpreted_intent"]["query"]["sort_by"], value: number) {
