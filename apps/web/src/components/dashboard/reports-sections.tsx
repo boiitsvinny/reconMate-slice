@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { IntelligenceResult, PortfolioIntelligence } from "@/lib/intelligence-api";
-import type { ExternalPaymentRequest, LatestIntelligenceCycle, PriorityCase, Recovery, RecoveryAction, SimulationEvent } from "./data";
+import type { BatchRecoveryProof, ExternalPaymentRequest, LatestIntelligenceCycle, PriorityCase, Recovery, RecoveryAction, SimulationEvent } from "./data";
 import { formatMoney } from "./data";
 import { buttonStyles, Panel, SectionHeader, StatusPill } from "./ui";
 
@@ -14,6 +14,7 @@ type ReportProps = {
   queue: PriorityCase[];
   actions: RecoveryAction[];
   paymentRequests: ExternalPaymentRequest[];
+  batchRecovery: BatchRecoveryProof;
   onSelectCase: (item: PriorityCase) => void;
 };
 
@@ -25,7 +26,81 @@ export function RecoveryEvidenceReport(props: ReportProps) {
   const casesById = new Map(props.queue.map((item) => [item.id, item]));
   for (const item of props.queue) if (!casesByCustomer.has(item.customerId) || item.recommendationPriority === "CRITICAL") casesByCustomer.set(item.customerId, item);
   const intelligenceByCustomer = new Map(props.intelligence.customers.map((item) => [item.entity_id, item]));
-  return <div className="space-y-6"><ExecutiveSnapshot {...props} /><MaterialChanges {...props} casesByCustomer={casesByCustomer} casesById={casesById} /><DecisionReport {...props} casesByCustomer={casesByCustomer} /><DeliberateRestraint {...props} casesByCustomer={casesByCustomer} /><OperatorActivity {...props} casesById={casesById} /><OutstandingExceptions {...props} intelligenceByCustomer={intelligenceByCustomer} casesById={casesById} /></div>;
+  return <div className="space-y-6"><BatchRecoveryProofPanel {...props} casesById={casesById} /><ExecutiveSnapshot {...props} /><MaterialChanges {...props} casesByCustomer={casesByCustomer} casesById={casesById} /><DecisionReport {...props} casesByCustomer={casesByCustomer} /><DeliberateRestraint {...props} casesByCustomer={casesByCustomer} /><OperatorActivity {...props} casesById={casesById} /><OutstandingExceptions {...props} intelligenceByCustomer={intelligenceByCustomer} casesById={casesById} /></div>;
+}
+
+function BatchRecoveryProofPanel({ batchRecovery: proof, casesById, onSelectCase }: ReportProps & { casesById: Map<string, PriorityCase> }) {
+  const actionOutcomes = [
+    ["Proposed / planned", proof.action_outcomes.recommended + proof.action_outcomes.planned],
+    ["Pending approval", proof.action_outcomes.pending_approval],
+    ["Approved", proof.action_outcomes.approved],
+    ["Held", proof.action_outcomes.held],
+    ["Rejected", proof.action_outcomes.rejected],
+    ["Executed", proof.action_outcomes.executed],
+    ["Requests created", proof.action_outcomes.payment_requests_created],
+    ["Provider events", proof.action_outcomes.provider_events_received],
+    ["Payments persisted", proof.action_outcomes.payments_persisted],
+  ] as const;
+  return <Panel className="overflow-hidden border-sky-300/20">
+    <SectionHeader eyebrow="Batch recovery proof" title="Measured money movement across the overdue portfolio" detail="A read-only reconciliation of persisted invoice balances and payment records, with stopping rules and operator outcomes in the same scope." prominent />
+    <div className="flex flex-wrap gap-x-5 gap-y-2 border-y border-white/[.06] bg-sky-300/[.025] px-5 py-3 text-[11px] text-slate-400 sm:px-6">
+      <span><strong className="text-slate-200">Observed window</strong> {proof.scope.earliest_due_date ?? "No overdue start"} → {proof.scope.as_of_date} · cycle {proof.scope.cycle}</span>
+      <span><strong className="text-slate-200">Scope</strong> {proof.scope.customer_count} customers · {proof.scope.invoice_count} invoices · {proof.scope.case_count} cases</span>
+      <span><strong className="text-slate-200">Source</strong> {proof.scope.provenance}</span>
+    </div>
+    <div className="grid gap-px bg-white/[.06] lg:grid-cols-[1fr_auto_1fr_auto_1fr_.8fr] lg:items-stretch">
+      <ProofAmount label="Starting overdue exposure" value={proof.reconciliation.starting_overdue_exposure} detail="Current balance plus qualifying observed payments" />
+      <span className="hidden place-items-center bg-[#08111f] px-1 text-xl text-sky-300 lg:grid">−</span>
+      <ProofAmount label="Observed recovery" value={proof.reconciliation.observed_recovery} detail={`${proof.reconciliation.qualifying_payment_count} persisted payment record(s)`} tone="emerald" />
+      <span className="hidden place-items-center bg-[#08111f] px-1 text-xl text-sky-300 lg:grid">=</span>
+      <ProofAmount label="Remaining overdue" value={proof.reconciliation.remaining_overdue_exposure} detail={`${proof.reconciliation.remaining_open_overdue_invoice_count} invoice(s) remain open`} tone="rose" />
+      <ProofAmount label="Recovery rate" value={`${proof.reconciliation.recovery_rate}%`} detail={proof.reconciliation.equation_holds ? "Reconciliation verified" : "Reconciliation exception"} tone={proof.reconciliation.equation_holds ? "emerald" : "rose"} money={false} />
+    </div>
+    <p className="border-b border-white/[.06] px-5 py-3 text-[11px] leading-5 text-slate-400 sm:px-6">{proof.reconciliation.measurement_note}</p>
+    <div className="grid gap-px bg-white/[.06] sm:grid-cols-2 lg:grid-cols-4">
+      <ReportMetric label="Accounts recovered" value={String(proof.reconciliation.fully_recovered_account_count)} detail={`${proof.reconciliation.partially_recovered_account_count} partially recovered`} tone="emerald" />
+      <ReportMetric label="Invoices recovered" value={String(proof.reconciliation.recovered_invoice_count)} detail={`${proof.reconciliation.partially_recovered_invoice_count} partially recovered`} tone="emerald" />
+      <ReportMetric label="Stopping rules" value={String(proof.stopping_rules.deliberate_hold_count)} detail={`${proof.stopping_rules.active_dispute_hold_count} dispute · ${proof.stopping_rules.active_promise_hold_count} promise · ${proof.stopping_rules.resolved_or_paid_case_count} resolved/paid`} tone="sky" />
+      <ReportMetric label="Unresolved exceptions" value={String(proof.stopping_rules.unresolved_exception_count)} detail={`${proof.stopping_rules.approval_required_case_count} approval-required · ${proof.stopping_rules.blocked_action_count} blocked actions`} tone="amber" />
+    </div>
+    <div className="grid gap-px border-t border-white/[.06] bg-white/[.06] xl:grid-cols-2">
+      <section className="bg-[#08111f] p-5 sm:p-6">
+        <p className="text-[10px] font-bold uppercase tracking-[.14em] text-sky-200">Persisted action and outcome chain</p>
+        <div className="mt-4 flex flex-wrap gap-2">{actionOutcomes.map(([name, count]) => <span key={name} className="rounded-full border border-white/[.08] bg-white/[.025] px-3 py-1.5 text-xs text-slate-300"><strong className="mr-1.5 tabular-nums text-white">{count}</strong>{name}</span>)}</div>
+        {proof.action_outcomes.duplicate_provider_events_ignored > 0 && <p className="mt-4 text-xs text-emerald-200">{proof.action_outcomes.duplicate_provider_events_ignored} duplicate provider event(s) ignored; no second financial mutation was counted.</p>}
+      </section>
+      <section className="bg-[#08111f] p-5 sm:p-6">
+        <p className="text-[10px] font-bold uppercase tracking-[.14em] text-sky-200">Same-scope baseline</p>
+        <div className="mt-3 grid grid-cols-3 gap-3"><BaselineValue value={proof.baseline.age_only_target_count} label="Age-only targets" /><BaselineValue value={proof.baseline.reconmate_immediate_action_count} label="ReconMate actions" /><BaselineValue value={proof.baseline.blocker_violations_avoided} label="Unsafe attempts avoided" /></div>
+        <p className="mt-4 text-[11px] leading-5 text-slate-500">{proof.baseline.limitation}</p>
+      </section>
+    </div>
+    <div className="grid gap-px border-t border-white/[.06] bg-white/[.06] xl:grid-cols-2">
+      <details className="group bg-[#08111f] p-5 sm:p-6">
+        <summary className="cursor-pointer list-none text-sm font-semibold text-white">Payment evidence <span className="ml-2 text-xs font-normal text-slate-500">{proof.payment_evidence.length} records · expand audit trail</span></summary>
+        <div className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-2">{proof.payment_evidence.map((payment) => {
+          const recoveryCase = payment.case_id ? casesById.get(payment.case_id) : undefined;
+          return <article key={payment.payment_id} className="rounded-xl border border-white/[.07] bg-white/[.02] p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-semibold text-white">{payment.invoice_number} · {formatMoney(payment.amount)}</p><p className="mt-1 text-[10px] text-slate-500">{payment.payment_date} · {payment.provenance}</p></div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="text-[11px] font-semibold text-sky-300">Open case →</button>}</div><p className="mt-2 break-all text-[10px] leading-5 text-slate-400">Payment {payment.provider_payment_reference ?? payment.payment_reference ?? payment.payment_id}{payment.event_reference ? ` · Event ${payment.event_reference}` : ""}{payment.request_reference ? ` · Request ${payment.request_reference}` : ""}</p>{payment.outstanding_before !== null && payment.outstanding_after !== null && <p className="mt-1 text-[11px] text-emerald-200">Outstanding {formatMoney(payment.outstanding_before)} → {formatMoney(payment.outstanding_after)}</p>}</article>;
+        })}{!proof.payment_evidence.length && <p className="py-5 text-xs text-slate-500">No qualifying post-due payment records exist in this batch.</p>}</div>
+      </details>
+      <details className="group bg-[#08111f] p-5 sm:p-6">
+        <summary className="cursor-pointer list-none text-sm font-semibold text-white">Stopping-rule evidence <span className="ml-2 text-xs font-normal text-slate-500">{proof.stopping_rules.hold_evidence.length} records · recovery intentionally withheld</span></summary>
+        <div className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-2">{proof.stopping_rules.hold_evidence.map((hold) => {
+          const recoveryCase = casesById.get(hold.case_id);
+          return <article key={hold.case_id} className="rounded-xl border border-emerald-300/10 bg-emerald-300/[.025] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-white">{hold.customer_name}</p><p className="mt-1 text-[10px] text-slate-500">{hold.invoice_number ?? "Portfolio case"} · {hold.provenance}</p></div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="text-[11px] font-semibold text-sky-300">Open case →</button>}</div><p className="mt-2 text-[11px] text-emerald-200">Recovery intentionally withheld: {hold.reasons.map(label).join(" · ")}</p><p className="mt-1 text-[10px] text-slate-500">Current recommendation: {label(hold.current_recommendation)}</p></article>;
+        })}{!proof.stopping_rules.hold_evidence.length && <p className="py-5 text-xs text-slate-500">No current stopping-rule holds exist in this batch.</p>}</div>
+      </details>
+    </div>
+  </Panel>;
+}
+
+function ProofAmount({ label: amountLabel, value, detail, tone = "sky", money = true }: { label: string; value: string; detail: string; tone?: "sky" | "emerald" | "rose"; money?: boolean }) {
+  const colors = { sky: "text-sky-200", emerald: "text-emerald-200", rose: "text-rose-200" };
+  return <article className="bg-[#08111f] p-5 sm:p-6"><p className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-400">{amountLabel}</p><p className={`mt-2 text-2xl font-semibold tabular-nums tracking-[-.03em] ${colors[tone]}`}>{money ? formatMoney(value) : value}</p><p className="mt-1 text-[11px] leading-5 text-slate-500">{detail}</p></article>;
+}
+
+function BaselineValue({ value, label: baselineLabel }: { value: number; label: string }) {
+  return <div><p className="text-xl font-semibold tabular-nums text-white">{value}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">{baselineLabel}</p></div>;
 }
 
 function ExecutiveSnapshot({ recovery, intelligence, latestCycle, events, actions }: ReportProps) {

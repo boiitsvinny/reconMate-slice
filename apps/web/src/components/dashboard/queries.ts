@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CaseApi, createPriorityQueue, Customer, ExternalPaymentRequest, fetchJson, Invoice, LatestIntelligenceCycle, Portfolio, ProviderMode, Recommendation, Recovery, RecoveryAction, SimState, SimulationEvent, Workspace } from "./data";
+import { BatchRecoveryProof, CaseApi, createPriorityQueue, Customer, ExternalPaymentRequest, fetchJson, Invoice, LatestIntelligenceCycle, Portfolio, ProviderMode, Recommendation, Recovery, RecoveryAction, SimState, SimulationEvent, Workspace } from "./data";
 import { getPortfolioIntelligence } from "@/lib/intelligence-api";
 
 export const LIVE_REFRESH_INTERVAL = 15_000;
@@ -18,6 +18,7 @@ export const queryKeys = {
   recommendations: ["reconmate", "recommendations"] as const,
   actions: ["reconmate", "actions"] as const,
   paymentRequests: ["reconmate", "payment-requests"] as const,
+  batchRecoveryProof: ["reconmate", "batch-recovery-proof"] as const,
   providerMode: ["reconmate", "provider-mode"] as const,
   simulationState: ["reconmate", "simulation-state"] as const,
   simulationEvents: ["reconmate", "simulation-events"] as const,
@@ -36,6 +37,7 @@ export const useCases = () => useQuery({ queryKey: queryKeys.cases, queryFn: () 
 export const useRecommendations = () => useQuery({ queryKey: queryKeys.recommendations, queryFn: () => fetchJson<Recommendation[]>("/recovery/recommendations"), ...liveQuery });
 export const useRecoveryActions = () => useQuery({ queryKey: queryKeys.actions, queryFn: () => fetchJson<RecoveryAction[]>("/recovery/actions"), ...liveQuery });
 export const usePaymentRequests = () => useQuery({ queryKey: queryKeys.paymentRequests, queryFn: () => fetchJson<ExternalPaymentRequest[]>("/payment-provider/requests"), ...liveQuery });
+export const useBatchRecoveryProof = () => useQuery({ queryKey: queryKeys.batchRecoveryProof, queryFn: () => fetchJson<BatchRecoveryProof>("/reports/batch-recovery"), ...liveQuery });
 export const useProviderMode = () => useQuery({ queryKey: queryKeys.providerMode, queryFn: () => fetchJson<ProviderMode>("/payment-provider/mode"), staleTime: 60_000 });
 export const useSimulationState = () => useQuery({ queryKey: queryKeys.simulationState, queryFn: () => fetchJson<SimState>("/simulation/state"), ...liveQuery });
 export const useSimulationEvents = () => useQuery({ queryKey: queryKeys.simulationEvents, queryFn: () => fetchJson<SimulationEvent[]>("/simulation/events"), ...liveQuery });

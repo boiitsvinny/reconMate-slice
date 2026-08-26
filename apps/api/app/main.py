@@ -8,6 +8,7 @@ from app.api.routes.imports import router as imports_router
 from app.api.routes.payments import router as payments_router
 from app.api.routes.portfolio import router as portfolio_router
 from app.api.routes.recovery import customer_recovery_router, router as recovery_router
+from app.api.routes.reports import router as reports_router
 from app.api.routes.workflow import router as workflow_router
 from app.api.routes.simulation import router as simulation_router
 from app.core.config import get_settings
@@ -34,6 +35,7 @@ app.include_router(imports_router)
 app.include_router(payments_router)
 app.include_router(portfolio_router)
 app.include_router(recovery_router)
+app.include_router(reports_router)
 app.include_router(workflow_router)
 app.include_router(simulation_router)
 app.include_router(customer_recovery_router)
