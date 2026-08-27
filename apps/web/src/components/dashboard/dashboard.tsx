@@ -12,7 +12,7 @@ import { HomeRecoveryQueue } from "./home-recovery-queue";
 import { OperationalIntelligenceHero } from "./operational-intelligence-hero";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
-import { queryKeys, useCustomers, useInvalidateOperationalData, useLatestIntelligenceCycle, usePortfolio, usePortfolioIntelligence, useRecovery, useRecoveryQueue, useSimulationEvents, useSimulationState } from "./queries";
+import { queryKeys, useCustomers, useLatestIntelligenceCycle, usePortfolio, usePortfolioIntelligence, useRecovery, useRecoveryQueue, useSimulationEvents, useSimulationState } from "./queries";
 import { CycleFeedback, ResetFeedback, SimulationControl, SimulationPhase } from "./simulation-control";
 import { AIPriorities } from "./todays-operational-focus";
 
@@ -22,11 +22,14 @@ export function Dashboard() {
   const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback | undefined>();
   const [resetFeedback, setResetFeedback] = useState<ResetFeedback | undefined>();
   const [tickPhase, setTickPhase] = useState<SimulationPhase>("PREPARING");
+  const [reconcileNotice, setReconcileNotice] = useState<string | undefined>();
+  const [reconcilingState, setReconcilingState] = useState(false);
   const [selected, setSelected] = useState<PriorityCase | null>(null);
   const { preview, openPreview, closePreview } = useCasePreview();
   const operationInFlight = useRef(false);
   const tickStartedAt = useRef(0);
   const tickResponseAt = useRef(0);
+  const unresolvedBaselineCycle = useRef<number | null>(null);
   const queryClient = useQueryClient();
   const commandSession = useCommandSession();
   const portfolio = usePortfolio();
@@ -44,7 +47,6 @@ export function Dashboard() {
   const errorMessage = queryError instanceof Error ? queryError.message : queryError ? "Unable to connect to ReconMate." : null;
   const backgroundError = dataReady && Boolean(errorMessage);
   const connectionsHealthy = dataReady && connectedQueries.every((query) => !query.isError);
-  const invalidateOperationalData = useInvalidateOperationalData();
   const refetchCycleQuery = useCallback(async (name: string, queryKey: QueryKey) => {
     const startedAt = performance.now();
     try {
@@ -61,6 +63,7 @@ export function Dashboard() {
       tickStartedAt.current = performance.now();
       tickResponseAt.current = 0;
       setResetFeedback(undefined);
+      setReconcileNotice(undefined);
       setTickPhase("REQUESTING");
       await Promise.all([
         queryKeys.portfolio,
@@ -139,7 +142,9 @@ export function Dashboard() {
         refreshFailed = criticalRefreshes.some((item) => item.status === "rejected");
       }
       setLastTick(result);
+      unresolvedBaselineCycle.current = null;
       setCycleFeedback(buildCycleFeedback(result, refreshFailed));
+      setReconcileNotice(refreshFailed ? "Cycle completed, but one or more dashboard views still require reconciliation." : `Completed cycle ${result.cycle}; persisted portfolio state is reconciled.`);
       setTickPhase(refreshFailed ? "FAILED" : "READY_AGAIN");
       const readyAt = performance.now();
       logFrontendTiming("cycle_ready", {
@@ -161,9 +166,6 @@ export function Dashboard() {
         failed_requests: results.filter((item) => item.status === "rejected").length,
       }));
     },
-    onSettled: (_result, error) => {
-      if (error) setTickPhase("FAILED");
-    },
   });
   const resetDemo = useMutation({
     mutationFn: async () => {
@@ -182,6 +184,8 @@ export function Dashboard() {
       setAuto(false);
       setLastTick(null);
       setCycleFeedback(undefined);
+      setReconcileNotice(undefined);
+      unresolvedBaselineCycle.current = null;
       setSelected(null);
       closePreview();
       commandSession.clearSession();
@@ -204,7 +208,7 @@ export function Dashboard() {
         : { status: "SUCCESS", message: `Demo baseline restored successfully: cycle ${response.state.cycle} / operating date ${response.state.simulation_date}.` });
     },
   });
-  const busy = tick.isPending || resetDemo.isPending;
+  const busy = tick.isPending || resetDemo.isPending || reconcilingState;
   const isUpdating = busy || connectedQueries.some((query) => query.isFetching);
   const mutateTick = tick.mutateAsync;
   const mutateReset = resetDemo.mutateAsync;
@@ -213,23 +217,101 @@ export function Dashboard() {
     if (tickPhase === "PREPARING" && dataReady && intelligence.data) setTickPhase("READY");
   }, [dataReady, intelligence.data, tickPhase]);
 
+  const reconcilePersistedCycle = useCallback(async (baselineCycle: number, pollForLateCompletion: boolean, refreshCurrent = false) => {
+    const attempts = pollForLateCompletion ? 8 : 1;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const response = await apiFetch("/simulation/state", {}, 15_000);
+        if (!response.ok) throw new Error(`Simulation state refresh failed with HTTP ${response.status}.`);
+        const state = await response.json() as SimState;
+        queryClient.setQueryData(queryKeys.simulationState, state);
+        if (state.cycle > baselineCycle || refreshCurrent) {
+          const refreshes = await Promise.allSettled([
+            refetchCycleQuery("portfolio_summary", queryKeys.portfolio),
+            refetchCycleQuery("recovery_summary", queryKeys.recovery),
+            refetchCycleQuery("portfolio_intelligence", queryKeys.portfolioIntelligence),
+            refetchCycleQuery("customers", queryKeys.customers),
+            refetchCycleQuery("simulation_events", queryKeys.simulationEvents),
+            refetchCycleQuery("latest_intelligence_cycle", queryKeys.latestIntelligenceCycle),
+            refetchCycleQuery("recovery_cases", queryKeys.cases),
+            refetchCycleQuery("recovery_recommendations", queryKeys.recommendations),
+          ]);
+          const failed = refreshes.filter((item) => item.status === "rejected").length;
+          unresolvedBaselineCycle.current = null;
+          setLastTick(null);
+          setCycleFeedback(undefined);
+          setTickPhase(failed ? "FAILED" : "READY_AGAIN");
+          setReconcileNotice(failed
+            ? `${state.cycle > baselineCycle ? `Completed cycle ${state.cycle}` : `Current cycle ${state.cycle}`}, but ${failed} dashboard refresh request(s) failed.`
+            : state.cycle > baselineCycle
+              ? `Completed cycle ${state.cycle}; the delayed persisted result was detected and dashboard state was reconciled.`
+              : `Refresh completed: current cycle ${state.cycle} and judge-critical dashboard state were re-fetched successfully.`);
+          logFrontendTiming("cycle_late_reconciliation", { status: failed ? "partial" : "success", baseline_cycle: baselineCycle, persisted_cycle: state.cycle, attempt: attempt + 1, failed_requests: failed });
+          return true;
+        }
+      } catch (error) {
+        logFrontendTiming("cycle_state_reconciliation", { status: "failed", baseline_cycle: baselineCycle, attempt: attempt + 1, error_type: error instanceof Error ? error.name : "UnknownError" });
+      }
+      if (attempt < attempts - 1) await new Promise<void>((resolve) => window.setTimeout(resolve, 5_000));
+    }
+    return false;
+  }, [queryClient, refetchCycleQuery]);
+
   const runTick = useCallback(async () => {
     if (operationInFlight.current) return;
     operationInFlight.current = true;
+    unresolvedBaselineCycle.current = simulation.data?.cycle ?? null;
     const longTimer = window.setTimeout(() => setTickPhase("TAKING_LONGER"), 12_000);
     try {
       await mutateTick();
-    } catch {
-      // Mutation state supplies the existing error presentation.
+    } catch (error) {
+      setAuto(false);
+      const baseline = unresolvedBaselineCycle.current;
+      const message = error instanceof Error ? error.message : "The simulation cycle failed.";
+      const outcomeUncertain = message.includes("did not respond") || message.includes("Unable to reach");
+      if (baseline === null || !outcomeUncertain) {
+        unresolvedBaselineCycle.current = null;
+        setTickPhase("FAILED");
+        setReconcileNotice(message);
+      } else {
+        setReconcilingState(true);
+        setTickPhase("RECONCILING");
+        setReconcileNotice("The original request ended without a confirmed response. Checking persisted cycle state before another run is allowed.");
+        const advanced = await reconcilePersistedCycle(baseline, true);
+        if (advanced) tick.reset();
+        if (!advanced) {
+          setTickPhase("TIMED_OUT");
+          setReconcileNotice("Timed out / refresh required. No later persisted cycle was detected yet; Run now remains locked to prevent an accidental duplicate cycle.");
+        }
+        setReconcilingState(false);
+      }
     } finally {
       window.clearTimeout(longTimer);
       operationInFlight.current = false;
     }
-  }, [mutateTick]);
+  }, [mutateTick, simulation.data?.cycle, reconcilePersistedCycle, tick]);
 
-  const reconcile = useCallback(() => {
-    void invalidateOperationalData();
-  }, [invalidateOperationalData]);
+  const reconcile = useCallback(async () => {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
+    setReconcilingState(true);
+    setTickPhase("RECONCILING");
+    setReconcileNotice("Refreshing persisted simulation and portfolio state...");
+    try {
+      const unresolved = unresolvedBaselineCycle.current;
+      const baseline = unresolved ?? simulation.data?.cycle ?? 0;
+      const advanced = await reconcilePersistedCycle(baseline, false, unresolved === null);
+      if (!advanced) {
+        unresolvedBaselineCycle.current = null;
+        tick.reset();
+        setTickPhase("FAILED");
+        setReconcileNotice("Refresh completed: no newer persisted cycle exists. The previous run is treated as failed, and a deliberate retry is now available.");
+      }
+    } finally {
+      setReconcilingState(false);
+      operationInFlight.current = false;
+    }
+  }, [reconcilePersistedCycle, simulation.data?.cycle, tick]);
 
   const runReset = useCallback(async () => {
     if (operationInFlight.current) return;
@@ -352,7 +434,7 @@ export function Dashboard() {
             {intelligence.data && <HomeRecoveryQueue items={recoveryQueue.queue} intelligence={intelligence.data} transitions={visibleTransitions} events={events.data} onSelect={openPreview} />}
 
             <section aria-label="Portfolio conditions and simulation" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
-              <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} phase={tickPhase} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} onReconcile={reconcile} />
+              <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} runLocked={tickPhase === "TIMED_OUT"} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} phase={tickPhase} reconcileNotice={reconcileNotice} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} onReconcile={() => void reconcile()} />
               <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
             </section>
           </>

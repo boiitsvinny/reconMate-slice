@@ -23,6 +23,9 @@ Its core thesis is simple:
 **Application:**
 https://recon-mate-slice.vercel.app/
 
+**API:**
+https://reconmate-api.onrender.com/
+
 The hosted build contains a deterministic synthetic B2B portfolio designed for reproducible evaluation.
 
 ---
@@ -222,13 +225,7 @@ The report also surfaces:
 
 ## Measurement boundary
 
-ReconMate deliberately distinguishes:
-
-**observed payment recovery**
-
-from
-
-**proven causal recovery created by ReconMate**
+ReconMate reports **observed post-due recovery** from persisted payment records. **No causal attribution is claimed.**
 
 The synthetic sandbox demonstrates recovery operations and reconciliation mechanics. It does not present simulated portfolio outcomes as production merchant revenue or claim unsupported causal attribution.
 

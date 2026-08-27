@@ -189,8 +189,30 @@ class CommandPlanner:
 
         elif intent is CommandIntentType.PREPARE_PAYMENT_REMINDERS:
             analyzed = tools.get_overdue_customers(interpreted.filters.top_n)
-            summary = f"Prepared {len(analyzed)} deterministic reminder drafts for customers with current overdue exposure."
-            actions.extend(self._reminder_proposal(plan_id, item, tools.get_customer(item.entity_id), created_at, tools.simulation_date) for item in analyzed)
+            reminder_actions = [
+                self._reminder_proposal(
+                    plan_id, item, tools.get_customer(item.entity_id), created_at,
+                    tools.simulation_date,
+                    tools.get_recovery_candidates(customer_ids={item.entity_id}, top_n=None),
+                )
+                for item in analyzed
+            ]
+            actions.extend(reminder_actions)
+            eligible = [
+                item for item, action in zip(analyzed, reminder_actions, strict=True)
+                if action.reminder_artifact and action.reminder_artifact.status == "PREPARED_FOR_REVIEW"
+            ]
+            non_sendable = len(reminder_actions) - len(eligible)
+            summary = (
+                f"Prepared {len(eligible)} deterministic payment-reminder draft(s) from current case-level policy. "
+                f"Separated {non_sendable} non-sendable account(s) for transparency."
+            )
+            evidence = QueryEvidence(
+                records_inspected=len(analyzed), records_matched=len(eligible),
+                records_excluded=non_sendable, records_returned=len(eligible),
+                exclusions=[ExclusionCount(reason="Current case-level policy does not permit a payment reminder", count=non_sendable)] if non_sendable else [],
+                ranking=self._ranking_evidence(eligible), latest_cycle=tools.latest_cycle_evidence(eligible),
+            )
 
         if not actions and intent is not CommandIntentType.UNKNOWN and not warnings:
             warnings.append("No current data matched the command filters; no action was invented.")
@@ -422,9 +444,24 @@ class CommandPlanner:
             limitations=["Confirmation creates only an internal workflow action; it does not contact the customer."],
         )
 
-    def _reminder_proposal(self, plan_id: UUID, result: IntelligenceResult, customer, prepared_at: datetime, simulation_date) -> ActionProposal:
+    def _reminder_proposal(
+        self, plan_id: UUID, result: IntelligenceResult, customer, prepared_at: datetime,
+        simulation_date, case_candidates: list[CaseCandidate],
+    ) -> ActionProposal:
         action = ProposalActionType.DRAFT_PAYMENT_REMINDER
-        invoices = [] if customer is None else [invoice for invoice in customer.invoices if invoice.issue_date <= simulation_date and invoice.outstanding_amount > 0 and invoice.due_date < simulation_date]
+        eligible_invoice_ids = {
+            candidate.case.invoice_id or (candidate.case.invoice.id if candidate.case.invoice is not None else None)
+            for candidate in case_candidates
+            if (candidate.case.invoice_id is not None or candidate.case.invoice is not None)
+            and candidate.recommendation.recommended_action is RecommendedAction.SEND_PAYMENT_REMINDER
+        }
+        invoices = [] if customer is None else [
+            invoice for invoice in customer.invoices
+            if invoice.id in eligible_invoice_ids
+            and invoice.issue_date <= simulation_date
+            and invoice.outstanding_amount > 0
+            and invoice.due_date < simulation_date
+        ]
         invoices.sort(key=lambda invoice: (invoice.due_date, invoice.invoice_number))
         invoice_facts = [{"invoice_number": invoice.invoice_number, "outstanding_amount": invoice.outstanding_amount, "due_date": invoice.due_date, "days_overdue": (simulation_date - invoice.due_date).days} for invoice in invoices]
         references = ", ".join(invoice.invoice_number for invoice in invoices)
@@ -432,11 +469,28 @@ class CommandPlanner:
         broken = result.metrics.broken_promise_count > 0
         blocked = result.metrics.active_dispute_count > 0
         deferred = result.metrics.active_promise_count > 0
-        missing_facts = not invoices
-        status = "BLOCKED" if blocked else "DEFERRED" if deferred else "UNAVAILABLE" if missing_facts else "PREPARED_FOR_REVIEW"
-        reason = "An active dispute requires operator review before payment outreach." if blocked else "An active payment promise is still being monitored; a reminder is not appropriate yet." if deferred else "No current overdue invoice facts were available for a grounded reminder." if missing_facts else "Current overdue invoices have no active dispute or active promise blocking an operator-reviewed reminder."
+        recommendations = {candidate.recommendation.recommended_action for candidate in case_candidates}
+        recovery_complete = bool(case_candidates) and recommendations == {RecommendedAction.NO_ACTION_REQUIRED}
+        policy_blocked = bool(case_candidates) and not invoices
+        missing_facts = not invoices and not policy_blocked
+        status = (
+            "BLOCKED_DISPUTE" if blocked else
+            "DEFERRED_ACTIVE_PROMISE" if deferred else
+            "RECOVERY_COMPLETE" if recovery_complete else
+            "NON_SENDABLE_POLICY" if policy_blocked else
+            "UNAVAILABLE" if missing_facts else
+            "PREPARED_FOR_REVIEW"
+        )
+        reason = (
+            "An active dispute requires operator review; this account is not sendable." if blocked else
+            "An active valid payment promise is being monitored; this account is deferred and not sendable." if deferred else
+            "The linked case is paid or closed; recovery is complete and no reminder is permitted." if recovery_complete else
+            "The current case-level recovery recommendation does not permit a payment reminder; this account is not sendable." if policy_blocked else
+            "No current overdue case and invoice facts were available for a grounded reminder." if missing_facts else
+            "Current case-level policy permits an operator-reviewed payment reminder."
+        )
         tone = "Firm factual follow-up" if broken else "Professional payment-status follow-up"
-        body = None if blocked or deferred or missing_facts else (
+        body = None if status != "PREPARED_FOR_REVIEW" else (
             f"Hello {result.entity_name},\n\nOur records show {references} with a total outstanding balance of INR {total:.2f}. "
             f"The oldest referenced invoice is {max((simulation_date - invoice.due_date).days for invoice in invoices)} days overdue. "
             + ("A previously recorded payment promise has passed without matching payment evidence. " if broken else "")
@@ -451,7 +505,7 @@ class CommandPlanner:
                 f"and {result.metrics.overdue_exposure} in overdue exposure."
             ),
             priority=result.level, risk_level=result.level, execution_mode=ExecutionMode.PREPARE,
-            executable=True, requires_confirmation=False,
+            executable=status == "PREPARED_FOR_REVIEW", requires_confirmation=False,
             reminder_artifact={"status": status, "customer_name": result.entity_name, "account_reference": customer.account_reference if customer else "", "invoices": invoice_facts, "total_outstanding": total, "promise_state": "BROKEN" if broken else "ACTIVE" if deferred else "NONE", "dispute_state": "ACTIVE" if blocked else "NONE", "intended_channel": "Operator-selected channel", "purpose": "Request payment status and expected resolution", "tone": tone, "prepared_at": prepared_at, "body": body, "reason": reason},
             limitations=["Draft preparation does not send email, SMS, WhatsApp, or a payment link."],
         )

@@ -10,17 +10,19 @@ type Props = {
   interval: number;
   busy: boolean;
   resetting: boolean;
+  runLocked: boolean;
   auto: boolean;
   feedback?: CycleFeedback;
   resetFeedback?: ResetFeedback;
   phase?: SimulationPhase;
+  reconcileNotice?: string;
   onAutoChange: (enabled: boolean) => void;
   onTick: () => void;
   onReset: () => void;
   onReconcile: () => void;
 };
 
-export type SimulationPhase = "PREPARING" | "READY" | "REQUESTING" | "RECONCILING" | "READY_AGAIN" | "TAKING_LONGER" | "FAILED";
+export type SimulationPhase = "PREPARING" | "READY" | "REQUESTING" | "RECONCILING" | "READY_AGAIN" | "TAKING_LONGER" | "FAILED" | "TIMED_OUT";
 
 export type CycleFeedback = {
   status: "MATERIAL_CHANGE" | "NO_MATERIAL_CHANGE" | "REFRESH_FAILED";
@@ -46,9 +48,10 @@ const phaseLabel = {
   READY_AGAIN: "Cycle reconciled. Ready for the next operating cycle.",
   TAKING_LONGER: "This cycle is taking longer than usual. The backend may still be finishing safely.",
   FAILED: "The cycle did not complete. Review the error and retry safely.",
+  TIMED_OUT: "Timed out / refresh required. Reconcile persisted state before retrying.",
 };
 
-export function SimulationControl({ cycle, simulationDate, interval, busy, resetting, auto, feedback, resetFeedback, phase, onAutoChange, onTick, onReset, onReconcile }: Props) {
+export function SimulationControl({ cycle, simulationDate, interval, busy, resetting, runLocked, auto, feedback, resetFeedback, phase, reconcileNotice, onAutoChange, onTick, onReset, onReconcile }: Props) {
   const [remaining, setRemaining] = useState(interval);
 
   useEffect(() => {
@@ -86,8 +89,8 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
       </div>
       <CycleReadiness phase={phase ?? "READY"} resetting={resetting} />
       <div className="mt-4 flex flex-wrap gap-2 pl-2">
-        <button disabled={busy || phase === "PREPARING"} onClick={() => onAutoChange(!auto)} className={cx(buttonStyles.secondary, "max-sm:flex-1")}>{auto ? "Pause" : "Start / Resume"}</button>
-        <button disabled={busy || phase === "PREPARING"} onClick={onTick} className={cx(buttonStyles.primary, "max-sm:flex-1")}>{busy && !resetting ? phase === "RECONCILING" ? "Reconciling..." : "Running..." : "Run now"}</button>
+        <button disabled={busy || runLocked || phase === "PREPARING"} onClick={() => onAutoChange(!auto)} className={cx(buttonStyles.secondary, "max-sm:flex-1")}>{auto ? "Pause" : "Start / Resume"}</button>
+        <button disabled={busy || runLocked || phase === "PREPARING"} onClick={onTick} className={cx(buttonStyles.primary, "max-sm:flex-1")}>{busy && !resetting ? phase === "RECONCILING" ? "Reconciling..." : "Running..." : "Run now"}</button>
         <button
           disabled={busy}
           onClick={() => {
@@ -98,6 +101,7 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
           {resetting ? "Restoring baseline..." : "Reset demo"}
         </button>
       </div>
+      {reconcileNotice && <div className={cx("mt-4 rounded-xl border px-3 py-2.5 text-[11px] font-medium leading-5", phase === "FAILED" || phase === "TIMED_OUT" ? "border-amber-300/15 bg-amber-300/[.04] text-amber-100" : "border-sky-300/12 bg-sky-300/[.035] text-sky-100")} role="status" aria-live="polite">{reconcileNotice}</div>}
       {(busy || phase === "PREPARING") && <div className="mt-4 border-t border-sky-300/10 pl-2 pt-3" role="status" aria-live="polite"><p className="text-[11px] font-semibold text-sky-200">{resetting ? "Restoring the seeded portfolio and refreshing every operational view..." : phase ? phaseLabel[phase] : "Persisting facts and synchronizing dashboard intelligence..."}</p>{!resetting && phase === "TAKING_LONGER" && <button type="button" onClick={onReconcile} className="mt-2 text-[11px] font-semibold text-sky-100 underline decoration-sky-300/40 underline-offset-4">Refresh current state</button>}</div>}
       {!busy && feedback && (
         <div className={cx("live-enter mt-4 border-t pl-2 pt-3", feedback.status === "REFRESH_FAILED" ? "border-amber-300/15" : "border-emerald-300/10")} role="status" aria-live="polite">
@@ -130,6 +134,7 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
         </div>
       )}
       {!busy && feedback?.status === "REFRESH_FAILED" && <button type="button" onClick={onReconcile} className={`${buttonStyles.secondary} mt-3 ml-2`}>Reconcile dashboard state</button>}
+      {!busy && phase === "TIMED_OUT" && <button type="button" onClick={onReconcile} className={`${buttonStyles.warning} mt-3 ml-2`}>Refresh current state</button>}
     </section>
   );
 }
@@ -140,9 +145,9 @@ function CycleReadiness({ phase, resetting }: { phase: SimulationPhase; resettin
   return (
     <div className="mt-3 pl-2" aria-label={phaseLabel[phase]}>
       <div className="grid grid-cols-4 gap-1" aria-hidden="true">
-        {stages.map((stage, index) => <span key={stage} className={cx("h-1 rounded-full transition-colors", index < position ? "bg-sky-300" : phase === "FAILED" && index === 0 ? "bg-rose-300" : "bg-white/[.07]")} />)}
+        {stages.map((stage, index) => <span key={stage} className={cx("h-1 rounded-full transition-colors", index < position ? "bg-sky-300" : (phase === "FAILED" || phase === "TIMED_OUT") && index === 0 ? "bg-rose-300" : "bg-white/[.07]")} />)}
       </div>
-      <div className="mt-2 flex items-center justify-between gap-3 text-[9px] font-semibold uppercase tracking-[.08em]"><span className={phase === "FAILED" ? "text-rose-200" : "text-sky-200"}>{phase === "FAILED" ? "Cycle failed safely" : phaseLabel[phase]}</span><span className="shrink-0 text-slate-600">Stage status</span></div>
+      <div className="mt-2 flex items-center justify-between gap-3 text-[9px] font-semibold uppercase tracking-[.08em]"><span className={phase === "FAILED" || phase === "TIMED_OUT" ? "text-rose-200" : "text-sky-200"}>{phase === "FAILED" ? "Cycle failed safely" : phaseLabel[phase]}</span><span className="shrink-0 text-slate-600">Stage status</span></div>
     </div>
   );
 }

@@ -51,12 +51,12 @@ function BatchRecoveryProofPanel({ batchRecovery: proof, casesById, onSelectCase
     <div className="grid gap-px bg-white/[.06] lg:grid-cols-[1fr_auto_1fr_auto_1fr_.8fr] lg:items-stretch">
       <ProofAmount label="Starting overdue exposure" value={proof.reconciliation.starting_overdue_exposure} detail="Current balance plus qualifying observed payments" meta={proof.metric_metadata.starting_overdue_exposure} />
       <span className="hidden place-items-center bg-[#08111f] px-1 text-xl text-sky-300 lg:grid">−</span>
-      <ProofAmount label="Observed recovery" value={proof.reconciliation.observed_recovery} detail={`${proof.reconciliation.qualifying_payment_count} persisted payment record(s)`} tone="emerald" meta={proof.metric_metadata.observed_recovery} />
+      <ProofAmount label="Observed post-due recovery" value={proof.reconciliation.observed_recovery} detail={`${proof.reconciliation.qualifying_payment_count} persisted payment record(s)`} tone="emerald" meta={proof.metric_metadata.observed_recovery} />
       <span className="hidden place-items-center bg-[#08111f] px-1 text-xl text-sky-300 lg:grid">=</span>
       <ProofAmount label="Remaining overdue" value={proof.reconciliation.remaining_overdue_exposure} detail={`${proof.reconciliation.remaining_open_overdue_invoice_count} invoice(s) remain open`} tone="rose" meta={proof.metric_metadata.remaining_overdue_exposure} />
-      <ProofAmount label="Observed recovery rate" value={`${proof.reconciliation.recovery_rate}%`} detail={proof.reconciliation.equation_holds ? "Reconciliation verified" : "Reconciliation exception"} tone={proof.reconciliation.equation_holds ? "emerald" : "rose"} money={false} meta={proof.metric_metadata.recovery_rate} />
+      <ProofAmount label="Observed post-due recovery rate" value={`${proof.reconciliation.recovery_rate}%`} detail={proof.reconciliation.equation_holds ? "Reconciliation verified" : "Reconciliation exception"} tone={proof.reconciliation.equation_holds ? "emerald" : "rose"} money={false} meta={proof.metric_metadata.recovery_rate} />
     </div>
-    <div className="border-b border-white/[.06] bg-black/10 px-5 py-3 sm:px-6"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Measurement boundary</p><p className="mt-1 text-[11px] leading-5 text-slate-400">{proof.reconciliation.measurement_note}</p></div>
+    <div className="border-b border-white/[.06] bg-black/10 px-5 py-3 sm:px-6"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-amber-100">No causal attribution claimed</p><p className="mt-1 text-[11px] leading-5 text-slate-400">{proof.reconciliation.measurement_note}</p></div>
     <div className="grid gap-px bg-white/[.06] sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
       <ReportMetric label="Accounts fully recovered" value={String(proof.reconciliation.fully_recovered_account_count)} detail="Customers · overdue cohort" tone="emerald" />
       <ReportMetric label="Accounts partially recovered" value={String(proof.reconciliation.partially_recovered_account_count)} detail="Customers · overdue cohort" tone="emerald" />

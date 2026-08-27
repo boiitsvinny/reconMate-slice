@@ -785,7 +785,16 @@ def test_changed_recommendation_allows_a_new_action_proposal() -> None:
 
 
 def test_reminder_command_prepares_draft_without_sending(monkeypatch) -> None:
-    client = _client(monkeypatch)
+    class EligibleReminderTools(FakeCommandTools):
+        def get_recovery_candidates(self, levels=None, customer_ids=None, top_n=None):
+            candidate = self.candidate
+            recommendation = candidate.recommendation.model_copy(update={
+                "recommended_action": RecommendedAction.SEND_PAYMENT_REMINDER,
+                "human_approval_required": False,
+            })
+            return [CaseCandidate(candidate.case, candidate.intelligence, recommendation, candidate.risk_level)]
+
+    client = _client(monkeypatch, EligibleReminderTools)
     response = client.post("/commands", json={"command": "Draft payment reminders for overdue customers"})
     app.dependency_overrides.clear()
     body = response.json()
@@ -810,8 +819,10 @@ def test_reminder_artifact_is_blocked_by_current_dispute(monkeypatch) -> None:
     response = client.post("/commands", json={"command": "Draft payment reminders for overdue customers"})
     app.dependency_overrides.clear()
     artifact = response.json()["plan"]["proposed_actions"][0]["reminder_artifact"]
-    assert artifact["status"] == "BLOCKED"
+    assert artifact["status"] == "BLOCKED_DISPUTE"
     assert artifact["body"] is None
+    assert response.json()["query_evidence"]["records_matched"] == 0
+    assert response.json()["outcomes"][0]["status"] == "NOT_EXECUTABLE"
 
 
 def test_reminder_artifact_is_deferred_by_active_promise(monkeypatch) -> None:
@@ -824,7 +835,35 @@ def test_reminder_artifact_is_deferred_by_active_promise(monkeypatch) -> None:
     response = client.post("/commands", json={"command": "Draft payment reminders for overdue customers"})
     app.dependency_overrides.clear()
     artifact = response.json()["plan"]["proposed_actions"][0]["reminder_artifact"]
-    assert artifact["status"] == "DEFERRED"
+    assert artifact["status"] == "DEFERRED_ACTIVE_PROMISE"
+    assert artifact["body"] is None
+
+
+def test_reminder_artifact_excludes_escalation_only_case(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    response = client.post("/commands", json={"command": "Draft payment reminders for overdue customers"})
+    app.dependency_overrides.clear()
+    body = response.json()
+    assert body["plan"]["proposed_actions"][0]["reminder_artifact"]["status"] == "NON_SENDABLE_POLICY"
+    assert body["plan"]["proposed_actions"][0]["reminder_artifact"]["body"] is None
+    assert body["query_evidence"]["records_matched"] == 0
+
+
+def test_reminder_artifact_excludes_paid_or_closed_case(monkeypatch) -> None:
+    class ClosedCaseTools(FakeCommandTools):
+        def get_recovery_candidates(self, levels=None, customer_ids=None, top_n=None):
+            candidate = self.candidate
+            recommendation = candidate.recommendation.model_copy(update={
+                "recommended_action": RecommendedAction.NO_ACTION_REQUIRED,
+                "human_approval_required": False,
+            })
+            return [CaseCandidate(candidate.case, candidate.intelligence, recommendation, candidate.risk_level)]
+
+    client = _client(monkeypatch, ClosedCaseTools)
+    response = client.post("/commands", json={"command": "Draft payment reminders for overdue customers"})
+    app.dependency_overrides.clear()
+    artifact = response.json()["plan"]["proposed_actions"][0]["reminder_artifact"]
+    assert artifact["status"] == "RECOVERY_COMPLETE"
     assert artifact["body"] is None
 
 

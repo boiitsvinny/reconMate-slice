@@ -46,6 +46,7 @@ export function CustomerPreview({ preview, onClose, onViewMore }: { preview: Cas
 
   if (!preview) return null;
   const { item } = preview;
+  const recoveryComplete = item.recommendedAction === "NO_ACTION_REQUIRED" || item.exposure <= 0 || item.state === "RESOLVED";
   const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
   const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
   const width = Math.min(320, viewportWidth - 24);
@@ -77,8 +78,8 @@ export function CustomerPreview({ preview, onClose, onViewMore }: { preview: Cas
         </div>
       </div>
       <ul className="mt-3 space-y-1.5 text-xs leading-5 text-slate-400">
-        <li className="font-medium text-sky-200">Current recommended action: {item.currentAction.replaceAll("_", " ")}</li>
-        <li>Case workflow recommendation: {item.recommendedAction.replaceAll("_", " ")}</li>
+        <li className={recoveryComplete ? "font-semibold text-emerald-200" : "font-medium text-sky-200"}>Current case decision: {recoveryComplete ? "RECOVERY COMPLETE / NO ACTION REQUIRED" : item.recommendedAction.replaceAll("_", " ")}</li>
+        <li>Customer-level intelligence: {item.currentAction.replaceAll("_", " ")}</li>
         <li>{item.daysOverdue > 0 ? `${item.daysOverdue} days overdue` : "Current invoice exposure"}</li>
         <li>{item.promiseSignal}</li>
         <li className={item.allowed ? "text-emerald-300" : "text-amber-200"}>{item.reason}</li>

@@ -56,6 +56,13 @@ export function CommandResultView({ command, result, customer, customerCases = [
   });
   const isUnknown = result.interpreted_intent.intent === "UNKNOWN";
   const showOperationalPlan = result.plan.execution_mode !== "READ_ONLY";
+  const reminderPlan = result.interpreted_intent.intent === "PREPARE_PAYMENT_REMINDERS";
+  const nonSendableProposals = reminderPlan
+    ? result.plan.proposed_actions.filter((proposal) => proposal.reminder_artifact?.status !== "PREPARED_FOR_REVIEW")
+    : [];
+  const preparedProposals = reminderPlan
+    ? result.plan.proposed_actions.filter((proposal) => proposal.reminder_artifact?.status === "PREPARED_FOR_REVIEW")
+    : result.plan.proposed_actions;
   const selectedCount = selected.size;
   const openTarget = (targetType: string, targetId: string) => {
     const opened = onOpenTarget?.(targetType, targetId) ?? false;
@@ -108,13 +115,13 @@ export function CommandResultView({ command, result, customer, customerCases = [
       )}
 
       {showOperationalPlan && <Panel className="overflow-hidden border-sky-300/15">
-        <SectionHeader eyebrow="Prepared command output" title={`Bounded work plan · ${result.plan.proposed_actions.length} proposal${result.plan.proposed_actions.length === 1 ? "" : "s"}`} detail={result.plan.proposed_actions.length > 4 ? "Ordered results are bounded inside this panel; scroll to review every proposal." : `Plan ${result.plan.plan_id.slice(0, 8)} / ${label(result.plan.execution_mode)}`} prominent action={confirmationIds.length > 0 && !reviewing ? <button type="button" onClick={() => setReviewing(true)} className={buttonStyles.warning}>Review {confirmationIds.length} action{confirmationIds.length === 1 ? "" : "s"}</button> : undefined} />
+        <SectionHeader eyebrow="Prepared command output" title={reminderPlan ? `${preparedProposals.length} sendable reminder draft${preparedProposals.length === 1 ? "" : "s"}` : `Bounded work plan · ${result.plan.proposed_actions.length} proposal${result.plan.proposed_actions.length === 1 ? "" : "s"}`} detail={reminderPlan ? `${nonSendableProposals.length} account${nonSendableProposals.length === 1 ? "" : "s"} separated below because current case-level policy does not permit a reminder.` : result.plan.proposed_actions.length > 4 ? "Ordered results are bounded inside this panel; scroll to review every proposal." : `Plan ${result.plan.plan_id.slice(0, 8)} / ${label(result.plan.execution_mode)}`} prominent action={confirmationIds.length > 0 && !reviewing ? <button type="button" onClick={() => setReviewing(true)} className={buttonStyles.warning}>Review {confirmationIds.length} action{confirmationIds.length === 1 ? "" : "s"}</button> : undefined} />
         {!result.plan.proposed_actions.length ? (
           <div className="p-10 text-center"><p className="text-sm font-medium text-slate-300">No matching action proposals</p><p className="mt-2 text-xs text-slate-500">No current record matched the interpreted command filters.</p></div>
         ) : (
           <div className="operational-scrollbar max-h-[42rem] overflow-y-auto overscroll-contain p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-300/35 lg:p-5" role="region" aria-label={`${result.plan.proposed_actions.length} operational proposals`} tabIndex={0}>
-            <div className="grid gap-4 lg:grid-cols-2">
-              {result.plan.proposed_actions.map((proposal) => (
+            {preparedProposals.length > 0 && <div className="grid gap-4 lg:grid-cols-2">
+              {preparedProposals.map((proposal) => (
                 <ActionProposalCard key={proposal.proposal_id} proposal={proposal} outcome={outcomes.get(proposal.proposal_id)} targetName={entityNames.get(proposal.target_id)} selected={selected.has(proposal.proposal_id)} onSelectedChange={reviewing && proposal.requires_confirmation ? (checked) => setSelected((current) => {
                   const next = new Set(current);
                   if (checked) next.add(proposal.proposal_id); else next.delete(proposal.proposal_id);
@@ -124,7 +131,17 @@ export function CommandResultView({ command, result, customer, customerCases = [
                   setTargetNotice(opened ? null : "This result has no active recovery case workspace. Its current intelligence remains available below.");
                 } : undefined} />
               ))}
-            </div>
+            </div>}
+            {reminderPlan && nonSendableProposals.length > 0 && <section className={preparedProposals.length ? "mt-6 border-t border-white/[.07] pt-5" : ""}>
+              <p className="text-[10px] font-bold uppercase tracking-[.14em] text-amber-200">Non-sendable accounts</p>
+              <p className="mt-1 text-xs leading-5 text-slate-400">Shown for policy transparency only. These are not payment-reminder matches and no usable draft was prepared.</p>
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                {nonSendableProposals.map((proposal) => <ActionProposalCard key={proposal.proposal_id} proposal={proposal} outcome={outcomes.get(proposal.proposal_id)} targetName={entityNames.get(proposal.target_id)} onOpenTarget={onOpenTarget && proposal.target_type === "CUSTOMER" ? () => {
+                  const opened = onOpenTarget(proposal.target_type, proposal.target_id);
+                  setTargetNotice(opened ? null : "This result has no active recovery case workspace. Its current intelligence remains available below.");
+                } : undefined} />)}
+              </div>
+            </section>}
           </div>
         )}
         {targetNotice && <p className="border-t border-amber-300/15 bg-amber-300/[.04] px-5 py-3 text-xs text-amber-100" role="status">{targetNotice}</p>}
@@ -204,9 +221,10 @@ function LatestCyclePanel({ result }: { result: CommandResult }) {
 
 function RankedEvidencePanel({ result, onOpenTarget }: { result: CommandResult; onOpenTarget?: (targetType: string, targetId: string) => void }) {
   const evidence = result.query_evidence;
+  const reminderPlan = result.interpreted_intent.intent === "PREPARE_PAYMENT_REMINDERS";
   const names = new Map(result.analyzed_entities.map((entity) => [entity.entity_id, entity.entity_name]));
-  if (!evidence.ranking.length) return <Panel className="overflow-hidden"><SectionHeader eyebrow="Query outcome" title={evidence.records_matched === 0 ? "No records matched the structured query" : `${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} counted`} detail={evidence.records_matched === 0 ? `ReconMate inspected ${evidence.records_inspected} records and applied every condition shown above.` : "This count comes from current operational records; no ranked rows were requested."} prominent /></Panel>;
-  return <Panel className="overflow-hidden"><SectionHeader eyebrow="What matched" title="Returned records and ranking evidence" detail={`${evidence.records_returned} of ${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} returned in the structured query order`} prominent /><div className="operational-scrollbar max-h-[46rem] divide-y divide-white/[.06] overflow-y-auto overscroll-contain" role="region" aria-label="Returned ranking evidence" tabIndex={0}>{evidence.ranking.map((item) => <article key={item.entity_id} className="interactive-row p-5 sm:p-6"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-[11px] font-bold uppercase tracking-[.12em] text-sky-300">Rank #{item.rank}</p><h3 className="mt-1 text-lg font-semibold text-white">{names.get(item.entity_id) ?? item.entity_id}</h3></div><div className="flex flex-wrap items-center gap-2"><StatusPill tone={tone(item.severity)}>{item.severity} risk</StatusPill><span className="text-[13px] font-medium text-slate-300">Current Intelligence Score {item.score}/100{item.raw_score !== item.score ? ` · raw ${item.raw_score}` : ""}</span></div></div><div className="mt-5 grid gap-5 lg:grid-cols-3"><AnalysisList title="Why it matched" items={item.facts} empty="No material factual factor was recorded." /><AnalysisList title="Actionability and workflow state" items={[...(item.blocker ? [item.blocker] : ["No current action blocker detected"]), ...(item.stored_workflow_priority ? [`Stored workflow priority: ${label(item.stored_workflow_priority)}`] : [])]} empty="" /><div><p className="text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">Current recommended action</p><p className="mt-2 text-[13px] font-medium leading-6 text-slate-200">{item.decision}</p>{onOpenTarget && <button type="button" onClick={() => onOpenTarget(result.interpreted_intent.query.entity === "RECOVERY_CASES" ? "RECOVERY_CASE" : "CUSTOMER", item.entity_id)} className="mt-3 text-xs font-semibold text-sky-300 hover:text-sky-200">Open supporting record →</button>}</div></div></article>)}</div></Panel>;
+  if (!evidence.ranking.length) return <Panel className="overflow-hidden"><SectionHeader eyebrow="Query outcome" title={reminderPlan ? "No accounts are currently eligible for a payment reminder" : evidence.records_matched === 0 ? "No records matched the structured query" : `${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} counted`} detail={reminderPlan ? `ReconMate inspected ${evidence.records_inspected} overdue account${evidence.records_inspected === 1 ? "" : "s"}; non-sendable reasons remain visible in the prepared-output panel.` : evidence.records_matched === 0 ? `ReconMate inspected ${evidence.records_inspected} records and applied every condition shown above.` : "This count comes from current operational records; no ranked rows were requested."} prominent /></Panel>;
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow={reminderPlan ? "Eligible reminder cohort" : "What matched"} title={reminderPlan ? "Accounts permitted for reminder preparation" : "Returned records and ranking evidence"} detail={reminderPlan ? `${evidence.records_returned} account${evidence.records_returned === 1 ? "" : "s"} passed current case-level reminder policy.` : `${evidence.records_returned} of ${evidence.records_matched} matching record${evidence.records_matched === 1 ? "" : "s"} returned in the structured query order`} prominent /><div className="operational-scrollbar max-h-[46rem] divide-y divide-white/[.06] overflow-y-auto overscroll-contain" role="region" aria-label="Returned ranking evidence" tabIndex={0}>{evidence.ranking.map((item) => <article key={item.entity_id} className="interactive-row p-5 sm:p-6"><div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"><div><p className="text-[11px] font-bold uppercase tracking-[.12em] text-sky-300">Rank #{item.rank}</p><h3 className="mt-1 text-lg font-semibold text-white">{names.get(item.entity_id) ?? item.entity_id}</h3></div><div className="flex flex-wrap items-center gap-2"><StatusPill tone={tone(item.severity)}>{item.severity} risk</StatusPill><span className="text-[13px] font-medium text-slate-300">Current Intelligence Score {item.score}/100{item.raw_score !== item.score ? ` · raw ${item.raw_score}` : ""}</span></div></div><div className="mt-5 grid gap-5 lg:grid-cols-3"><AnalysisList title={reminderPlan ? "Why it is eligible" : "Why it matched"} items={item.facts} empty="No material factual factor was recorded." /><AnalysisList title="Actionability and workflow state" items={[...(item.blocker ? [item.blocker] : ["No current action blocker detected"]), ...(item.stored_workflow_priority ? [`Stored workflow priority: ${label(item.stored_workflow_priority)}`] : [])]} empty="" /><div><p className="text-[11px] font-bold uppercase tracking-[.12em] text-slate-400">Current recommended action</p><p className="mt-2 text-[13px] font-medium leading-6 text-slate-200">{item.decision}</p>{onOpenTarget && <button type="button" onClick={() => onOpenTarget(result.interpreted_intent.query.entity === "RECOVERY_CASES" ? "RECOVERY_CASE" : "CUSTOMER", item.entity_id)} className="mt-3 text-xs font-semibold text-sky-300 hover:text-sky-200">Open supporting record →</button>}</div></div></article>)}</div></Panel>;
 }
 
 function QueryRow({ term, value }: { term: string; value: string }) {

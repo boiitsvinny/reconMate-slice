@@ -168,7 +168,7 @@ export type ActionProposal = {
 };
 
 export type ReminderArtifact = {
-  status: "PREPARED_FOR_REVIEW" | "BLOCKED" | "DEFERRED" | "UNAVAILABLE";
+  status: "PREPARED_FOR_REVIEW" | "BLOCKED_DISPUTE" | "DEFERRED_ACTIVE_PROMISE" | "RECOVERY_COMPLETE" | "NON_SENDABLE_POLICY" | "UNAVAILABLE";
   customer_name: string;
   account_reference: string;
   invoices: { invoice_number: string; outstanding_amount: string; due_date: string; days_overdue: number }[];
