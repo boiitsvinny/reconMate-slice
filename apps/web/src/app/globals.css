@@ -42,6 +42,13 @@ main { background: rgba(5, 8, 18, 0.52); }
 .workspace-analyze { background: radial-gradient(circle at 82% 12%, rgba(56, 189, 248, .07), transparent 30%), rgba(5, 8, 18, .58); }
 .workspace-history { background: linear-gradient(180deg, rgba(8, 13, 23, .9), rgba(5, 8, 18, .76)); font-variant-numeric: tabular-nums; }
 .workspace-reports .workspace-panel { box-shadow: 0 12px 34px rgba(0, 0, 0, .18); }
+.workspace-panel { transition: border-color 180ms ease, box-shadow 180ms ease; }
+.workspace-panel:hover { border-color: rgba(125, 211, 252, .14); box-shadow: 0 20px 52px rgba(0, 0, 0, .25); }
+.interactive-card { transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease; }
+.interactive-card:hover { border-color: rgba(125, 211, 252, .2); background-color: rgba(255, 255, 255, .035); box-shadow: 0 12px 28px rgba(0, 0, 0, .16); transform: translateY(-1px); }
+.proof-hero { background: radial-gradient(circle at 18% 0%, rgba(56, 189, 248, .07), transparent 42%), rgba(8, 17, 31, .97); }
+.proof-amount { position: relative; overflow: hidden; }
+.proof-amount::after { position: absolute; inset: auto 1.25rem 0; height: 1px; content: ""; background: linear-gradient(90deg, rgba(125, 211, 252, .5), transparent); opacity: .45; }
 .workspace-analyze .workspace-panel { border-color: rgba(125, 211, 252, .12); }
 .workspace-history .workspace-panel { border-color: rgba(148, 163, 184, .16); border-radius: 14px; box-shadow: 0 12px 28px rgba(0, 0, 0, .18); }
 .decision-critical { text-shadow: 0 0 24px currentColor; }
@@ -63,4 +70,6 @@ main { background: rgba(5, 8, 18, 0.52); }
   :root, body::before { animation: none; }
   .interactive-row { transition: none; }
   .interactive-row:hover { transform: none; }
+  .workspace-panel, .interactive-card { transition: none; }
+  .interactive-card:hover { transform: none; }
 }

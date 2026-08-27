@@ -63,9 +63,9 @@ export function StatusPill({ children, tone = "sky" }: { children: ReactNode; to
 }
 
 export const buttonStyles = {
-  primary: "rounded-lg bg-sky-300 px-3.5 py-2 text-xs font-bold text-slate-950 transition hover:bg-sky-200 disabled:cursor-not-allowed disabled:opacity-45",
-  secondary: "rounded-lg border border-white/10 bg-white/[.03] px-3.5 py-2 text-xs font-semibold text-slate-200 transition hover:border-sky-300/35 hover:text-white disabled:cursor-not-allowed disabled:opacity-45",
-  danger: "rounded-lg border border-rose-300/25 bg-rose-400/[.06] px-3 py-1.5 text-xs font-bold text-rose-100 transition hover:border-rose-200/45 disabled:cursor-not-allowed disabled:opacity-45",
-  warning: "rounded-lg border border-amber-300/25 bg-amber-300/[.06] px-3 py-1.5 text-xs font-bold text-amber-100 transition hover:border-amber-200/45 disabled:cursor-not-allowed disabled:opacity-45",
-  success: "rounded-lg bg-emerald-300 px-3 py-1.5 text-xs font-bold text-emerald-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-45",
+  primary: "rounded-lg bg-sky-300 px-3.5 py-2 text-xs font-bold text-slate-950 transition duration-150 hover:bg-sky-200 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 disabled:active:translate-y-0",
+  secondary: "rounded-lg border border-white/10 bg-white/[.03] px-3.5 py-2 text-xs font-semibold text-slate-200 transition duration-150 hover:border-sky-300/35 hover:text-white active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 disabled:active:translate-y-0",
+  danger: "rounded-lg border border-rose-300/25 bg-rose-400/[.06] px-3 py-1.5 text-xs font-bold text-rose-100 transition duration-150 hover:border-rose-200/45 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 disabled:active:translate-y-0",
+  warning: "rounded-lg border border-amber-300/25 bg-amber-300/[.06] px-3 py-1.5 text-xs font-bold text-amber-100 transition duration-150 hover:border-amber-200/45 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 disabled:active:translate-y-0",
+  success: "rounded-lg bg-emerald-300 px-3 py-1.5 text-xs font-bold text-emerald-950 transition duration-150 hover:bg-emerald-200 active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 disabled:active:translate-y-0",
 };

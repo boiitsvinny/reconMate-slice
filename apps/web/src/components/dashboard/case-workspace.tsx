@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api";
+import { evidenceTimestampMeaning, formatTimestamp, labeledTimestamp } from "@/lib/time";
 import { useCommandSession } from "@/components/intelligence/command-session";
 import { ReminderArtifact } from "@/components/intelligence/reminder-artifact";
 import { PaymentRequestPanel } from "./payment-request-panel";
@@ -22,7 +23,7 @@ function actionName(action: { action_type: string; recommended_action: string | 
 
 function executedActionExplanation(action: { executed_at: string | null; recommendation_context: { workflow_effect?: string } | null }) {
   const executedAt = action.executed_at;
-  const timestamp = executedAt ? ` at ${new Date(executedAt).toLocaleString()}` : "";
+  const timestamp = executedAt ? ` at ${formatTimestamp(executedAt)}` : "";
   const boundary = action.recommendation_context?.workflow_effect;
   return `ReconMate recorded this internal workflow step as executed${timestamp}.${boundary ? ` ${boundary}` : ""}`;
 }
@@ -155,7 +156,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               <Card label="Invoice status" value={workspace.invoice?.status ?? "-"} />
               <Card label="Recovery state" value={label(workspace.workflow.recovery_state)} />
             </section>
-            <section className="rounded-2xl border border-sky-300/25 bg-sky-400/[.07] p-5 shadow-[0_16px_35px_rgba(14,165,233,.07)]">
+            <section className="case-primary-card rounded-2xl border border-sky-300/25 bg-sky-400/[.07] p-5 shadow-[0_16px_35px_rgba(14,165,233,.07)]">
               <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">Current customer intelligence</p>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
                 <h3 className="text-xl font-semibold tracking-[-.025em] text-white">{workspace.intelligence.recommendation.title}</h3>
@@ -236,9 +237,9 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
                       </div>
                       <h4 className="mt-2 text-base font-semibold text-white">{actionName(latest)}</h4>
                       <p className="mt-2 text-xs leading-5 text-slate-400">This is an internal recovery workflow record. Its current status is {label(latest.status).toLowerCase()}.</p>
-                      <p className="mt-1 text-[11px] text-slate-500">Created {latest.created_at ? new Date(latest.created_at).toLocaleString() : "in the current operator session"} / approval state {label(latest.approval_status)}</p>
+                      <p className="mt-1 text-[11px] text-slate-500">{latest.created_at ? labeledTimestamp(latest.created_at, "recorded") : "Recorded in the current operator session"} / approval state {label(latest.approval_status)}</p>
                       {latest.decision_reason && <p className="mt-2 text-xs leading-5 text-slate-400">Operator reason: {latest.decision_reason}</p>}
-                      {latest.decision_at && <p className="mt-1 text-[11px] text-slate-500">Decision recorded {new Date(latest.decision_at).toLocaleString()}{latest.decision_by ? ` by ${latest.decision_by}` : ""}.</p>}
+                      {latest.decision_at && <p className="mt-1 text-[11px] text-slate-500">{labeledTimestamp(latest.decision_at, "recorded")}{latest.decision_by ? ` by ${latest.decision_by}` : ""}.</p>}
                     </div>
                   )}
                   <div className="mt-4 flex flex-wrap gap-2">
@@ -264,29 +265,64 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
 
 function CommunicationFactReview({ workspace, busy, request }: { workspace: Workspace; busy: boolean; request: (url: string, body: Record<string, unknown>) => Promise<boolean> }) {
   const messages = workspace.communications.filter((item) => item.direction === "INBOUND").slice(0, 3);
-  const analyze = (communicationId: string) => request(`/communications/${communicationId}/analyze`, {});
-  const decide = (communicationId: string, analysisId: string, candidateId: string, decision: "ACCEPT" | "REJECT") => {
+  const [pendingInterpretation, setPendingInterpretation] = useState<string | null>(null);
+  const [pendingDecision, setPendingDecision] = useState<string | null>(null);
+  const sandboxMode = messages.some((message) => message.analyses.some((analysis) => analysis.runtime_mode === "MOCK / DEV MODE"));
+  const analyze = async (communicationId: string) => {
+    setPendingInterpretation(communicationId);
+    try { return await request(`/communications/${communicationId}/analyze`, {}); }
+    finally { setPendingInterpretation(null); }
+  };
+  const decide = async (communicationId: string, analysisId: string, candidateId: string, decision: "ACCEPT" | "REJECT") => {
     if (!workspace.invoice) return Promise.resolve(false);
-    return request(`/communications/${communicationId}/analyses/${analysisId}/decision`, {
-      case_id: workspace.case_id, invoice_id: workspace.invoice.id, candidate_id: candidateId,
-      decision, operator_id: "web-operator",
-    });
+    const pendingKey = `${candidateId}:${decision}`;
+    setPendingDecision(pendingKey);
+    try {
+      return await request(`/communications/${communicationId}/analyses/${analysisId}/decision`, {
+        case_id: workspace.case_id, invoice_id: workspace.invoice.id, candidate_id: candidateId,
+        decision, operator_id: "web-operator",
+      });
+    } finally { setPendingDecision(null); }
   };
   return <section className="rounded-2xl border border-fuchsia-300/15 bg-fuchsia-300/[.025] p-5">
     <p className="text-[10px] font-bold uppercase tracking-[.15em] text-fuchsia-200">Bounded communication intelligence</p>
     <h3 className="mt-1.5 text-lg font-semibold text-white">Customer message → candidate fact → operator decision</h3>
-    <p className="mt-1 text-xs leading-5 text-slate-400">AI interprets one customer message into candidate facts. Deterministic policy owns risk, blockers, actionability, and recommendations. The operator confirms facts before persistence; financial state changes only through verified payment events.</p>
+    <p className="mt-1 text-xs leading-5 text-slate-400">Interpretation proposes candidate facts; deterministic policy owns risk, blockers, actionability, and recommendations. The operator confirms facts before persistence.</p>
+    {sandboxMode && <div className="mt-4 rounded-xl border border-fuchsia-200/12 bg-black/10 px-4 py-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone="slate">Sandbox interpretation</StatusPill><p className="text-[11px] font-medium text-slate-300">Deterministic extraction is used in this deployment for reproducible evaluation.</p></div><p className="mt-1.5 text-[11px] leading-5 text-slate-500">Candidate facts still require operator confirmation before persistence. This is not presented as a live model result.</p></div>}
     {messages.length ? <div className="mt-4 space-y-3">{messages.map((message) => {
       const analysis = message.analyses[0];
-      return <article key={message.id} className="rounded-xl border border-white/[.08] bg-black/10 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Customer message</p><p className="mt-2 text-sm leading-6 text-slate-200">“{message.content}”</p><p className="mt-1 text-[10px] text-slate-600">Received {new Date(message.occurred_at).toLocaleString()}</p></div>{!analysis && <button type="button" disabled={busy} onClick={() => void analyze(message.id)} className={buttonStyles.primary}>{busy ? "Interpreting…" : "Extract candidate facts"}</button>}</div>
-        {analysis && <div className="mt-4 border-t border-white/[.07] pt-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-fuchsia-200">AI interpretation</p><StatusPill tone={analysis.runtime_mode === "LIVE MODEL" ? "emerald" : "slate"}>{analysis.runtime_mode}</StatusPill></div><p className="mt-1 text-[10px] text-slate-500">Provider {analysis.provider} · model {analysis.model_version ?? "not reported"} · extracted {analysis.analyzed_at ? new Date(analysis.analyzed_at).toLocaleString() : "timestamp unavailable"} · structured intent {label(analysis.result.intent)}</p><div className="mt-3 space-y-2">{analysis.candidates.map((candidate) => {
+      const interpreting = pendingInterpretation === message.id;
+      return <article key={message.id} className="interactive-card rounded-xl border border-white/[.08] bg-black/10 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Customer message</p><p className="mt-2 text-sm leading-6 text-slate-200">“{message.content}”</p><p className="mt-1 text-[10px] text-slate-600">{labeledTimestamp(message.occurred_at, "received")}</p></div>{!analysis && <button type="button" aria-busy={interpreting} disabled={busy || interpreting} onClick={() => void analyze(message.id)} className={buttonStyles.primary}>{interpreting ? "Extracting candidate facts…" : "Extract candidate facts"}</button>}</div>
+        {interpreting && <p role="status" className="mt-3 text-xs text-sky-200">Interpreting this message. No fact is written until an operator accepts a valid candidate.</p>}
+        {analysis && <div className="mt-4 border-t border-white/[.07] pt-4"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-fuchsia-200">Communication interpretation</p><StatusPill tone={analysis.runtime_mode === "LIVE MODEL" ? "emerald" : "slate"}>{analysis.runtime_mode === "LIVE MODEL" ? "Live model" : "Sandbox"}</StatusPill></div><p className="mt-1 text-[10px] text-slate-500">{labeledTimestamp(analysis.analyzed_at, "extracted")} · structured intent {label(analysis.result.intent)}</p><details className="mt-1 text-[10px] text-slate-600"><summary className="cursor-pointer select-none hover:text-slate-400">Technical interpretation details</summary><p className="mt-1">Provider {analysis.provider} · model {analysis.model_version ?? "not reported"}</p></details><div className="mt-3 space-y-2">{analysis.candidates.map((candidate) => {
           const decision = candidate.decision_result;
-          return <div key={candidate.candidate_id} className="rounded-xl border border-white/[.07] bg-white/[.025] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-white">{label(candidate.fact_type)}</p><span className="text-xs font-semibold tabular-nums text-fuchsia-100">{Math.round(candidate.confidence * 100)}% confidence</span></div><p className="mt-2 text-xs text-slate-400"><span className="text-slate-500">Evidence:</span> “{candidate.evidence_span}”</p>{candidate.defer_reason && <p className="mt-2 text-xs text-amber-200">Safely deferred: {candidate.defer_reason}</p>}{decision ? <div className="mt-3 rounded-lg border border-white/[.07] bg-black/10 p-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone={decision.decision === "ACCEPT" ? "emerald" : "rose"}>{decision.decision === "ACCEPT" ? "Accepted" : "Rejected"}</StatusPill><span className="text-[11px] text-slate-400">Operator {decision.operator_id}</span></div>{decision.persisted_fact && <p className="mt-2 text-xs font-semibold text-emerald-200">Persisted fact: {decision.persisted_fact}</p>}<p className="mt-2 text-xs text-slate-300">Score {decision.score_before} → {decision.score_after} · recommendation {label(decision.recommendation_before)} → {label(decision.recommendation_after)}</p><p className="mt-1 text-[10px] text-slate-500">Financial mutation: none. Deterministic reassessment only.</p></div> : <div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={busy || !candidate.persistence_eligible || !workspace.invoice} onClick={() => void decide(message.id, analysis.id, candidate.candidate_id, "ACCEPT")} className={buttonStyles.success}>Accept structured fact</button><button type="button" disabled={busy} onClick={() => void decide(message.id, analysis.id, candidate.candidate_id, "REJECT")} className={buttonStyles.secondary}>Reject candidate</button></div>}</div>;
+          const accepting = pendingDecision === `${candidate.candidate_id}:ACCEPT`;
+          const rejecting = pendingDecision === `${candidate.candidate_id}:REJECT`;
+          return <div key={candidate.candidate_id} className="interactive-card rounded-xl border border-white/[.07] bg-white/[.025] p-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-sm font-semibold text-white">{label(candidate.fact_type)}</p><span className="text-xs font-semibold tabular-nums text-fuchsia-100">{Math.round(candidate.confidence * 100)}% confidence</span></div><p className="mt-2 text-xs text-slate-400"><span className="text-slate-500">Evidence:</span> “{candidate.evidence_span}”</p>{candidate.defer_reason && <p className="mt-2 text-xs text-amber-200">Safely deferred: {candidate.defer_reason}</p>}{decision ? decision.decision === "ACCEPT" ? <AcceptedFactImpact decision={decision} /> : <div className="mt-3 rounded-xl border border-rose-300/12 bg-rose-300/[.025] p-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone="rose">Candidate rejected</StatusPill><span className="text-[11px] text-slate-400">Operator {decision.operator_id}</span></div><p className="mt-2 text-xs text-slate-400">No candidate fact was persisted and no financial state changed.</p></div> : <div className="mt-3 flex flex-wrap gap-2"><button type="button" aria-busy={accepting} disabled={busy || !candidate.persistence_eligible || !workspace.invoice} onClick={() => void decide(message.id, analysis.id, candidate.candidate_id, "ACCEPT")} className={buttonStyles.success}>{accepting ? "Accepting fact…" : "Accept structured fact"}</button><button type="button" aria-busy={rejecting} disabled={busy} onClick={() => void decide(message.id, analysis.id, candidate.candidate_id, "REJECT")} className={buttonStyles.secondary}>{rejecting ? "Rejecting candidate…" : "Reject candidate"}</button></div>}</div>;
         })}</div></div>}
       </article>;
     })}</div> : <p className="mt-4 rounded-xl border border-white/[.07] bg-black/10 p-4 text-xs text-slate-500">No inbound customer communication is linked to this case account.</p>}
   </section>;
+}
+
+function AcceptedFactImpact({ decision }: { decision: NonNullable<Workspace["communications"][number]["analyses"][number]["candidates"][number]["decision_result"]> }) {
+  const blockersBefore = decision.blockers_before.length ? decision.blockers_before.map(label).join(" · ") : "None";
+  const blockersAfter = decision.blockers_after.length ? decision.blockers_after.map(label).join(" · ") : "None";
+  return <div className="live-enter mt-3 rounded-xl border border-emerald-300/25 bg-emerald-300/[.055] p-4 shadow-[0_12px_30px_rgba(52,211,153,.06)]">
+    <div className="flex flex-wrap items-center justify-between gap-2"><div><p className="text-[10px] font-extrabold uppercase tracking-[.14em] text-emerald-300">Fact accepted</p><p className="mt-1 text-sm font-semibold text-white">Persisted fact: {decision.persisted_fact ?? "Confirmed structured fact"}</p></div><StatusPill tone="emerald">Reassessed</StatusPill></div>
+    <div className="mt-4 divide-y divide-white/[.07] rounded-lg border border-white/[.07] bg-black/10 px-3">
+      <DecisionImpactRow label="Risk score" before={String(decision.score_before)} after={String(decision.score_after)} />
+      <DecisionImpactRow label="Blocker" before={blockersBefore} after={blockersAfter} />
+      <DecisionImpactRow label="Recommendation" before={label(decision.recommendation_before)} after={label(decision.recommendation_after)} />
+      <DecisionImpactRow label="Financial change" before="None" />
+    </div>
+    <p className="mt-3 text-[11px] leading-5 text-emerald-100/70">The accepted evidence triggered deterministic reassessment. No invoice, payment, promise amount, or balance was changed.</p>
+  </div>;
+}
+
+function DecisionImpactRow({ label: rowLabel, before, after }: { label: string; before: string; after?: string }) {
+  return <div className="grid gap-1 py-2.5 text-xs sm:grid-cols-[130px_1fr]"><span className="font-medium text-slate-500">{rowLabel}</span><span className="flex min-w-0 flex-wrap items-center gap-2 font-semibold"><span className={after ? "text-slate-500" : "text-emerald-200"}>{before}</span>{after && <><span className="text-sky-300">→</span><span className="text-white">{after}</span></>}</span></div>;
 }
 
 function DecisionDialog({ verb, reason, busy, onReasonChange, onCancel, onConfirm }: { verb: "approve" | "reject" | "hold" | "cancel" | "execute"; reason: string; busy: boolean; onReasonChange: (value: string) => void; onCancel: () => void; onConfirm: () => void }) {
@@ -322,8 +358,8 @@ function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evi
       const before = value(entry.before); const after = value(entry.after);
       const refs = [entry.request_reference && `Request ${entry.request_reference}`, entry.event_reference && `Event ${entry.event_reference}`, entry.payment_reference && `Payment ${entry.payment_reference}`].filter(Boolean);
       const ids = [entry.customer_id && `Customer ${entry.customer_id}`, entry.case_id && `Case ${entry.case_id}`, entry.invoice_id && `Invoice ${entry.invoice_id}`].filter(Boolean);
-      return <li key={entry.id} className={`border-l-2 pl-4 ${tones[entry.category]}`}>
-        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.12em]">{label(entry.category)}</p><time className="text-[10px] text-slate-500">{new Date(entry.occurred_at).toLocaleString()}</time></div>
+      return <li key={entry.id} className={`interactive-card rounded-r-xl border-l-2 bg-black/[.08] py-2.5 pl-4 pr-3 ${tones[entry.category]}`}>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.12em]">{label(entry.category)}</p><time className="text-[10px] text-slate-500">{labeledTimestamp(entry.occurred_at, evidenceTimestampMeaning(entry.provenance, entry.category))}</time></div>
         <div className="mt-1 flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-white">{entry.title}</p>{entry.historical && <StatusPill tone="slate">Historical / stored</StatusPill>}</div>
         {entry.detail && <p className="mt-1 text-xs leading-5 text-slate-400">{label(entry.detail)}</p>}
         {before && after && <p className="mt-1 text-xs text-slate-300"><span className="text-slate-500">Before:</span> {before} <span className="mx-1 text-sky-300">→</span> <span className="text-slate-500">After:</span> {after}</p>}
@@ -336,17 +372,17 @@ function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evi
 
 function OutcomeEvidenceChain({ payment, precedingAction, currentExposure, recommendation }: { payment: NonNullable<Workspace["payments"]>[number]; precedingAction?: Workspace["actions"][number]; currentExposure: string; recommendation: string }) {
   const steps = [
-    precedingAction ? { eyebrow: "Action", title: actionName(precedingAction), detail: `Internal workflow recorded as executed ${new Date(precedingAction.executed_at ?? precedingAction.created_at ?? 0).toLocaleString()}.` } : null,
+    precedingAction ? { eyebrow: "Action", title: actionName(precedingAction), detail: `Internal workflow ${labeledTimestamp(precedingAction.executed_at ?? precedingAction.created_at, "recorded").toLowerCase()}.` } : null,
     { eyebrow: "Observed event", title: money(payment.amount) + " payment recorded", detail: `${precedingAction ? "Payment received after the internal action; chronology does not prove causation." : "Persisted payment fact"} · ${payment.payment_date}${payment.reference ? ` · ${payment.reference}` : ""}` },
     { eyebrow: "Current factual state", title: money(currentExposure) + " outstanding", detail: "Current invoice exposure after persisted payment records." },
     { eyebrow: "Current decision", title: label(recommendation), detail: "Recommendation recalculated from the current persisted facts and blockers." },
   ].filter((step): step is { eyebrow: string; title: string; detail: string } => Boolean(step));
-  return <section className="rounded-2xl border border-emerald-300/15 bg-emerald-300/[.025] p-5"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-emerald-300">Observed operational sequence</p><h3 className="mt-1.5 text-lg font-semibold text-white">Outcome and reassessment evidence</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">{steps.map((step, index) => <div key={step.eyebrow} className="relative rounded-xl border border-white/[.07] bg-black/10 p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">{index + 1}. {step.eyebrow}</p><p className="mt-2 text-sm font-semibold text-white">{step.title}</p><p className="mt-1 text-xs leading-5 text-slate-400">{step.detail}</p></div>)}</div></section>;
+  return <section className="rounded-2xl border border-emerald-300/15 bg-emerald-300/[.025] p-5"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-emerald-300">Observed operational sequence</p><h3 className="mt-1.5 text-lg font-semibold text-white">Outcome and reassessment evidence</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">{steps.map((step, index) => <div key={step.eyebrow} className="interactive-card relative rounded-xl border border-white/[.07] bg-black/10 p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">{index + 1}. {step.eyebrow}</p><p className="mt-2 text-sm font-semibold text-white">{step.title}</p><p className="mt-1 text-xs leading-5 text-slate-400">{step.detail}</p></div>)}</div></section>;
 }
 
 function Card({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-xl border border-white/[.08] bg-white/[.025] p-3">
+    <div className="interactive-card rounded-xl border border-white/[.08] bg-white/[.025] p-3">
       <p className="text-[10px] uppercase tracking-[.12em] text-slate-500">{label}</p>
       <p className="mt-1 text-sm font-semibold text-white">{value}</p>
     </div>
