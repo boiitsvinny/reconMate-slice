@@ -50,7 +50,7 @@ export function AmbientBackdrop() {
 
   return <div className="ambient-backdrop" aria-hidden="true">
     <div ref={glowRef} className="ambient-pointer-glow" />
-    <div className="ambient-particles">{Array.from({ length: 10 }, (_, index) => <i key={index} />)}</div>
+    <div className="ambient-particles">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</div>
     <div className="ambient-texture" />
     <div className="ambient-vignette" />
   </div>;

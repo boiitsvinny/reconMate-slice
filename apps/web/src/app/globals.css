@@ -21,7 +21,7 @@ body {
 .ambient-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 0;
+  z-index: -1;
   pointer-events: none;
   overflow: hidden;
 }
@@ -39,7 +39,7 @@ body {
   transition: opacity 500ms ease;
 }
 .ambient-pointer-glow[data-visible="true"] { opacity: 1; }
-.ambient-particles { position: absolute; inset: 0; opacity: .45; }
+.ambient-particles { position: absolute; inset: 0; opacity: .7; }
 .ambient-particles i {
   --dx: 18px;
   --dy: -28px;
@@ -47,8 +47,8 @@ body {
   width: 2px;
   height: 2px;
   border-radius: 50%;
-  background: rgba(166, 183, 255, .28);
-  box-shadow: 0 0 7px rgba(48, 69, 171, .18);
+  background: rgba(190, 202, 255, .42);
+  box-shadow: 0 0 7px rgba(93, 113, 220, .26);
   animation: ambient-particle-float 28s ease-in-out infinite alternate;
 }
 .ambient-particles i:nth-child(1) { left: 7%; top: 17%; animation-duration: 31s; }
@@ -61,6 +61,8 @@ body {
 .ambient-particles i:nth-child(8) { --dx: -30px; --dy: -12px; left: 91%; top: 79%; animation-duration: 41s; }
 .ambient-particles i:nth-child(9) { --dx: 21px; --dy: 25px; left: 26%; top: 48%; width: 1px; height: 1px; animation-duration: 36s; }
 .ambient-particles i:nth-child(10) { --dx: -12px; --dy: -32px; left: 67%; top: 91%; animation-duration: 44s; }
+.ambient-particles i:nth-child(11) { --dx: 17px; --dy: -21px; left: 13%; top: 39%; width: 1px; height: 1px; animation-duration: 38s; }
+.ambient-particles i:nth-child(12) { --dx: -19px; --dy: 24px; left: 87%; top: 52%; animation-duration: 43s; }
 .ambient-texture {
   position: absolute;
   inset: 0;
@@ -89,6 +91,13 @@ main {
 .workspace-reports { background: linear-gradient(180deg, rgba(0, 0, 0, .1), rgba(2, 4, 12, .22)); }
 .workspace-analyze { background: radial-gradient(circle at 82% 12%, rgba(92, 113, 222, .06), transparent 31%), rgba(0, 0, 0, .13); }
 .workspace-history { background: linear-gradient(180deg, rgba(0, 0, 0, .14), rgba(2, 4, 12, .26)); font-variant-numeric: tabular-nums; }
+.header-glass {
+  border: 1px solid rgba(255, 255, 255, .09);
+  background: linear-gradient(135deg, rgba(8, 13, 24, .72), rgba(5, 8, 16, .58));
+  box-shadow: 0 12px 34px rgba(0, 0, 0, .3), inset 0 1px 0 rgba(255, 255, 255, .035);
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
+}
 .workspace-reports .workspace-panel { box-shadow: 0 12px 34px rgba(0, 0, 0, .18); }
 .workspace-panel {
   background: rgba(7, 11, 20, .64);
@@ -163,5 +172,5 @@ main {
 }
 @media (hover: none), (pointer: coarse) {
   .ambient-pointer-glow { display: none; }
-  .ambient-particles { opacity: .28; }
+  .ambient-particles { opacity: .42; }
 }

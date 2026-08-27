@@ -46,8 +46,8 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
 
   return (
     <>
-    <header className={`sticky top-0 z-40 flex h-16 items-center justify-between gap-3 border-b border-white/[0.09] bg-[#07111f]/95 px-4 shadow-lg shadow-black/10 backdrop-blur-xl transition-transform duration-300 ease-out sm:px-6 lg:px-10 ${navigationVisible ? "translate-y-0" : "-translate-y-full"}`}>
-      <div className="group flex min-w-0 items-center gap-3">
+    <header className={`pointer-events-none sticky top-0 z-40 grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-2 transition-transform duration-300 ease-out sm:px-5 lg:px-7 ${navigationVisible ? "translate-y-0" : "-translate-y-full"}`}>
+      <div className="header-glass pointer-events-auto flex w-fit min-w-0 items-center gap-2.5 rounded-2xl p-1.5 pr-3">
         <button type="button" onClick={toggleInspection} aria-label="Toggle Intelligence Inspection" aria-pressed={inspectionEnabled} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-sky-200/25 bg-gradient-to-br from-sky-300/20 to-blue-500/10 shadow-[0_0_24px_rgba(56,189,248,.12)] transition hover:border-sky-200/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60">
           <svg aria-hidden="true" viewBox="0 0 32 32" className="h-7 w-7 fill-none stroke-sky-200" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M8 24V8h8.5a5 5 0 0 1 0 10H8" />
@@ -62,15 +62,14 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
         </div>
         </Link>
       </div>
-      <nav aria-label="Primary navigation" className="hidden items-center gap-1 rounded-xl border border-white/[.07] bg-white/[.025] p-1 sm:flex lg:ml-6">
+      <nav aria-label="Primary navigation" className="header-glass pointer-events-auto hidden items-center gap-1 rounded-2xl p-1 sm:flex">
         {navigation.map(([href, label]) => {
           const active = href === "/" ? pathname === href : pathname.startsWith(href);
           return <Link aria-current={active ? "page" : undefined} key={href} href={href} className={`rounded-lg px-3.5 py-2 text-[11px] font-semibold transition ${active ? "bg-sky-300 text-slate-950 shadow-sm shadow-sky-400/20" : "text-slate-400 hover:bg-white/[.05] hover:text-white"}`}>{label}</Link>;
         })}
       </nav>
-      <div className="flex items-center gap-3">
-        {!home && <div className={`hidden rounded-lg border px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.13em] lg:block ${updating ? "border-sky-300/20 bg-sky-300/[.07] text-sky-200" : connected ? "border-emerald-300/15 bg-emerald-300/[0.06] text-emerald-200" : "border-amber-300/20 bg-amber-300/[.07] text-amber-100"}`}>{systemLabel}</div>}
-        {!home && <span className={`h-2 w-2 rounded-full ${updating ? "animate-pulse bg-sky-300" : connected ? "bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,.8)]" : "bg-rose-400"}`} aria-label={updating ? "Refreshing live data" : connected ? "API connected" : "API unavailable"} />}
+      <div className="pointer-events-auto justify-self-end">
+        {!home && <div className="header-glass hidden items-center gap-2 rounded-2xl p-1.5 pl-3 lg:flex"><span className={`text-[10px] font-semibold uppercase tracking-[0.13em] ${updating ? "text-sky-200" : connected ? "text-emerald-200" : "text-amber-100"}`}>{systemLabel}</span><span className={`h-2 w-2 rounded-full ${updating ? "animate-pulse bg-sky-300" : connected ? "bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,.8)]" : "bg-rose-400"}`} aria-label={updating ? "Refreshing live data" : connected ? "API connected" : "API unavailable"} /></div>}
       </div>
     </header>
     <nav aria-label="Mobile navigation" className={`fixed inset-x-0 bottom-0 z-50 border-t border-white/[.09] bg-[#07111f]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl transition-transform duration-300 ease-out sm:hidden ${navigationVisible ? "translate-y-0" : "translate-y-full"}`}>
