@@ -323,7 +323,7 @@ def _validate_transport_object_keys(payload: object) -> None:
 
 
 class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProvider):
-    """Read-only Gemini Interactions API extraction with strict structured output."""
+    """Read-only Gemini Generate Content extraction with strict local validation."""
 
     name = "google"
     runtime_mode = "LIVE MODEL"
@@ -345,15 +345,16 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
     def analyze(self, content: str, reference_date: date | None = None) -> CommunicationAnalysisResult:
         reference = reference_date or date.today()
         started_at = perf_counter()
+        prompt = (
+            f"{_SYSTEM_INSTRUCTIONS}\n\n"
+            f"{_PLAIN_JSON_INSTRUCTIONS}\n\n"
+            f"Reference date for relative dates: {reference.isoformat()}\n"
+            f"Customer message:\n{content}"
+        )
         try:
-            interaction = self.client.interactions.create(
+            response = self.client.models.generate_content(
                 model=self.model_version,
-                input=(
-                    f"{_SYSTEM_INSTRUCTIONS}\n\n"
-                    f"{_PLAIN_JSON_INSTRUCTIONS}\n\n"
-                    f"Reference date for relative dates: {reference.isoformat()}\n"
-                    f"Customer message:\n{content}"
-                ),
+                contents=prompt,
             )
         except Exception as exc:
             category = _classify_provider_failure(exc)
@@ -370,14 +371,14 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
             raise ProviderError("The live model provider is unavailable; no fact was written.") from exc
 
         try:
-            if not interaction.output_text:
+            if not response.text:
                 exc = ValueError("Empty structured provider response")
                 _log_provider_failure(
                     model=self.model_version, category="malformed_provider_response", exc=exc,
                     elapsed_ms=round((perf_counter() - started_at) * 1000), secret=self._redaction_secret,
                 )
                 raise ProviderError("The model returned no structured extraction.") from exc
-            decoded = json.loads(interaction.output_text)
+            decoded = json.loads(response.text)
         except ProviderError:
             raise
         except json.JSONDecodeError as exc:

@@ -42,17 +42,17 @@ def _candidate(**overrides):
     return value
 
 
-class FakeInteractions:
+class FakeModels:
     def __init__(self, payload=None, error=None):
         self.payload = payload
         self.error = error
         self.calls = []
 
-    def create(self, **kwargs):
+    def generate_content(self, **kwargs):
         self.calls.append(kwargs)
         if self.error:
             raise self.error
-        return SimpleNamespace(output_text=self.payload)
+        return SimpleNamespace(text=self.payload)
 
 
 class FakeProviderFailure(Exception):
@@ -73,7 +73,7 @@ def _provider(payload=None, error=None, api_key="test-key"):
         api_key=api_key, model="gemini-3.7-flash", timeout_seconds=3,
         confidence_threshold=0.7,
     )
-    provider.client = SimpleNamespace(interactions=FakeInteractions(payload, error))
+    provider.client = SimpleNamespace(models=FakeModels(payload, error))
     return provider
 
 
@@ -90,19 +90,19 @@ def test_provider_configuration_and_runtime_labels_are_explicit(caplog) -> None:
     assert live.runtime_mode == "LIVE MODEL" and live.model_version == "gemini-3.7-flash"
 
 
-def test_live_provider_uses_plain_text_call_with_prompted_json_contract() -> None:
+def test_live_provider_uses_generate_content_with_prompted_json_contract() -> None:
     provider = _provider(json.dumps({"candidates": [_candidate()]}))
     result = provider.analyze(MESSAGE, date(2026, 8, 26))
     assert result.candidates[0].fact_type.value == "ACTIVE_DISPUTE"
-    call = provider.client.interactions.calls[0]
-    assert set(call) == {"model", "input"}
+    call = provider.client.models.calls[0]
+    assert set(call) == {"model", "contents"}
     assert call["model"] == "gemini-3.7-flash"
-    assert MESSAGE in call["input"] and "portfolio" not in call["input"].lower()
-    assert "Return ONLY one JSON object" in call["input"]
-    assert '"candidates"' in call["input"]
+    assert MESSAGE in call["contents"] and "portfolio" not in call["contents"].lower()
+    assert "Return ONLY one JSON object" in call["contents"]
+    assert '"candidates"' in call["contents"]
 
 
-def test_installed_sdk_serializes_only_model_and_plain_text_input() -> None:
+def test_installed_sdk_serializes_generate_content_without_optional_config() -> None:
     captured = {}
     payload = json.dumps({"candidates": [_candidate(proposed_data={
         "amount": None,
@@ -115,13 +115,14 @@ def test_installed_sdk_serializes_only_model_and_plain_text_input() -> None:
     })]})
 
     def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
         captured["body"] = json.loads(request.content)
         return httpx.Response(200, json={
-            "id": "interaction-test",
-            "object": "interaction",
-            "status": "completed",
-            "model": "gemini-3.7-flash",
-            "steps": [{"type": "model_output", "content": [{"type": "text", "text": payload}]}],
+            "candidates": [{
+                "content": {"parts": [{"text": payload}], "role": "model"},
+                "finishReason": "STOP",
+                "index": 0,
+            }],
         })
 
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -141,13 +142,14 @@ def test_installed_sdk_serializes_only_model_and_plain_text_input() -> None:
 
     assert result.candidates[0].fact_type.value == "ACTIVE_DISPUTE"
     body = captured["body"]
-    assert set(body) == {"model", "input"}
-    assert body["model"] == "gemini-3.7-flash"
-    assert MESSAGE in body["input"]
-    assert "Return ONLY one JSON object" in body["input"]
+    assert "/models/gemini-3.7-flash:generateContent" in captured["url"]
+    assert set(body) == {"contents"}
+    prompt = body["contents"][0]["parts"][0]["text"]
+    assert MESSAGE in prompt
+    assert "Return ONLY one JSON object" in prompt
 
 
-def test_real_plain_call_bad_request_metadata_is_sanitized_without_probe(caplog) -> None:
+def test_real_generate_content_bad_request_is_classified_and_sanitized(caplog) -> None:
     captured = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -183,14 +185,13 @@ def test_real_plain_call_bad_request_metadata_is_sanitized_without_probe(caplog)
         client.close()
 
     failure = _failure_log(caplog)
-    assert failure["exception_type"] == "BadRequestError"
-    assert failure["google_error_status"] == "INVALID_ARGUMENT"
-    assert failure["google_error_code"] == 400
-    assert failure["field_violation_path"] == "model"
-    assert "Unsupported model field" in failure["field_violation_description"]
+    assert failure["exception_type"] == "ClientError"
+    assert failure["http_status"] == 400
+    assert failure["provider_error_code"] == "INVALID_ARGUMENT"
+    assert failure["failure_category"] == "request_or_schema_error"
     assert SECRET not in json.dumps(failure) and MESSAGE not in json.dumps(failure)
     assert len(captured) == 1
-    assert set(captured[0]) == {"model", "input"}
+    assert set(captured[0]) == {"contents"}
 
 
 @pytest.mark.parametrize("payload", [
@@ -207,13 +208,13 @@ def test_untrusted_or_authoritative_model_output_fails_closed(payload: str) -> N
 
 
 def test_timeout_is_safe_and_does_not_retry_or_write(caplog) -> None:
-    interactions = FakeInteractions(error=httpx.ReadTimeout("timed out"))
+    models = FakeModels(error=httpx.ReadTimeout("timed out"))
     provider = _provider()
-    provider.client = SimpleNamespace(interactions=interactions)
+    provider.client = SimpleNamespace(models=models)
     with caplog.at_level(logging.ERROR, logger="app.intelligence.provider"):
         with pytest.raises(ProviderError, match="timed out"):
             provider.analyze(MESSAGE, date(2026, 8, 26))
-    assert len(interactions.calls) == 1
+    assert len(models.calls) == 1
     event = _failure_log(caplog)
     assert event["failure_category"] == "timeout"
     assert event["exception_type"] == "ReadTimeout"
@@ -271,12 +272,12 @@ def test_malformed_and_local_schema_failures_are_distinguished(caplog, payload: 
 
 
 def test_sdk_or_network_failure_is_contained_without_fallback() -> None:
-    interactions = FakeInteractions(error=RuntimeError("generated SDK failure"))
+    models = FakeModels(error=RuntimeError("generated SDK failure"))
     provider = _provider()
-    provider.client = SimpleNamespace(interactions=interactions)
+    provider.client = SimpleNamespace(models=models)
     with pytest.raises(ProviderError, match="provider is unavailable"):
         provider.analyze(MESSAGE, date(2026, 8, 26))
-    assert len(interactions.calls) == 1
+    assert len(models.calls) == 1
 
 
 def test_low_confidence_defers_and_duplicates_are_normalized() -> None:
