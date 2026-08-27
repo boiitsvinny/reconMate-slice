@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "./providers";
+import { AmbientBackdrop } from "@/components/layout/ambient-backdrop";
 
 export const metadata: Metadata = {
   title: "ReconMate",
@@ -8,5 +9,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body><Providers>{children}</Providers></body></html>;
+  return <html lang="en"><body><AmbientBackdrop /><Providers>{children}</Providers></body></html>;
 }

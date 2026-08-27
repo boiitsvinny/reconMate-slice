@@ -22,8 +22,8 @@ const riskTone = (level: IntelligenceResult["level"]) => level === "CRITICAL" ? 
 const decisionLabel = (value: string) => value.replaceAll("_", " ");
 
 export function AIPriorities({ intelligence, loading, error, transitions, casesByCustomer, caseLinksLoading, caseLinksError, onSelectCase }: Props) {
-  if (loading) return <Panel className="mt-5 h-72 animate-pulse bg-white/[.035]"><span className="sr-only">Loading AI priorities</span></Panel>;
-  if (!intelligence) return <Panel className="mt-5 overflow-hidden border-amber-300/15"><SectionHeader eyebrow="Contextual decisioning" title="AI priorities are temporarily unavailable" detail={error ?? "Current customer intelligence could not be evaluated."} prominent /></Panel>;
+  if (loading) return <Panel className="mt-5 h-72 animate-pulse bg-white/[.035]"><span className="sr-only">Loading recovery priorities</span></Panel>;
+  if (!intelligence) return <Panel className="mt-5 overflow-hidden border-amber-300/15"><SectionHeader eyebrow="Deterministic decisioning" title="Recovery priorities are temporarily unavailable" detail={error ?? "Current recovery policy could not be evaluated."} prominent /></Panel>;
 
   const customers = new Map(intelligence.customers.map((item) => [item.entity_id, item]));
   const materialTransitions = transitions.filter((item) => item.entity_type === "CUSTOMER" && item.material);
@@ -37,7 +37,7 @@ export function AIPriorities({ intelligence, loading, error, transitions, casesB
 
   return (
     <Panel className="mt-5 overflow-hidden">
-      <SectionHeader eyebrow="Contextual decisioning" title="AI Priorities" detail="The same overdue condition can produce a different decision when customer evidence differs." prominent />
+      <SectionHeader eyebrow="Deterministic decisioning" title="Recovery Priorities" detail="Policy ranks current recovery work from persisted facts, stopping rules, and operator-confirmed communication evidence." prominent />
       {caseLinksError && <p className="border-b border-amber-300/10 bg-amber-300/[.04] px-5 py-3 text-[11px] text-amber-100/75">Case links are temporarily unavailable; the current decision evidence remains visible.</p>}
       <div className="grid xl:grid-cols-2">
         {urgent && <PriorityDecisionCard kind="priority" item={urgent} transition={urgentTransition} recoveryCase={casesByCustomer.get(urgent.entity_id)} caseLinkLoading={caseLinksLoading} onSelectCase={onSelectCase} />}
@@ -71,7 +71,7 @@ function PriorityDecisionCard({ kind, item, transition, recoveryCase, caseLinkLo
       <div className={`mt-5 rounded-xl border p-4 ${restraint ? "border-emerald-300/15 bg-emerald-300/[.035]" : "border-sky-300/15 bg-sky-300/[.035]"}`}>
         <p className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-400">Recovery decision</p>
         {previousDecision ? <div className="mt-3 flex flex-wrap items-center gap-3 text-base font-semibold"><span className="text-slate-500 line-through decoration-slate-500/50">{previousDecision}</span><span className="text-lg text-sky-300">→</span><span className={restraint ? "text-emerald-200" : "text-white"}>{currentDecision}</span></div> : <p className={`mt-2 text-lg font-semibold ${restraint ? "text-emerald-200" : "text-white"}`}>{currentDecision}</p>}
-        {transition?.previous_score !== null && transition?.previous_score !== undefined ? <p className="mt-3 text-[13px] text-slate-400">Current Intelligence Score <span className="tabular-nums text-slate-500">{transition.previous_score}</span> <span className="mx-1.5 text-sky-300">→</span> <span className="text-base font-semibold tabular-nums text-white">{transition.current_score}</span></p> : <p className="mt-3 text-[13px] text-slate-400">Current Intelligence Score: <strong className="text-white">{item.score}/100</strong></p>}
+        {transition?.previous_score !== null && transition?.previous_score !== undefined ? <p className="mt-3 text-[13px] text-slate-400">Policy risk score <span className="tabular-nums text-slate-500">{transition.previous_score}</span> <span className="mx-1.5 text-sky-300">→</span> <span className="text-base font-semibold tabular-nums text-white">{transition.current_score}</span></p> : <p className="mt-3 text-[13px] text-slate-400">Policy risk score: <strong className="text-white">{item.score}/100</strong></p>}
       </div>
 
       <div className="mt-4">

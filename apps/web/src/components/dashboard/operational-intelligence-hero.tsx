@@ -30,8 +30,8 @@ export function OperationalIntelligenceHero({ intelligence, recovery, latestCycl
     <Panel className="overflow-hidden border-sky-300/15">
       <SectionHeader
         eyebrow="Decision system activity"
-        title="ReconMate Intelligence"
-        detail="Current evidence is continuously reassessed before recovery work is recommended."
+        title="ReconMate Decision Intelligence"
+        detail="Deterministic policy continuously reassesses persisted evidence before recovery work is recommended; material actions remain operator controlled."
         prominent
         action={<StatusPill tone={synchronizing ? "sky" : "emerald"}>{synchronizing ? "Reassessing" : "Evaluation current"}</StatusPill>}
       />
@@ -41,7 +41,7 @@ export function OperationalIntelligenceHero({ intelligence, recovery, latestCycl
         <IntelligenceMetric label="Decisions changed" value={latestCycle ? String(latestCycle.recommendations_changed) : "—"} detail="Material recommendation moves" emphasis={Boolean(latestCycle?.recommendations_changed)} />
         <IntelligenceMetric label="Approval required" value={String(approvalRequired)} detail="Recommendations requiring an operator" />
         <IntelligenceMetric label="Deliberate holds" value={String(holds)} detail="Monitor or wait decisions" restraint />
-        <IntelligenceMetric label="Recovered this cycle" value={recoveredThisCycle} detail="Sum of persisted payment amounts" restraint={recoveredThisCycle !== "—"} />
+        <IntelligenceMetric label="Observed recovery this cycle" value={recoveredThisCycle} detail="Sum of persisted payment amounts" restraint={recoveredThisCycle !== "—"} />
       </div>
       <div className="flex flex-col gap-2 border-t border-white/[.06] px-5 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
         <p className={synchronizing ? "animate-pulse text-sky-200" : "text-slate-400"}>{activity}</p>

@@ -46,16 +46,18 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
             <h2 className="mt-3 text-xl font-semibold tracking-[-.03em] text-white sm:text-2xl">What do you want ReconMate to work on?</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ask about operational priorities, overdue exposure, broken promises, recovery work, or payment reminders.</p>
             <form onSubmit={submit} className="mt-5 flex flex-col gap-3 sm:flex-row">
-              <label htmlFor="reconmate-command" className="sr-only">Operational command</label>
-              <input
-                id="reconmate-command"
-                value={command}
-                onChange={(event) => setCommand(event.target.value)}
-                disabled={processing}
-                placeholder="Enter an operational command..."
-                autoComplete="off"
-                className="min-h-12 min-w-0 flex-1 rounded-xl border border-white/[.12] bg-[#050d19]/75 px-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-sky-300/45 focus:ring-2 focus:ring-sky-300/10 disabled:opacity-60"
-              />
+              <div className="intelligence-input-shell min-w-0 flex-1">
+                <label htmlFor="reconmate-command" className="sr-only">Operational command</label>
+                <input
+                  id="reconmate-command"
+                  value={command}
+                  onChange={(event) => setCommand(event.target.value)}
+                  disabled={processing}
+                  placeholder="Enter an operational command..."
+                  autoComplete="off"
+                  className="intelligence-command-input min-h-12 w-full min-w-0 rounded-[11px] px-4 text-sm text-white outline-none placeholder:text-slate-600 disabled:opacity-60"
+                />
+              </div>
               <button disabled={processing || !command.trim()} className={`${buttonStyles.primary} min-h-12 px-6 sm:w-auto`}>{processing ? "Analyzing..." : "Analyze"}</button>
             </form>
             <div className="mt-4 flex flex-wrap gap-2" aria-label="Supported command examples">

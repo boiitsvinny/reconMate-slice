@@ -56,7 +56,7 @@ export function StatusPill({ children, tone = "sky" }: { children: ReactNode; to
   };
 
   return (
-    <span className={cx("inline-flex w-fit items-center rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.08em]", tones[tone])}>
+    <span className={cx("inline-flex w-fit items-center rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[.08em] transition-colors duration-200", tones[tone])}>
       {children}
     </span>
   );

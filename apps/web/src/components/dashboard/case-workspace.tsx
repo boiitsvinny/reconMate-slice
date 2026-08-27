@@ -21,11 +21,28 @@ function actionName(action: { action_type: string; recommended_action: string | 
   return label(action.recommended_action ?? action.action_type);
 }
 
-function executedActionExplanation(action: { executed_at: string | null; recommendation_context: { workflow_effect?: string } | null }) {
-  const executedAt = action.executed_at;
-  const timestamp = executedAt ? ` at ${formatTimestamp(executedAt)}` : "";
-  const boundary = action.recommendation_context?.workflow_effect;
-  return `ReconMate recorded this internal workflow step as executed${timestamp}.${boundary ? ` ${boundary}` : ""}`;
+function executedOutcomeTitle(action: { action_type: string; recommended_action: string | null }) {
+  const outcomes: Record<string, string> = {
+    SEND_PAYMENT_REMINDER: "Reminder workflow recorded as completed",
+    REQUEST_PAYMENT_DATE: "Payment-date follow-up workflow recorded",
+    MONITOR_ACTIVE_PROMISE: "Promise monitoring workflow entered",
+    REVIEW_PAYMENT_CLAIM: "Payment-claim review workflow recorded",
+    HOLD_FOR_DISPUTE: "Dispute hold workflow recorded",
+    PREPARE_ESCALATION: "Escalation preparation recorded",
+    ESCALATE_TO_HUMAN: "Senior recovery review workflow recorded",
+  };
+  return outcomes[action.recommended_action ?? ""] ?? "Internal recovery workflow recorded";
+}
+
+function workflowStateTitle(status: string) {
+  return {
+    RECOMMENDED: "Workflow prepared for operator action",
+    PENDING_APPROVAL: "Waiting for human approval",
+    APPROVED: "Human approval recorded",
+    HELD: "Workflow placed on hold",
+    REJECTED: "Workflow rejected",
+    CANCELLED: "Workflow cancelled",
+  }[status] ?? "Workflow state recorded";
 }
 
 export function CaseWorkspace({ item, onClose, liveVersion, affected, transition }: { item: PriorityCase; onClose: () => void; liveVersion: number; affected: boolean; transition?: IntelligenceTransition }) {
@@ -73,6 +90,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
   const precedingAction = latestPayment ? workspace?.actions
     .filter((candidate) => candidate.status === "EXECUTED" && candidate.executed_at && candidate.executed_at.slice(0, 10) <= latestPayment.payment_date)
     .sort((left, right) => new Date(right.executed_at ?? 0).getTime() - new Date(left.executed_at ?? 0).getTime())[0] : undefined;
+  const followingPayment = latest && precedingAction?.id === latest.id ? latestPayment : undefined;
   const queryError = workspaceQuery.error instanceof Error ? workspaceQuery.error.message : null;
   const mutationError = action.error instanceof Error ? action.error.message : null;
   const error = mutationError ?? (!workspace ? queryError : null);
@@ -114,7 +132,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-[#050814]/65 p-0 backdrop-blur-sm sm:p-2" onClick={onClose} role="presentation">
-      <section className="h-full w-full max-w-2xl overflow-y-auto rounded-none border border-white/[0.12] bg-[#0d1628] p-4 pb-24 shadow-2xl shadow-black/70 sm:rounded-2xl sm:p-7" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${item.customerName} recovery workspace`}>
+      <section className="case-workspace-panel h-full w-full max-w-2xl overflow-y-auto rounded-none border border-white/[0.12] bg-[#0d1628]/95 p-4 pb-24 shadow-2xl shadow-black/70 backdrop-blur-xl sm:rounded-2xl sm:p-7" onClick={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label={`${item.customerName} recovery workspace`}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-sky-300">Operator case workspace</p>
@@ -157,15 +175,16 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               <Card label="Recovery state" value={label(workspace.workflow.recovery_state)} />
             </section>
             <section className="case-primary-card rounded-2xl border border-sky-300/25 bg-sky-400/[.07] p-5 shadow-[0_16px_35px_rgba(14,165,233,.07)]">
-              <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">Current customer intelligence</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-sky-300">Deterministic recovery decision</p>
               <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
                 <h3 className="text-xl font-semibold tracking-[-.025em] text-white">{workspace.intelligence.recommendation.title}</h3>
                 <StatusPill tone="sky">{workspace.intelligence.level}</StatusPill>
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-300">{workspace.intelligence.recommendation.explanation}</p>
+              <p className="mt-2 text-[11px] leading-5 text-sky-100/65">Calculated by deterministic policy from persisted recovery facts. Communication interpretation can supply operator-confirmed evidence; it cannot decide policy or mutate financial state.</p>
               <div className="mt-4 rounded-xl border border-white/[.07] bg-black/10 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Current intelligence score</p>
+                  <p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Deterministic policy risk score</p>
                   <p className="text-xs font-semibold text-white">{workspace.intelligence.score}/100 / {workspace.intelligence.level}</p>
                 </div>
                 <p className="mt-1 text-[10px] text-slate-500">Evaluated for operating date {workspace.intelligence.calculated_at}.{workspace.intelligence.raw_score > 100 ? ` Raw weighted score ${workspace.intelligence.raw_score}; displayed score capped at 100.` : ""}</p>
@@ -198,6 +217,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               {reminderDraft && <ReminderArtifact artifact={reminderDraft} />}
             </section>
             <CommunicationFactReview workspace={workspace} busy={busy} request={request} />
+            <RecoveryLoopSummary workspace={workspace} latest={latest} latestPayment={followingPayment} />
             <section className="rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
               <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-slate-500">Operator decision</p>
               <h3 className="mt-1.5 text-lg font-semibold tracking-[-.02em] text-white sm:text-xl">Choose the controlled workflow response</h3>
@@ -221,22 +241,16 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               ) : (
                 <div className="mt-4 rounded-xl border border-white/[.08] bg-black/10 p-4">
                   {latest.status === "EXECUTED" ? (
-                    <div>
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-[10px] font-bold uppercase tracking-[.13em] text-emerald-300">Latest action completed</p>
-                        <StatusPill tone="emerald">Executed</StatusPill>
-                      </div>
-                      <h4 className="mt-2 text-base font-semibold text-white">{actionName(latest)}</h4>
-                      <p className="mt-2 text-xs leading-5 text-slate-300">{executedActionExplanation(latest)}</p>
-                    </div>
+                    <ExecutedActionResult action={latest} latestPayment={followingPayment} />
                   ) : (
                     <div>
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-[10px] font-bold uppercase tracking-[.13em] text-sky-300">Latest workflow action</p>
+                        <p className="text-[10px] font-bold uppercase tracking-[.13em] text-sky-300">Current workflow result</p>
                         <StatusPill tone="sky">{label(latest.status)}</StatusPill>
                       </div>
-                      <h4 className="mt-2 text-base font-semibold text-white">{actionName(latest)}</h4>
-                      <p className="mt-2 text-xs leading-5 text-slate-400">This is an internal recovery workflow record. Its current status is {label(latest.status).toLowerCase()}.</p>
+                      <h4 className="mt-2 text-base font-semibold text-white">{workflowStateTitle(latest.status)}</h4>
+                      <p className="mt-1 text-xs font-medium text-sky-200">Action: {actionName(latest)}</p>
+                      <p className="mt-2 text-xs leading-5 text-slate-400">This persisted internal workflow is {label(latest.status).toLowerCase()}. It has not contacted the customer or changed an invoice, payment, promise, dispute, or case state.</p>
                       <p className="mt-1 text-[11px] text-slate-500">{latest.created_at ? labeledTimestamp(latest.created_at, "recorded") : "Recorded in the current operator session"} / approval state {label(latest.approval_status)}</p>
                       {latest.decision_reason && <p className="mt-2 text-xs leading-5 text-slate-400">Operator reason: {latest.decision_reason}</p>}
                       {latest.decision_at && <p className="mt-1 text-[11px] text-slate-500">{labeledTimestamp(latest.decision_at, "recorded")}{latest.decision_by ? ` by ${latest.decision_by}` : ""}.</p>}
@@ -263,6 +277,47 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
   );
 }
 
+function RecoveryLoopSummary({ workspace, latest, latestPayment }: { workspace: Workspace; latest?: Workspace["actions"][number]; latestPayment?: NonNullable<Workspace["payments"]>[number] }) {
+  const accepted = workspace.communications
+    .flatMap((message) => message.analyses.flatMap((analysis) => analysis.candidates))
+    .find((candidate) => candidate.decision_result?.decision === "ACCEPT")?.decision_result;
+  const blockers = workspace.recommendation.blockers;
+  const stages = [
+    { label: "Evidence", value: accepted?.persisted_fact ?? "Current persisted case facts", tone: accepted ? "text-emerald-200" : "text-slate-300" },
+    { label: "Policy decision", value: label(workspace.recommendation.recommended_action), tone: "text-sky-200" },
+    { label: "Stopping rules", value: blockers.length ? blockers.map(label).join(" · ") : "No current blocker", tone: blockers.length ? "text-amber-100" : "text-emerald-200" },
+    { label: "Human control", value: latest ? latest.human_approval_required ? label(latest.approval_status) : "Not required for workflow" : workspace.recommendation.human_approval_required ? "Approval required" : "Approval not required", tone: (latest?.human_approval_required ?? workspace.recommendation.human_approval_required) ? "text-amber-100" : "text-slate-300" },
+    { label: "Workflow", value: latest ? label(latest.status) : "Not created", tone: latest?.status === "EXECUTED" ? "text-emerald-200" : "text-slate-300" },
+    { label: "Later outcome", value: latestPayment ? `${money(latestPayment.amount)} payment persisted` : "No later payment evidence", tone: latestPayment ? "text-emerald-200" : "text-slate-500" },
+  ];
+  return <section className="rounded-2xl border border-sky-300/15 bg-sky-300/[.025] p-5" aria-label="Case recovery control loop">
+    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.15em] text-sky-300">Evidence-to-outcome control loop</p><h3 className="mt-1.5 text-lg font-semibold text-white">How this case moved through ReconMate</h3><p className="mt-1 text-xs leading-5 text-slate-400">Only stages supported by persisted case data are shown as complete.</p></div><a href="#case-evidence-timeline" className="text-xs font-semibold text-sky-300 hover:text-sky-200">Open audit evidence ↓</a></div>
+    <ol className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{stages.map((stage, index) => <li key={stage.label} className="interactive-card rounded-xl border border-white/[.07] bg-black/10 p-3"><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">{index + 1}. {stage.label}</p><p className={`mt-1.5 text-xs font-semibold leading-5 ${stage.tone}`}>{stage.value}</p></li>)}</ol>
+    <div className="mt-4 grid gap-2 rounded-xl border border-white/[.07] bg-black/10 p-3 text-[11px] leading-5 sm:grid-cols-3"><p><strong className="text-fuchsia-200">Interpretation:</strong> extracts candidate evidence from communication.</p><p><strong className="text-sky-200">Deterministic policy:</strong> calculates risk, blockers, and recovery action.</p><p><strong className="text-amber-100">Operator:</strong> confirms evidence and approves material workflow actions.</p></div>
+  </section>;
+}
+
+function ExecutedActionResult({ action, latestPayment }: { action: Workspace["actions"][number]; latestPayment?: NonNullable<Workspace["payments"]>[number] }) {
+  const recordedBlockers = action.recommendation_context?.blockers ?? [];
+  return <div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.13em] text-emerald-300">Latest workflow outcome</p><StatusPill tone="emerald">Executed · internal simulation</StatusPill></div>
+    <h4 className="mt-2 text-lg font-semibold text-white">{executedOutcomeTitle(action)}</h4>
+    <p className="mt-1 text-xs font-medium text-sky-200">Action: {actionName(action)}</p>
+    <dl className="mt-4 divide-y divide-white/[.07] rounded-xl border border-white/[.07] bg-white/[.02] px-3">
+      <ActionResultRow term="Why it was allowed" detail={`The server rechecked the current deterministic recommendation and stopping rules before execution.${recordedBlockers.length ? ` Recorded control context: ${recordedBlockers.map(label).join(" · ")}.` : " No blocking condition prevented this internal workflow."}`} />
+      <ActionResultRow term="Human approval" detail={action.human_approval_required ? `${label(action.approval_status)}${action.decision_by ? ` by ${action.decision_by}` : ""}.` : "Not required by the persisted recommendation."} />
+      <ActionResultRow term="System state changed" detail={`The internal workflow status was recorded as EXECUTED${action.executed_at ? ` at ${formatTimestamp(action.executed_at)}` : ""}; its audit event is available below.`} />
+      <ActionResultRow term="External / financial effect" detail="None. No customer contact occurred and no invoice, payment, promise, dispute, balance, or case state was changed." />
+      <ActionResultRow term="What happens next" detail={latestPayment ? "A later persisted payment is available in the outcome evidence below. Chronology is shown without claiming this workflow caused payment." : "Continue monitoring for verified provider or payment evidence. No recovery outcome is inferred yet."} />
+    </dl>
+    <div className="mt-4 flex flex-wrap gap-3"><a href="#case-evidence-timeline" className="text-xs font-semibold text-sky-300 hover:text-sky-200">View workflow audit ↓</a>{latestPayment && <a href="#case-outcome-evidence" className="text-xs font-semibold text-emerald-300 hover:text-emerald-200">View later outcome ↓</a>}</div>
+  </div>;
+}
+
+function ActionResultRow({ term, detail }: { term: string; detail: string }) {
+  return <div className="grid gap-1 py-2.5 text-xs sm:grid-cols-[150px_1fr]"><dt className="font-semibold text-slate-400">{term}</dt><dd className="leading-5 text-slate-200">{detail}</dd></div>;
+}
+
 function CommunicationFactReview({ workspace, busy, request }: { workspace: Workspace; busy: boolean; request: (url: string, body: Record<string, unknown>) => Promise<boolean> }) {
   const messages = workspace.communications.filter((item) => item.direction === "INBOUND").slice(0, 3);
   const [pendingInterpretation, setPendingInterpretation] = useState<string | null>(null);
@@ -287,7 +342,7 @@ function CommunicationFactReview({ workspace, busy, request }: { workspace: Work
   return <section className="rounded-2xl border border-fuchsia-300/15 bg-fuchsia-300/[.025] p-5">
     <p className="text-[10px] font-bold uppercase tracking-[.15em] text-fuchsia-200">Bounded communication intelligence</p>
     <h3 className="mt-1.5 text-lg font-semibold text-white">Customer message → candidate fact → operator decision</h3>
-    <p className="mt-1 text-xs leading-5 text-slate-400">Interpretation proposes candidate facts; deterministic policy owns risk, blockers, actionability, and recommendations. The operator confirms facts before persistence.</p>
+    <p className="mt-1 text-xs leading-5 text-slate-400">Interpretation proposes candidate facts; deterministic policy owns risk, blockers, actionability, and recommendations. The operator confirms facts before persistence. Unavailable, invalid, or low-confidence interpretation fails closed and writes no fact.</p>
     {sandboxMode && <div className="mt-4 rounded-xl border border-fuchsia-200/12 bg-black/10 px-4 py-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone="slate">Sandbox interpretation</StatusPill><p className="text-[11px] font-medium text-slate-300">Deterministic extraction is used in this deployment for reproducible evaluation.</p></div><p className="mt-1.5 text-[11px] leading-5 text-slate-500">Candidate facts still require operator confirmation before persistence. This is not presented as a live model result.</p></div>}
     {messages.length ? <div className="mt-4 space-y-3">{messages.map((message) => {
       const analysis = message.analyses[0];
@@ -350,7 +405,8 @@ function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evi
   const value = (record: Record<string, string | number | null> | null) => record
     ? Object.entries(record).map(([key, item]) => `${label(key)} ${item ?? "-"}`).join(" · ")
     : null;
-  return <section className="rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
+  const categoryLabel = (category: keyof typeof tones) => category === "AI_INTERPRETATION" ? "COMMUNICATION INTERPRETATION" : label(category);
+  return <section id="case-evidence-timeline" className="scroll-mt-6 rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
     <p className="text-[10px] font-bold uppercase tracking-[.15em] text-sky-300">Persisted evidence</p>
     <h3 className="mt-1.5 text-lg font-semibold text-white">Case event and decision timeline</h3>
     <p className="mt-1 text-xs leading-5 text-slate-400">Fact → decision → controlled action → provider outcome → reassessment. Historical decisions are labeled and never replace the current recommendation above.</p>
@@ -359,7 +415,7 @@ function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evi
       const refs = [entry.request_reference && `Request ${entry.request_reference}`, entry.event_reference && `Event ${entry.event_reference}`, entry.payment_reference && `Payment ${entry.payment_reference}`].filter(Boolean);
       const ids = [entry.customer_id && `Customer ${entry.customer_id}`, entry.case_id && `Case ${entry.case_id}`, entry.invoice_id && `Invoice ${entry.invoice_id}`].filter(Boolean);
       return <li key={entry.id} className={`interactive-card rounded-r-xl border-l-2 bg-black/[.08] py-2.5 pl-4 pr-3 ${tones[entry.category]}`}>
-        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.12em]">{label(entry.category)}</p><time className="text-[10px] text-slate-500">{labeledTimestamp(entry.occurred_at, evidenceTimestampMeaning(entry.provenance, entry.category))}</time></div>
+        <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-[10px] font-bold uppercase tracking-[.12em]">{categoryLabel(entry.category)}</p><time className="text-[10px] text-slate-500">{labeledTimestamp(entry.occurred_at, evidenceTimestampMeaning(entry.provenance, entry.category))}</time></div>
         <div className="mt-1 flex flex-wrap items-center gap-2"><p className="text-sm font-semibold text-white">{entry.title}</p>{entry.historical && <StatusPill tone="slate">Historical / stored</StatusPill>}</div>
         {entry.detail && <p className="mt-1 text-xs leading-5 text-slate-400">{label(entry.detail)}</p>}
         {before && after && <p className="mt-1 text-xs text-slate-300"><span className="text-slate-500">Before:</span> {before} <span className="mx-1 text-sky-300">→</span> <span className="text-slate-500">After:</span> {after}</p>}
@@ -377,7 +433,7 @@ function OutcomeEvidenceChain({ payment, precedingAction, currentExposure, recom
     { eyebrow: "Current factual state", title: money(currentExposure) + " outstanding", detail: "Current invoice exposure after persisted payment records." },
     { eyebrow: "Current decision", title: label(recommendation), detail: "Recommendation recalculated from the current persisted facts and blockers." },
   ].filter((step): step is { eyebrow: string; title: string; detail: string } => Boolean(step));
-  return <section className="rounded-2xl border border-emerald-300/15 bg-emerald-300/[.025] p-5"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-emerald-300">Observed operational sequence</p><h3 className="mt-1.5 text-lg font-semibold text-white">Outcome and reassessment evidence</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">{steps.map((step, index) => <div key={step.eyebrow} className="interactive-card relative rounded-xl border border-white/[.07] bg-black/10 p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">{index + 1}. {step.eyebrow}</p><p className="mt-2 text-sm font-semibold text-white">{step.title}</p><p className="mt-1 text-xs leading-5 text-slate-400">{step.detail}</p></div>)}</div></section>;
+  return <section id="case-outcome-evidence" className="scroll-mt-6 rounded-2xl border border-emerald-300/15 bg-emerald-300/[.025] p-5"><p className="text-[10px] font-bold uppercase tracking-[.15em] text-emerald-300">Observed operational sequence</p><h3 className="mt-1.5 text-lg font-semibold text-white">Outcome and reassessment evidence</h3><div className="mt-4 grid gap-3 sm:grid-cols-2">{steps.map((step, index) => <div key={step.eyebrow} className="interactive-card relative rounded-xl border border-white/[.07] bg-black/10 p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">{index + 1}. {step.eyebrow}</p><p className="mt-2 text-sm font-semibold text-white">{step.title}</p><p className="mt-1 text-xs leading-5 text-slate-400">{step.detail}</p></div>)}</div></section>;
 }
 
 function Card({ label, value }: { label: string; value: string }) {

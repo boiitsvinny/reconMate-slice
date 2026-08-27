@@ -230,7 +230,7 @@ export function Dashboard() {
               <div className="hide-scrollbar flex snap-x snap-mandatory gap-3 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible xl:grid-cols-4">
                 <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Total outstanding" value={money(portfolio.data.total_outstanding_amount)} detail={`${portfolio.data.total_invoices} live receivables across the portfolio.`} tone="blue" />
                 <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Overdue exposure" state="Past due" value={money(recovery.data.overdue_exposure)} detail="Outstanding receivables past their due date; not every balance requires the same action." tone="red" emphasis />
-                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Recovered this cycle" state={recoveredThisCycle > 0 ? "Confirmed" : "No payment event"} value={recoveredThisCycle > 0 ? money(recoveredThisCycle) : "—"} detail="Sum of persisted payment events in the current operating cycle." tone="green" />
+                <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Observed recovery this cycle" state={recoveredThisCycle > 0 ? "Confirmed" : "No payment event"} value={recoveredThisCycle > 0 ? money(recoveredThisCycle) : "—"} detail="Sum of persisted payment events in the current operating cycle." tone="green" />
                 <PortfolioMetricCard className="min-w-[76vw] snap-start sm:min-w-0" label="Open recovery cases" value={String(recovery.data.open_cases ?? recovery.data.total_cases)} detail="Cases not currently resolved or closed." tone="amber" />
               </div>
             </section>
