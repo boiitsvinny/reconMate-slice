@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { type CSSProperties, useEffect, useRef } from "react";
 
 export function AmbientBackdrop() {
   const glowRef = useRef<HTMLDivElement>(null);
@@ -48,10 +48,20 @@ export function AmbientBackdrop() {
     };
   }, []);
 
+  const dust = Array.from({ length: 48 }, (_, index) => ({
+    left: `${(index * 37 + 9) % 97}%`,
+    top: `${(index * 61 + 13) % 94}%`,
+    width: `${index % 11 === 0 ? 3 : index % 4 === 0 ? 2 : 1}px`,
+    height: `${index % 11 === 0 ? 3 : index % 4 === 0 ? 2 : 1}px`,
+    animationDelay: `${-(index * 2.7)}s`,
+    animationDuration: `${26 + (index * 7) % 25}s`,
+    "--dx": `${((index * 17) % 53) - 26}px`,
+    "--dy": `${-18 - (index * 13) % 45}px`,
+  })) as Array<CSSProperties & Record<"--dx" | "--dy", string>>;
+
   return <div className="ambient-backdrop" aria-hidden="true">
     <div ref={glowRef} className="ambient-pointer-glow" />
-    <div className="ambient-orbs">{Array.from({ length: 6 }, (_, index) => <i key={index} />)}</div>
-    <div className="ambient-particles">{Array.from({ length: 12 }, (_, index) => <i key={index} />)}</div>
+    <div className="ambient-particles">{dust.map((style, index) => <i key={index} style={style} />)}</div>
     <div className="ambient-texture" />
     <div className="ambient-vignette" />
   </div>;
