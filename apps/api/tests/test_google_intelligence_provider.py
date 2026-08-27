@@ -69,6 +69,11 @@ def _failure_log(caplog) -> dict:
     return json.loads(record.message)
 
 
+def _self_test_log(caplog) -> dict:
+    record = next(record for record in reversed(caplog.records) if "gemini_provider_self_test" in record.message)
+    return json.loads(record.message)
+
+
 def _provider(payload=None, error=None, api_key="test-key"):
     provider = GoogleGenAICommunicationIntelligenceProvider(
         api_key=api_key, model="gemini-3.7-flash", timeout_seconds=3,
@@ -155,6 +160,72 @@ def test_installed_sdk_serializes_current_interactions_structured_output_shape()
     assert "additionalProperties" not in json.dumps(serialized_schema)
     assert not any(key in json.dumps(serialized_schema) for key in ("$defs", "$ref", "oneOf", "anyOf", "const"))
     assert "response_mime_type" not in body
+
+
+def test_real_bad_request_metadata_is_sanitized_and_minimal_probe_is_comparable(caplog) -> None:
+    provider_module._MINIMAL_SELF_TEST_ATTEMPTED = False
+    captured = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        if len(captured) == 1:
+            return httpx.Response(400, json={"error": {
+                "code": 400,
+                "status": "INVALID_ARGUMENT",
+                "message": f"raw message contains {SECRET} and {MESSAGE}",
+                "details": [{
+                    "@type": "type.googleapis.com/google.rpc.BadRequest",
+                    "fieldViolations": [{
+                        "field": "response_format.schema.properties.candidates",
+                        "description": f"Unsupported schema field; key={SECRET}; source={MESSAGE}",
+                    }],
+                }],
+            }})
+        return httpx.Response(200, json={
+            "id": "minimal-test",
+            "object": "interaction",
+            "status": "completed",
+            "model": "gemini-3.7-flash",
+            "steps": [{"type": "model_output", "content": [{"type": "text", "text": '{"result":"ok"}'}]}],
+        })
+
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = genai.Client(
+        api_key=SECRET,
+        http_options=genai_types.HttpOptions(
+            base_url="https://gemini-error.test",
+            httpx_client=http_client,
+            retry_options=genai_types.HttpRetryOptions(attempts=1),
+        ),
+    )
+    provider = _provider(api_key=SECRET)
+    provider.client = client
+    try:
+        with caplog.at_level(logging.INFO, logger="app.intelligence.provider"):
+            with pytest.raises(ProviderError, match="provider is unavailable"):
+                provider.analyze(MESSAGE, date(2026, 8, 26))
+    finally:
+        client.close()
+
+    failure = _failure_log(caplog)
+    assert failure["exception_type"] == "BadRequestError"
+    assert failure["google_error_status"] == "INVALID_ARGUMENT"
+    assert failure["google_error_code"] == 400
+    assert failure["field_violation_path"] == "response_format.schema.properties.candidates"
+    assert "Unsupported schema field" in failure["field_violation_description"]
+    assert SECRET not in json.dumps(failure) and MESSAGE not in json.dumps(failure)
+    probe = _self_test_log(caplog)
+    assert probe["outcome"] == "passed"
+    assert probe["same_model_and_request_options_as_reconmate"] is True
+    assert probe["input_mode"] == "fixed_non_customer_probe"
+    assert len(captured) == 2
+    reconmate, minimal = captured
+    assert set(reconmate) == set(minimal) == {"model", "input", "response_format", "generation_config", "store"}
+    assert reconmate["model"] == minimal["model"] == "gemini-3.7-flash"
+    assert reconmate["generation_config"] == minimal["generation_config"]
+    assert reconmate["store"] == minimal["store"] is False
+    assert reconmate["response_format"]["schema"] == provider_module._EXTRACTION_SCHEMA
+    assert minimal["response_format"]["schema"] == provider_module._MINIMAL_SELF_TEST_SCHEMA
 
 
 @pytest.mark.parametrize("payload", [

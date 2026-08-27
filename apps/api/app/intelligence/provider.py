@@ -7,6 +7,7 @@ import json
 import logging
 import re
 from time import perf_counter
+from threading import Lock
 from typing import Any
 
 from google import genai
@@ -33,6 +34,82 @@ _SAFE_FAILURE_MESSAGES = {
     "unknown_provider_error": "The Gemini provider request failed unexpectedly.",
 }
 
+_MINIMAL_SELF_TEST_SCHEMA = {
+    "type": "object",
+    "properties": {"result": {"type": "string"}},
+    "required": ["result"],
+}
+_MINIMAL_SELF_TEST_LOCK = Lock()
+_MINIMAL_SELF_TEST_ATTEMPTED = False
+
+
+def _parsed_error_body(exc: BaseException) -> dict[str, Any] | None:
+    body = getattr(exc, "body", None)
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if hasattr(body, "model_dump"):
+        body = body.model_dump(mode="json")
+    return body if isinstance(body, dict) else None
+
+
+def _safe_identifier(value: object, secret: str | None) -> str | None:
+    if value is None:
+        return None
+    rendered = str(value)
+    if secret:
+        rendered = rendered.replace(secret, "[REDACTED]")
+    rendered = re.sub(r"AIza[0-9A-Za-z_-]{16,}", "[REDACTED]", rendered)
+    rendered = re.sub(r"[^A-Za-z0-9_.:/\[\]-]", "_", rendered)[:160]
+    return rendered or None
+
+
+def _google_error_metadata(
+    exc: BaseException, *, secret: str | None, sensitive_text: str | None,
+) -> dict[str, object | None]:
+    body = _parsed_error_body(exc)
+    error = body.get("error") if body else None
+    if not isinstance(error, dict):
+        error = body if isinstance(body, dict) else {}
+    google_status = _safe_identifier(error.get("status"), secret)
+    google_code = error.get("code")
+    google_code = google_code if isinstance(google_code, int) else _safe_identifier(google_code, secret)
+    path = description = None
+    details = error.get("details")
+    if isinstance(details, list):
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            violations = detail.get("fieldViolations") or detail.get("field_violations")
+            if not isinstance(violations, list) or not violations:
+                continue
+            violation = violations[0]
+            if not isinstance(violation, dict):
+                continue
+            path = _safe_identifier(violation.get("field"), secret)
+            raw_description = violation.get("description")
+            if isinstance(raw_description, str):
+                if path and "input" in path.casefold():
+                    description = "Google rejected an input field; content was redacted."
+                else:
+                    if secret:
+                        raw_description = raw_description.replace(secret, "[REDACTED]")
+                    if sensitive_text:
+                        raw_description = raw_description.replace(sensitive_text, "[REDACTED_CUSTOMER_MESSAGE]")
+                    raw_description = re.sub(r"AIza[0-9A-Za-z_-]{16,}", "[REDACTED]", raw_description)
+                    raw_description = re.sub(r"(?i)bearer\s+[^\s,;]+", "Bearer [REDACTED]", raw_description)
+                    raw_description = re.sub(r"(?i)(api[_-]?key|key|token|secret)\s*[:=]\s*[^\s,;]+", r"\1=[REDACTED]", raw_description)
+                    description = " ".join(raw_description.split())[:240]
+            break
+    return {
+        "google_error_status": google_status,
+        "google_error_code": google_code,
+        "field_violation_path": path,
+        "field_violation_description": description,
+    }
+
 
 def _http_status(exc: BaseException) -> int | None:
     for value in (getattr(exc, "status_code", None), getattr(getattr(exc, "response", None), "status_code", None)):
@@ -48,19 +125,15 @@ def _provider_error_code(exc: BaseException, secret: str | None) -> str | None:
         getattr(exc, "status", None),
         getattr(exc, "code", None),
     ]
-    body = getattr(exc, "body", None)
-    if isinstance(body, dict):
+    body = _parsed_error_body(exc)
+    if body:
         error = body.get("error")
         if isinstance(error, dict):
             values.extend((error.get("status"), error.get("code")))
     for value in values:
         if value is None:
             continue
-        rendered = str(value)
-        if secret:
-            rendered = rendered.replace(secret, "[REDACTED]")
-        rendered = re.sub(r"AIza[0-9A-Za-z_-]{16,}", "[REDACTED]", rendered)
-        rendered = re.sub(r"[^A-Za-z0-9_.:/\[\]-]", "_", rendered)[:80]
+        rendered = _safe_identifier(value, secret)
         if rendered:
             return rendered
     return None
@@ -85,7 +158,7 @@ def _classify_provider_failure(exc: BaseException) -> str:
 
 def _log_provider_failure(
     *, model: str | None, category: str, exc: BaseException, elapsed_ms: int,
-    secret: str | None = None,
+    secret: str | None = None, sensitive_text: str | None = None,
 ) -> None:
     # This is deliberately an allowlisted payload: no prompt, headers, raw response,
     # traceback, or exception string is emitted.
@@ -100,7 +173,39 @@ def _log_provider_failure(
         "message": _SAFE_FAILURE_MESSAGES[category],
         "elapsed_ms": max(0, elapsed_ms),
     }
+    payload.update(_google_error_metadata(exc, secret=secret, sensitive_text=sensitive_text))
     logger.error(json.dumps(payload, separators=(",", ":")))
+
+
+def _log_self_test(
+    *, model: str, outcome: str, elapsed_ms: int, exc: BaseException | None = None,
+    secret: str | None = None,
+) -> None:
+    payload = {
+        "event": "gemini_provider_self_test",
+        "provider": "google",
+        "model": model,
+        "probe": "minimal_documented_schema",
+        "outcome": outcome,
+        "request_fields": ["generation_config", "input", "model", "response_format", "store"],
+        "same_model_and_request_options_as_reconmate": True,
+        "input_mode": "fixed_non_customer_probe",
+        "exception_type": exc.__class__.__name__ if exc else None,
+        "http_status": _http_status(exc) if exc else None,
+        "provider_error_code": _provider_error_code(exc, secret) if exc else None,
+        "elapsed_ms": max(0, elapsed_ms),
+    }
+    if exc:
+        payload.update(_google_error_metadata(exc, secret=secret, sensitive_text=None))
+        logger.error(json.dumps(payload, separators=(",", ":")))
+    else:
+        payload.update({
+            "google_error_status": None,
+            "google_error_code": None,
+            "field_violation_path": None,
+            "field_violation_description": None,
+        })
+        logger.info(json.dumps(payload, separators=(",", ":")))
 
 
 class ProviderError(RuntimeError):
@@ -277,6 +382,44 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
             http_options=genai_types.HttpOptions(
                 retry_options=genai_types.HttpRetryOptions(attempts=1),
             ),
+            )
+
+    def _run_minimal_structured_output_self_test(self) -> None:
+        global _MINIMAL_SELF_TEST_ATTEMPTED
+        with _MINIMAL_SELF_TEST_LOCK:
+            if _MINIMAL_SELF_TEST_ATTEMPTED:
+                return
+            _MINIMAL_SELF_TEST_ATTEMPTED = True
+        started_at = perf_counter()
+        try:
+            interaction = self.client.interactions.create(
+                model=self.model_version,
+                input="Return a JSON object whose result field is the word ok.",
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": _MINIMAL_SELF_TEST_SCHEMA,
+                },
+                generation_config={"max_output_tokens": 1200},
+                store=False,
+                timeout=self.timeout_seconds,
+            )
+            decoded = json.loads(interaction.output_text or "")
+            if not isinstance(decoded, dict) or not isinstance(decoded.get("result"), str):
+                raise ValueError("Minimal structured output was malformed")
+        except Exception as exc:
+            _log_self_test(
+                model=self.model_version,
+                outcome="failed",
+                elapsed_ms=round((perf_counter() - started_at) * 1000),
+                exc=exc,
+                secret=self._redaction_secret,
+            )
+            return
+        _log_self_test(
+            model=self.model_version,
+            outcome="passed",
+            elapsed_ms=round((perf_counter() - started_at) * 1000),
         )
 
     def analyze(self, content: str, reference_date: date | None = None) -> CommunicationAnalysisResult:
@@ -307,7 +450,10 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
                 exc=exc,
                 elapsed_ms=round((perf_counter() - started_at) * 1000),
                 secret=self._redaction_secret,
+                sensitive_text=content,
             )
+            if category == "request_or_schema_error":
+                self._run_minimal_structured_output_self_test()
             if category == "timeout":
                 raise ProviderError("The live model timed out; no fact was written.") from exc
             raise ProviderError("The live model provider is unavailable; no fact was written.") from exc
