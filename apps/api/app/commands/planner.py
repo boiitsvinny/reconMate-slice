@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
@@ -14,11 +14,13 @@ from app.commands.schemas import (
     CommandRequest,
     EntityReference,
     ExecutionMode,
+    DirectQueryRecord,
     ExclusionCount,
     InspectionScope,
     ProposalActionType,
     QueryEntity,
     QueryEvidence,
+    QueryResultKind,
     RankingEvidence,
     StructuredQuery,
 )
@@ -39,6 +41,8 @@ class PlanningOutput:
     understanding_summary: str
     warnings: list[str]
     query_evidence: QueryEvidence
+    result_kind: QueryResultKind = QueryResultKind.FILTER
+    direct_records: list[DirectQueryRecord] = field(default_factory=list)
 
 
 class CommandPlanner:
@@ -54,6 +58,8 @@ class CommandPlanner:
         analyzed: list[IntelligenceResult] = []
         warnings: list[str] = []
         evidence = QueryEvidence()
+        result_kind = QueryResultKind.FILTER
+        direct_records: list[DirectQueryRecord] = []
         summary = "The command could not be mapped safely to a supported operation."
         limit = interpreted.filters.top_n or DEFAULT_RESULT_LIMIT
         intent = interpreted.intent
@@ -80,8 +86,49 @@ class CommandPlanner:
                 query = query.model_copy(update={"limit": DEFAULT_RESULT_LIMIT})
                 interpreted.query = query
                 interpreted.filters = interpreted.filters.model_copy(update={"top_n": query.limit})
-            if query.entity.value == "RECOVERY_CASES":
-                execution = tools.execute_case_query(query)
+            if query.entity in {QueryEntity.INVOICES, QueryEntity.PAYMENTS}:
+                execution = tools.execute_direct_query(query, customer_id=request.context_customer_id)
+                direct_records = execution.records
+                result_kind = (
+                    QueryResultKind.COUNT if query.count_only else
+                    QueryResultKind.EXACT_ENTITY if query.exact_reference else
+                    QueryResultKind.PAYMENTS if query.entity is QueryEntity.PAYMENTS else
+                    QueryResultKind.INVOICES
+                )
+                noun = "payments" if query.entity is QueryEntity.PAYMENTS else "invoices"
+                summary = f"Found {execution.matched} persisted {noun} matching the structured query."
+                evidence = QueryEvidence(
+                    records_inspected=execution.inspected,
+                    records_matched=execution.matched,
+                    records_excluded=execution.inspected - execution.matched,
+                    records_returned=0 if query.count_only else len(direct_records),
+                    inspection_scope=execution.scope,
+                    exclusions=[ExclusionCount(reason=reason, count=count) for reason, count in execution.exclusions],
+                )
+                if query.count_only:
+                    actions.append(self._query_count_action(plan_id, execution.matched, noun))
+                    direct_records = []
+            elif query.comparison_requested:
+                compared = tools.resolve_comparison(request.command)
+                analyzed = compared
+                result_kind = QueryResultKind.COMPARE
+                summary = (
+                    f"Compared {compared[0].entity_name} and {compared[1].entity_name} using current persisted recovery facts."
+                    if len(compared) == 2 else
+                    "A comparison requires two unambiguous persisted customer names."
+                )
+                if len(compared) != 2:
+                    warnings.append("ReconMate could not resolve exactly two persisted customers for comparison; no ranking fallback was used.")
+                else:
+                    actions.extend(self._customer_review(plan_id, item) for item in analyzed)
+                evidence = QueryEvidence(
+                    records_inspected=len(tools.customers()), records_matched=len(compared),
+                    records_excluded=max(0, len(tools.customers()) - len(compared)), records_returned=len(compared),
+                    inspection_scope=InspectionScope(customers=len(tools.customers())),
+                    ranking=self._ranking_evidence(compared),
+                )
+            elif query.entity.value == "RECOVERY_CASES":
+                execution = tools.execute_case_query(query, customer_id=request.context_customer_id)
                 candidates = execution.records
                 analyzed = [item.intelligence for item in candidates]
                 summary = f"Found {len(candidates)} recovery cases matching the composed current-state query."
@@ -103,6 +150,13 @@ class CommandPlanner:
                 else:
                     actions.extend(self._customer_review(plan_id, item) for item in analyzed)
                 evidence = self._execution_evidence(execution, analyzed, tools, query)
+
+            if query.count_only:
+                result_kind = QueryResultKind.COUNT
+            elif query.time_scope.value == "LATEST_CYCLE":
+                result_kind = QueryResultKind.LATEST_CHANGES
+            elif result_kind is QueryResultKind.FILTER and (query.limit is not None or query.sort_by.value != "RISK_SCORE"):
+                result_kind = QueryResultKind.RANK
 
         elif intent is CommandIntentType.CUSTOMER_ANALYSIS:
             result = tools.get_customer_intelligence(request.context_customer_id) if request.context_customer_id else None
@@ -223,7 +277,7 @@ class CommandPlanner:
                 ranking=self._ranking_evidence(eligible), latest_cycle=tools.latest_cycle_evidence(eligible),
             )
 
-        if not actions and intent is not CommandIntentType.UNKNOWN and not warnings:
+        if not actions and not direct_records and evidence.records_matched == 0 and intent is not CommandIntentType.UNKNOWN and not warnings:
             warnings.append("No current data matched the command filters; no action was invented.")
 
         requires_confirmation = any(action.requires_confirmation for action in actions)
@@ -239,7 +293,7 @@ class CommandPlanner:
         entities = [
             EntityReference(entity_type=item.entity_type, entity_id=item.entity_id, display_name=item.entity_name)
             for item in analyzed
-        ]
+        ] + [EntityReference(entity_type=item.entity_type, entity_id=item.entity_id, display_name=item.display_name) for item in direct_records]
         plan = CommandPlan(
             plan_id=plan_id,
             created_at=created_at,
@@ -257,7 +311,13 @@ class CommandPlanner:
                 records_inspected=len(analyzed), records_matched=len(analyzed), records_returned=len(analyzed),
                 ranking=self._ranking_evidence(analyzed), latest_cycle=tools.latest_cycle_evidence(analyzed),
             )
-        return PlanningOutput(plan=plan, analyzed_entities=analyzed, understanding_summary=summary, warnings=warnings, query_evidence=evidence)
+        if intent in {CommandIntentType.CUSTOMER_ANALYSIS, CommandIntentType.CASE_ANALYSIS, CommandIntentType.EXPLAIN_RECOMMENDATION}:
+            result_kind = QueryResultKind.EXACT_ENTITY
+        elif intent in {CommandIntentType.PREPARE_FOLLOW_UPS, CommandIntentType.PREPARE_RECOVERY_ACTIONS, CommandIntentType.PREPARE_PAYMENT_REMINDERS}:
+            result_kind = QueryResultKind.PREPARE_ACTION
+        elif intent is CommandIntentType.PORTFOLIO_ANALYSIS:
+            result_kind = QueryResultKind.RANK
+        return PlanningOutput(plan=plan, analyzed_entities=analyzed, understanding_summary=summary, warnings=warnings, query_evidence=evidence, result_kind=result_kind, direct_records=direct_records)
 
     def _execution_evidence(
         self,

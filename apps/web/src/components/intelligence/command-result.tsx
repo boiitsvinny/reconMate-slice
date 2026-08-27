@@ -57,6 +57,7 @@ export function CommandResultView({ command, result, customer, customerCases = [
   const isUnknown = result.interpreted_intent.intent === "UNKNOWN";
   const showOperationalPlan = result.plan.execution_mode !== "READ_ONLY";
   const reminderPlan = result.interpreted_intent.intent === "PREPARE_PAYMENT_REMINDERS";
+  const directQuery = result.interpreted_intent.query.entity === "INVOICES" || result.interpreted_intent.query.entity === "PAYMENTS";
   const nonSendableProposals = reminderPlan
     ? result.plan.proposed_actions.filter((proposal) => proposal.reminder_artifact?.status !== "PREPARED_FOR_REVIEW")
     : [];
@@ -69,7 +70,7 @@ export function CommandResultView({ command, result, customer, customerCases = [
     setTargetNotice(opened ? null : "This result has no active recovery case workspace. Its current intelligence remains available below.");
   };
   if (isUnknown) {
-    const suggestions = ["Who should I focus on today?", "Show customers with broken promises", "Show customers blocked by disputes", "What changed this cycle?"];
+    const suggestions = ["Who should I focus on today?", "Show overdue invoices above 2 lakh", "Payments received this cycle", "Compare Mintleaf and Prime"];
     return (
       <Panel className="mt-6 border-amber-300/15">
         <SectionHeader eyebrow="Unsupported request" title="ReconMate cannot answer this from the current receivables model." detail={result.interpreted_intent.guidance ?? result.understanding_summary} prominent />
@@ -80,15 +81,18 @@ export function CommandResultView({ command, result, customer, customerCases = [
 
   return (
     <div className="mt-6 space-y-6" aria-live="polite">
+      <CommandAnswer command={command} result={result} />
       {result.interpreted_intent.intent === "CUSTOMER_ANALYSIS" && customer && result.analyzed_entities[0]?.entity_id === customer.id && (
         <CustomerOperationalBrief customer={customer} cases={customerCases} entity={result.analyzed_entities[0]} result={result} onOpenWorkspace={onOpenWorkspace} />
       )}
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,.92fr)]">
-        <InterpretationPanel command={command} result={result} />
+        <InterpretationPanel result={result} />
         <InspectionPanel result={result} />
       </section>
 
-      <RankedEvidencePanel result={result} onOpenTarget={onOpenTarget ? openTarget : undefined} />
+      {result.direct_records.length > 0 && <DirectRecordsPanel result={result} />}
+      {!directQuery && result.result_kind !== "COMPARE" && <RankedEvidencePanel result={result} onOpenTarget={onOpenTarget ? openTarget : undefined} />}
+      {directQuery && result.direct_records.length === 0 && result.result_kind !== "COUNT" && <Panel className="overflow-hidden"><SectionHeader eyebrow="Query outcome" title="No persisted records matched" detail={`${result.query_evidence.records_inspected} records were inspected and every structured condition was applied.`} prominent /></Panel>}
 
       {result.query_evidence.latest_cycle && <LatestCyclePanel result={result} />}
 
@@ -158,6 +162,46 @@ export function CommandResultView({ command, result, customer, customerCases = [
   );
 }
 
+function CommandAnswer({ command, result }: { command: string; result: CommandResult }) {
+  const count = result.query_evidence.records_matched;
+  const entity = result.analyzed_entities[0];
+  const answer = result.result_kind === "COUNT"
+    ? `${count} matching ${result.interpreted_intent.query.entity.toLowerCase().replaceAll("_", " ")}`
+    : result.result_kind === "COMPARE"
+      ? result.analyzed_entities.length === 2 ? `${result.analyzed_entities[0].entity_name} compared with ${result.analyzed_entities[1].entity_name}` : "Two unambiguous customer records were not resolved"
+      : result.result_kind === "EXACT_ENTITY" && result.direct_records[0]
+        ? result.direct_records[0].display_name
+        : result.result_kind === "EXACT_ENTITY" && entity
+          ? `${entity.entity_name} · ${entity.recommendation.title}`
+          : result.result_kind === "INVOICES" || result.result_kind === "PAYMENTS"
+            ? `${count} matching persisted ${result.result_kind.toLowerCase()}`
+            : result.understanding_summary;
+  return <Panel className="overflow-hidden border-sky-300/20">
+    <div className="grid gap-px bg-white/[.06] lg:grid-cols-[.85fr_1.1fr_1.35fr]">
+      <AnswerCell label="What you asked" value={`“${command}”`} />
+      <AnswerCell label="What ReconMate understood" value={objectives[result.interpreted_intent.intent]} />
+      <AnswerCell label="Answer" value={answer} primary />
+    </div>
+  </Panel>;
+}
+
+function AnswerCell({ label: answerLabel, value, primary = false }: { label: string; value: string; primary?: boolean }) {
+  return <div className={primary ? "bg-sky-300/[.045] p-4 sm:p-5" : "bg-[#08111f]/90 p-4 sm:p-5"}><p className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-500">{answerLabel}</p><p className={`mt-2 leading-6 ${primary ? "text-base font-semibold text-white" : "text-sm text-slate-300"}`}>{value}</p></div>;
+}
+
+function DirectRecordsPanel({ result }: { result: CommandResult }) {
+  const payments = result.interpreted_intent.query.entity === "PAYMENTS";
+  return <Panel className="overflow-hidden">
+    <SectionHeader eyebrow="Persisted factual records" title={payments ? "Payment records" : "Invoice records"} detail={`${result.query_evidence.records_returned} of ${result.query_evidence.records_matched} matching records shown`} prominent />
+    <div className="operational-scrollbar max-h-[34rem] overflow-auto" role="region" aria-label={payments ? "Matching payments" : "Matching invoices"} tabIndex={0}>
+      <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+        <thead className="sticky top-0 z-10 bg-[#08111f]"><tr className="border-b border-white/[.07] text-[10px] uppercase tracking-[.12em] text-slate-500"><th className="px-5 py-3">{payments ? "Payment" : "Invoice"}</th><th className="px-5 py-3">Customer</th><th className="px-5 py-3">Invoice</th><th className="px-5 py-3">{payments ? "Amount" : "Outstanding"}</th><th className="px-5 py-3">{payments ? "Payment date" : "Due / age"}</th><th className="px-5 py-3">Status</th></tr></thead>
+        <tbody className="divide-y divide-white/[.055]">{result.direct_records.map((record) => <tr key={record.entity_id} className="interactive-row"><td className="px-5 py-4 font-semibold text-sky-100">{record.display_name}</td><td className="px-5 py-4 text-slate-200">{record.customer_name}</td><td className="px-5 py-4 text-slate-300">{record.invoice_number}</td><td className="px-5 py-4 font-semibold tabular-nums text-white">{formatMoney(record.amount ?? record.outstanding_amount ?? "0")}</td><td className="px-5 py-4 text-slate-300">{payments ? record.payment_date : `${record.due_date ?? "—"} · ${record.days_overdue ?? 0}d overdue`}</td><td className="px-5 py-4"><StatusPill tone={record.status === "PAID" ? "emerald" : record.status === "DISPUTED" ? "amber" : "slate"}>{record.status ?? "Persisted"}</StatusPill></td></tr>)}</tbody>
+      </table>
+    </div>
+  </Panel>;
+}
+
 function CustomerOperationalBrief({ customer, cases, entity, result, onOpenWorkspace }: { customer: Customer; cases: PriorityCase[]; entity: CommandResult["analyzed_entities"][number]; result: CommandResult; onOpenWorkspace?: (customerId: string) => boolean }) {
   const caseBlocker = cases.find((item) => !item.allowed)?.reason;
   const blocker = caseBlocker ?? (entity.metrics.active_dispute_count
@@ -190,20 +234,21 @@ function SemanticSummary({ label: fieldLabel, value, detail }: { label: string; 
   return <div className="bg-[#08111f]/80 p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-400">{fieldLabel}</p><p className="mt-2 text-lg font-semibold text-white">{value}</p><p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p></div>;
 }
 
-function InterpretationPanel({ command, result }: { command: string; result: CommandResult }) {
+function InterpretationPanel({ result }: { result: CommandResult }) {
   const query = result.interpreted_intent.query;
   const conditions = queryConditions(result);
   const exclusions = queryExclusions(result);
   const returnedLimit = result.query_evidence.records_matched > result.query_evidence.records_returned ? String(result.query_evidence.records_returned) : "All matches";
-  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Query" title="What ReconMate understood" detail="The structured query produced by the command planner" prominent /><div className="space-y-4 p-5"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Your request</p><p className="mt-1.5 text-sm leading-6 text-slate-200">“{command}”</p></div><div className="rounded-xl border border-sky-300/12 bg-sky-300/[.035] p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-sky-300">Primary objective</p><p className="mt-2 text-base font-semibold leading-6 text-white">{objectives[result.interpreted_intent.intent]}</p></div><dl className="grid gap-x-5 gap-y-3 text-xs sm:grid-cols-2"><QueryRow term="Looking for" value={query.entity === "RECOVERY_CASES" ? "Recovery cases" : "Customers"} /><QueryRow term="Conditions" value={conditions.join(" + ") || "Current portfolio state"} /><QueryRow term="Excluded" value={exclusions.join(" + ") || "No explicit exclusions"} /><QueryRow term="Order" value={queryOrder(result)} /><QueryRow term="Limit" value={query.count_only ? "Count only" : query.limit ? String(query.limit) : returnedLimit} /><QueryRow term="Scope" value={query.time_scope === "LATEST_CYCLE" ? "Latest simulation cycle" : "Current portfolio"} /></dl></div></Panel>;
+  const entityLabel = query.entity === "RECOVERY_CASES" ? "Recovery cases" : query.entity === "INVOICES" ? "Invoices" : query.entity === "PAYMENTS" ? "Payments" : "Customers";
+  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Structured scope" title="Filters and execution boundary" detail="Deterministic query details behind the answer above" prominent /><div className="p-5"><dl className="grid gap-x-5 gap-y-3 text-xs sm:grid-cols-2"><QueryRow term="Looking for" value={entityLabel} /><QueryRow term="Conditions" value={conditions.join(" + ") || "Current portfolio state"} /><QueryRow term="Excluded" value={exclusions.join(" + ") || "No explicit exclusions"} /><QueryRow term="Order" value={queryOrder(result)} /><QueryRow term="Limit" value={query.count_only ? "Count only" : query.limit ? String(query.limit) : returnedLimit} /><QueryRow term="Scope" value={query.time_scope === "LATEST_CYCLE" ? "Latest simulation cycle" : "Current portfolio"} /></dl></div></Panel>;
 }
 
 function InspectionPanel({ result }: { result: CommandResult }) {
   const evidence = result.query_evidence;
   const scope = evidence.inspection_scope;
-  const scopeItems = [[scope.customers, "customers"], [scope.invoices, "invoices"], [scope.promises, "promises"], [scope.active_disputes, "active disputes"], [scope.recovery_cases, "recovery cases"], [scope.latest_cycle_events, "latest-cycle events"]] as const;
+  const scopeItems = [[scope.customers, "customers"], [scope.invoices, "invoices"], [scope.payments, "payments"], [scope.promises, "promises"], [scope.active_disputes, "active disputes"], [scope.recovery_cases, "recovery cases"], [scope.latest_cycle_events, "latest-cycle events"]] as const;
   const query = result.interpreted_intent.query;
-  const relevantNames = new Set<string>(["customers"]);
+  const relevantNames = new Set<string>([query.entity === "PAYMENTS" ? "payments" : query.entity === "INVOICES" ? "invoices" : "customers"]);
   if (query.entity === "RECOVERY_CASES") relevantNames.add("recovery cases");
   if (query.broken_promise || query.active_promise) relevantNames.add("promises");
   if (query.active_dispute !== null) relevantNames.add("active disputes");
@@ -238,7 +283,7 @@ function AnalysisList({ title, items, empty }: { title: string; items: string[];
 function queryConditions(result: CommandResult): string[] {
   const query = result.interpreted_intent.query;
   const booleans = [[query.overdue, "Overdue"], [query.broken_promise, "Broken promise"], [query.active_promise, "Active promise"], [query.active_dispute, "Active dispute"], [query.partial_payment, "Partial payment"], [query.recent_payment, "Recent payment"], [query.actionable, "Actionable"], [query.blocked, "Blocked"], [query.monitoring, "Monitoring"]] as const;
-  return [...query.risk_levels.map((level) => `${label(level)} risk`), ...booleans.filter(([value]) => value === true).map(([, text]) => text), ...(query.min_days_overdue !== null ? [`At least ${query.min_days_overdue} days overdue`] : []), ...(query.max_days_overdue !== null ? [`At most ${query.max_days_overdue} days overdue`] : []), ...(query.min_score !== null ? [`Score at least ${query.min_score}`] : []), ...(query.max_score !== null ? [`Score at most ${query.max_score}`] : []), ...(query.min_exposure !== null ? [`Overdue exposure at least INR ${query.min_exposure}`] : []), ...(query.max_exposure !== null ? [`Overdue exposure at most INR ${query.max_exposure}`] : [])];
+  return [...query.risk_levels.map((level) => `${label(level)} risk`), ...(query.exact_reference ? [`Exact reference ${query.exact_reference}`] : []), ...booleans.filter(([value]) => value === true).map(([, text]) => text), ...(query.min_days_overdue !== null ? [`At least ${query.min_days_overdue} days overdue`] : []), ...(query.max_days_overdue !== null ? [`At most ${query.max_days_overdue} days overdue`] : []), ...(query.min_score !== null ? [`Score at least ${query.min_score}`] : []), ...(query.max_score !== null ? [`Score at most ${query.max_score}`] : []), ...(query.min_exposure !== null ? [`Amount at least INR ${query.min_exposure}`] : []), ...(query.max_exposure !== null ? [`Amount at most INR ${query.max_exposure}`] : [])];
 }
 
 function queryExclusions(result: CommandResult): string[] {
@@ -249,6 +294,8 @@ function queryExclusions(result: CommandResult): string[] {
 
 function queryOrder(result: CommandResult): string {
   const query = result.interpreted_intent.query;
+  if (query.entity === "PAYMENTS") return query.descending ? "Latest payment date" : "Oldest payment date";
+  if (query.entity === "INVOICES" && query.sort_by === "RISK_SCORE") return query.descending ? "Latest due date" : "Earliest due date";
   const names = { RISK_SCORE: "current intelligence score", TOTAL_EXPOSURE: "total exposure", OVERDUE_EXPOSURE: "overdue exposure", DAYS_OVERDUE: "oldest invoice age", LAST_PAYMENT: "latest payment activity" };
   return `${query.descending ? "Highest" : "Lowest"} ${names[query.sort_by]}`;
 }

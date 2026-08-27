@@ -13,6 +13,9 @@ const examples = [
   "Show customers with broken promises",
   "Show customers blocked by disputes",
   "What changed this cycle?",
+  "Show overdue invoices above 2 lakh",
+  "Payments received this cycle",
+  "Compare Mintleaf and Prime",
 ];
 
 type CommandCenterProps = {

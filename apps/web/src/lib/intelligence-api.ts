@@ -88,7 +88,9 @@ export type CommandFilters = {
 };
 
 export type StructuredQuery = {
-  entity: "CUSTOMERS" | "RECOVERY_CASES";
+  entity: "CUSTOMERS" | "RECOVERY_CASES" | "INVOICES" | "PAYMENTS";
+  exact_reference: string | null;
+  comparison_requested: boolean;
   risk_levels: PriorityLevel[];
   overdue: boolean | null;
   broken_promise: boolean | null;
@@ -121,6 +123,7 @@ export type QueryEvidence = {
   inspection_scope: {
     customers: number;
     invoices: number;
+    payments: number;
     promises: number;
     active_disputes: number;
     recovery_cases: number;
@@ -207,6 +210,25 @@ export type CommandResult = {
     guidance: string | null;
   };
   understanding_summary: string;
+  result_kind: "FILTER" | "RANK" | "COUNT" | "EXACT_ENTITY" | "COMPARE" | "LATEST_CHANGES" | "INVOICES" | "PAYMENTS" | "PREPARE_ACTION";
+  direct_records: {
+    entity_type: "INVOICE" | "PAYMENT";
+    entity_id: string;
+    display_name: string;
+    customer_id: string;
+    customer_name: string;
+    invoice_id: string;
+    invoice_number: string;
+    status: string | null;
+    amount: string | null;
+    original_amount: string | null;
+    outstanding_amount: string | null;
+    issue_date: string | null;
+    due_date: string | null;
+    days_overdue: number | null;
+    payment_date: string | null;
+    reference: string | null;
+  }[];
   query_evidence: QueryEvidence;
   analyzed_entities: IntelligenceResult[];
   plan: {

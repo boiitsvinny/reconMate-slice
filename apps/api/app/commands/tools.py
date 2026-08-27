@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+import re
 from typing import Any
 from uuid import UUID
 
@@ -15,13 +16,14 @@ from app.intelligence.operational_service import (
     evaluate_customer_intelligence,
     evaluate_portfolio_intelligence,
 )
-from app.commands.schemas import InspectionScope, LatestCycleEvidence, QuerySort, QueryTimeScope, StructuredQuery
+from app.commands.schemas import DirectQueryRecord, InspectionScope, LatestCycleEvidence, QueryEntity, QuerySort, QueryTimeScope, StructuredQuery
 from app.models.domain import (
     Communication,
     AuditEvent,
     Customer,
     Invoice,
     InvoiceStatus,
+    Payment,
     PromiseToPay,
     RecoveryCase,
     SimulationState,
@@ -129,6 +131,113 @@ class CommandTools:
     def get_case(self, case_id: UUID | str) -> RecoveryCase | None:
         return next((item for item in self.cases() if str(item.id) == str(case_id)), None)
 
+    def resolve_comparison(self, command: str) -> list[IntelligenceResult]:
+        """Resolve exactly two persisted customer names without guessing a ranking fallback."""
+        normalized = " ".join(re.sub(r"[^a-z0-9]+", " ", command.lower()).split())
+        matches: list[tuple[int, Customer]] = []
+        ignored = {"office", "mart", "partners", "network", "systems", "works", "manufacturing", "infrastructure"}
+        for customer in self.customers():
+            name = " ".join(re.sub(r"[^a-z0-9]+", " ", customer.name.lower()).split())
+            if name and name in normalized:
+                matches.append((100 + len(name), customer))
+                continue
+            tokens = [token for token in name.split() if len(token) >= 5 and token not in ignored]
+            hit = max((len(token) for token in tokens if re.search(rf"\b{re.escape(token)}\b", normalized)), default=0)
+            if hit:
+                matches.append((hit, customer))
+        matches.sort(key=lambda item: (-item[0], item[1].name))
+        unique = []
+        for _, customer in matches:
+            if customer.id not in {item.id for item in unique}:
+                unique.append(customer)
+        if len(unique) != 2:
+            return []
+        return [self.get_customer_intelligence(customer.id) for customer in unique if self.get_customer_intelligence(customer.id) is not None]
+
+    def execute_direct_query(self, query: StructuredQuery, customer_id: UUID | None = None) -> QueryExecution:
+        """Return persisted invoice/payment rows using only structured deterministic predicates."""
+        customers = self.customers()
+        invoices = [invoice for customer in customers for invoice in customer.invoices]
+        payments = [payment for invoice in invoices for payment in invoice.payments]
+        customer_by_id = {customer.id: customer for customer in customers}
+        invoice_by_id = {invoice.id: invoice for invoice in invoices}
+        scope = InspectionScope(
+            customers=len(customers), invoices=len(invoices), payments=len(payments),
+            promises=sum(len(customer.promises_to_pay) for customer in customers),
+            active_disputes=sum(invoice.status is InvoiceStatus.DISPUTED and invoice.outstanding_amount > 0 for invoice in invoices),
+            recovery_cases=sum(len(customer.recovery_cases) for customer in customers),
+            latest_cycle_events=self._latest_cycle_event_count(),
+        )
+        exclusions: list[tuple[str, int]] = []
+
+        if query.entity is QueryEntity.INVOICES:
+            rows = list(invoices)
+            predicates = [
+                ("Different customer", lambda item: customer_id is None or item.customer_id == customer_id),
+                ("Invoice reference did not match", lambda item: not query.exact_reference or item.invoice_number.lower() == query.exact_reference.lower() or str(item.id).lower() == query.exact_reference.lower()),
+                ("Invoice is not currently unpaid", lambda item: query.overdue is not True or (item.issue_date <= self.simulation_date and item.due_date < self.simulation_date and item.outstanding_amount > 0)),
+                ("Invoice is outside the requested age", lambda item: query.min_days_overdue is None or (self.simulation_date - item.due_date).days >= query.min_days_overdue),
+                ("Invoice is outside the requested age", lambda item: query.max_days_overdue is None or (self.simulation_date - item.due_date).days <= query.max_days_overdue),
+                ("Outstanding amount is below the requested threshold", lambda item: query.min_exposure is None or item.outstanding_amount >= query.min_exposure),
+                ("Outstanding amount is above the requested threshold", lambda item: query.max_exposure is None or item.outstanding_amount <= query.max_exposure),
+                ("Invoice is not partially paid", lambda item: query.partial_payment is not True or Decimal("0") < item.outstanding_amount < item.original_amount),
+            ]
+            matched = self._filter_direct(rows, predicates, exclusions)
+            matched.sort(key=lambda item: self._invoice_sort_key(item, query), reverse=query.descending)
+            returned = matched if query.count_only or query.limit is None else matched[:query.limit]
+            records = [self._invoice_record(item, customer_by_id[item.customer_id]) for item in returned]
+            return QueryExecution(records, len(rows), len(matched), exclusions, scope)
+
+        rows = list(payments)
+        predicates = [
+            ("Different customer", lambda item: customer_id is None or invoice_by_id[item.invoice_id].customer_id == customer_id),
+            ("Payment reference did not match", lambda item: not query.exact_reference or (item.reference or "").lower() == query.exact_reference.lower() or str(item.id).lower() == query.exact_reference.lower()),
+            ("Payment was not recorded in the current cycle", lambda item: query.time_scope is not QueryTimeScope.LATEST_CYCLE or item.payment_date == self.simulation_date),
+            ("Payment amount is below the requested threshold", lambda item: query.min_exposure is None or item.amount >= query.min_exposure),
+            ("Payment amount is above the requested threshold", lambda item: query.max_exposure is None or item.amount <= query.max_exposure),
+        ]
+        matched = self._filter_direct(rows, predicates, exclusions)
+        matched.sort(key=lambda item: (item.payment_date, item.created_at, str(item.id)), reverse=query.descending)
+        returned = matched if query.count_only or query.limit is None else matched[:query.limit]
+        records = [self._payment_record(item, invoice_by_id[item.invoice_id], customer_by_id[invoice_by_id[item.invoice_id].customer_id]) for item in returned]
+        return QueryExecution(records, len(rows), len(matched), exclusions, scope)
+
+    @staticmethod
+    def _filter_direct(rows, predicates, exclusions):
+        remaining = rows
+        for reason, predicate in predicates:
+            before = len(remaining)
+            remaining = [item for item in remaining if predicate(item)]
+            if before > len(remaining):
+                exclusions.append((reason, before - len(remaining)))
+        return remaining
+
+    def _invoice_sort_key(self, invoice: Invoice, query: StructuredQuery):
+        if query.sort_by in {QuerySort.TOTAL_EXPOSURE, QuerySort.OVERDUE_EXPOSURE}:
+            return invoice.outstanding_amount
+        if query.sort_by is QuerySort.DAYS_OVERDUE:
+            return (self.simulation_date - invoice.due_date).days
+        return invoice.due_date
+
+    def _invoice_record(self, invoice: Invoice, customer: Customer) -> DirectQueryRecord:
+        days = max(0, (self.simulation_date - invoice.due_date).days) if invoice.due_date < self.simulation_date else 0
+        return DirectQueryRecord(
+            entity_type="INVOICE", entity_id=str(invoice.id), display_name=invoice.invoice_number,
+            customer_id=str(customer.id), customer_name=customer.name, invoice_id=str(invoice.id),
+            invoice_number=invoice.invoice_number, status=invoice.status.value,
+            original_amount=invoice.original_amount, outstanding_amount=invoice.outstanding_amount,
+            issue_date=invoice.issue_date, due_date=invoice.due_date, days_overdue=days,
+        )
+
+    @staticmethod
+    def _payment_record(payment: Payment, invoice: Invoice, customer: Customer) -> DirectQueryRecord:
+        return DirectQueryRecord(
+            entity_type="PAYMENT", entity_id=str(payment.id), display_name=payment.reference or str(payment.id),
+            customer_id=str(customer.id), customer_name=customer.name, invoice_id=str(invoice.id),
+            invoice_number=invoice.invoice_number, amount=payment.amount, payment_date=payment.payment_date,
+            reference=payment.reference,
+        )
+
     def _case_scoped_customer_intelligence(self, case: RecoveryCase) -> IntelligenceResult:
         """Keep case identity while using the portfolio's authoritative current score."""
         cache = getattr(self, "_customer_intelligence", {})
@@ -204,11 +313,14 @@ class CommandTools:
     def query_recovery_candidates(self, query: StructuredQuery) -> list[CaseCandidate]:
         return self.execute_case_query(query).records
 
-    def execute_case_query(self, query: StructuredQuery) -> QueryExecution:
+    def execute_case_query(self, query: StructuredQuery, customer_id: UUID | None = None) -> QueryExecution:
         """Apply the same structured semantics to real recovery-case recommendations."""
         latest_ids = self._latest_cycle_customer_ids() if query.time_scope is QueryTimeScope.LATEST_CYCLE else None
         changed_ids, held_ids = self._latest_cycle_decision_ids("RECOVERY_CASE") if query.decision_changed is not None or query.decision_held is not None else (set(), set())
-        candidates = self.get_recovery_candidates(top_n=None)
+        candidates = (
+            self.get_recovery_candidates(customer_ids={str(customer_id)}, top_n=None)
+            if customer_id else self.get_recovery_candidates(top_n=None)
+        )
         contexts = []
         candidate_by_entity: dict[str, CaseCandidate] = {}
         for candidate in candidates:

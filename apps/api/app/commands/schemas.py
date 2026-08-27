@@ -34,6 +34,20 @@ class CommandScope(str, Enum):
 class QueryEntity(str, Enum):
     CUSTOMERS = "CUSTOMERS"
     RECOVERY_CASES = "RECOVERY_CASES"
+    INVOICES = "INVOICES"
+    PAYMENTS = "PAYMENTS"
+
+
+class QueryResultKind(str, Enum):
+    FILTER = "FILTER"
+    RANK = "RANK"
+    COUNT = "COUNT"
+    EXACT_ENTITY = "EXACT_ENTITY"
+    COMPARE = "COMPARE"
+    LATEST_CHANGES = "LATEST_CHANGES"
+    INVOICES = "INVOICES"
+    PAYMENTS = "PAYMENTS"
+    PREPARE_ACTION = "PREPARE_ACTION"
 
 
 class QuerySort(str, Enum):
@@ -102,6 +116,8 @@ class StructuredQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     entity: QueryEntity = QueryEntity.CUSTOMERS
+    exact_reference: str | None = Field(default=None, max_length=255)
+    comparison_requested: bool = False
     risk_levels: list[PriorityLevel] = Field(default_factory=list)
     overdue: bool | None = None
     broken_promise: bool | None = None
@@ -238,6 +254,7 @@ class InspectionScope(BaseModel):
 
     customers: int = 0
     invoices: int = 0
+    payments: int = 0
     promises: int = 0
     active_disputes: int = 0
     recovery_cases: int = 0
@@ -291,12 +308,37 @@ class QueryEvidence(BaseModel):
     latest_cycle: LatestCycleEvidence | None = None
 
 
+class DirectQueryRecord(BaseModel):
+    """Small read-only envelope for persisted invoice and payment results."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity_type: str
+    entity_id: str
+    display_name: str
+    customer_id: str
+    customer_name: str
+    invoice_id: str
+    invoice_number: str
+    status: str | None = None
+    amount: Decimal | None = None
+    original_amount: Decimal | None = None
+    outstanding_amount: Decimal | None = None
+    issue_date: date | None = None
+    due_date: date | None = None
+    days_overdue: int | None = None
+    payment_date: date | None = None
+    reference: str | None = None
+
+
 class CommandResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     plan_id: UUID
     interpreted_intent: CommandIntent
     understanding_summary: str
+    result_kind: QueryResultKind = QueryResultKind.FILTER
+    direct_records: list[DirectQueryRecord] = Field(default_factory=list)
     query_evidence: QueryEvidence = Field(default_factory=QueryEvidence)
     analyzed_entities: list[IntelligenceResult]
     plan: CommandPlan

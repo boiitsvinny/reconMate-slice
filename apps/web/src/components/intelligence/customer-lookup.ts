@@ -17,6 +17,7 @@ const OPERATIONAL_TERMS = new Set([
 const LOOKUP_PREFIXES = [
   /^analy[sz]e\s+(.+)$/,
   /^show\s+recovery\s+cases?\s+for\s+(.+)$/,
+  /^show\s+(?:the\s+)?cases?\s+for\s+(.+)$/,
   /^show\s+(.+)$/,
   /^what(?:'s|\s+is)\s+happening\s+with\s+(.+)$/,
   /^why\s+(?:are\s+we\s+)?holding\s+(.+)$/,
@@ -54,6 +55,9 @@ export function resolveCustomerLookup(query: string, customers: Customer[], hasC
   const original = query.trim();
   if (!original) return { kind: "none" };
   const normalized = normalize(original);
+  if (/\bcompare\b|\bversus\b|\bvs\b/.test(normalized)) return { kind: "none" };
+  if (/\b(?:inv|pay)\s+[a-z0-9]+\s+[a-z0-9]+\b/.test(normalized)) return { kind: "none" };
+  if (/\b(?:invoice|payment)s?\b/.test(normalized) && !/\bfor\b/.test(normalized)) return { kind: "none" };
   if (/\bthis customer\b/.test(normalized)) return hasCustomerContext ? { kind: "context" } : { kind: "not-found", query: original };
 
   const term = lookupTerm(original);

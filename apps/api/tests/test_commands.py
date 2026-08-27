@@ -10,7 +10,7 @@ from app.api.routes import commands as commands_route
 from app.api.routes.workflow import _current_workspace_intelligence
 from app.commands.interpreter import RuleBasedCommandInterpreter
 from app.commands.planner import CommandPlanner
-from app.commands.schemas import CommandIntentType, CommandRequest, CommandScope, ConfirmCommandRequest, ExecutionMode, InspectionScope, ProposalStatus, QueryEntity, QuerySort, QueryTimeScope, StructuredQuery
+from app.commands.schemas import CommandIntentType, CommandRequest, CommandScope, ConfirmCommandRequest, DirectQueryRecord, ExecutionMode, InspectionScope, ProposalStatus, QueryEntity, QueryResultKind, QuerySort, QueryTimeScope, StructuredQuery
 from app.commands.service import CommandService, EphemeralPlanRegistry
 from app.commands.tools import CaseCandidate, CommandTools, QueryExecution
 from app.db.session import get_db
@@ -27,7 +27,7 @@ from app.intelligence.operational_schemas import (
 )
 from app.intelligence.operational_service import evaluate_customer_intelligence
 from app.main import app
-from app.models.domain import AuditEvent, Customer, Invoice, InvoiceStatus, RecoveryAction, RecoveryActionStatus, RecoveryCase, RecoveryPriority, RecoveryState
+from app.models.domain import AuditEvent, Customer, Invoice, InvoiceStatus, Payment, RecoveryAction, RecoveryActionStatus, RecoveryCase, RecoveryPriority, RecoveryState
 from app.recommendations.schemas import RecommendedAction, RecommendationPriority, RecoveryRecommendation
 
 
@@ -161,6 +161,9 @@ class FakeCommandTools:
     def get_customer(self, customer_id):
         return self.candidate.case.customer if str(customer_id) == str(CUSTOMER_ID) else None
 
+    def customers(self):
+        return [self.candidate.case.customer]
+
     def get_case_intelligence(self, case_id):
         return CASE_RESULT if case_id == CASE_ID else None
 
@@ -197,6 +200,21 @@ class FakeCommandTools:
     def execute_case_query(self, query):
         records = self.query_recovery_candidates(query)
         return QueryExecution(records=records, inspected=1, matched=len(records), exclusions=[], scope=InspectionScope(customers=1, invoices=1, promises=1, recovery_cases=1))
+
+    def execute_direct_query(self, query, customer_id=None):
+        invoice = self.candidate.case.invoice
+        record = DirectQueryRecord(
+            entity_type="INVOICE" if query.entity is QueryEntity.INVOICES else "PAYMENT",
+            entity_id=str(invoice.id), display_name=invoice.invoice_number,
+            customer_id=str(invoice.customer.id), customer_name=invoice.customer.name,
+            invoice_id=str(invoice.id), invoice_number=invoice.invoice_number,
+            status=invoice.status.value, outstanding_amount=invoice.outstanding_amount,
+            due_date=invoice.due_date, days_overdue=(TODAY - invoice.due_date).days,
+        )
+        return QueryExecution(records=[record], inspected=1, matched=1, exclusions=[], scope=InspectionScope(customers=1, invoices=1))
+
+    def resolve_comparison(self, command):
+        return []
 
     def latest_cycle_evidence(self, _results):
         return None
@@ -311,13 +329,19 @@ def test_interpreter_accepts_analyze_page_operator_aliases(command: str) -> None
     "Show Mintleaf Office Mart",
     "What is happening with Mintleaf?",
     "Why are we holding Mintleaf?",
-    "Show recovery cases for Mintleaf",
     "What changed for this customer?",
 ])
 def test_resolved_customer_lookup_uses_customer_analysis(command: str) -> None:
     result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command, context_customer_id=CUSTOMER_ID))
     assert result.intent is CommandIntentType.CUSTOMER_ANALYSIS
     assert result.scope is CommandScope.CUSTOMER
+
+
+def test_resolved_customer_case_lookup_scopes_recovery_cases() -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command="Show recovery cases for Mintleaf", context_customer_id=CUSTOMER_ID))
+    assert result.intent is CommandIntentType.PRIORITIZE_CASES
+    assert result.scope is CommandScope.CUSTOMER
+    assert result.query.entity is QueryEntity.RECOVERY_CASES
 
 
 def test_unresolved_company_name_is_not_silently_reinterpreted() -> None:
@@ -447,7 +471,6 @@ def test_unrelated_domain_terms_override_accidental_financial_word_matches(comma
     "Predict who will pay next month",
     "Who improved after the latest cycle?",
     "Purple bananas dance quickly",
-    "Show overdue invoices",
     "List weather forecasts for Bengaluru",
     "Write me a poem",
     "Tell me a joke",
@@ -517,10 +540,67 @@ def test_composed_predicates_all_apply_to_the_same_grounded_result() -> None:
     )
 
 
-def test_compare_request_fails_safely_instead_of_falling_back_to_top_risk() -> None:
+def test_compare_request_uses_explicit_comparison_instead_of_falling_back_to_top_risk() -> None:
     result = RuleBasedCommandInterpreter().interpret(CommandRequest(command="Compare Frontier and Greenfield"))
-    assert result.intent is CommandIntentType.UNKNOWN
-    assert result.guidance
+    assert result.intent is CommandIntentType.PRIORITIZE_CASES
+    assert result.query.comparison_requested is True
+
+
+@pytest.mark.parametrize(("command", "entity", "reference", "count_only"), [
+    ("show invoice INV-083-03", QueryEntity.INVOICES, "INV-083-03", False),
+    ("show payment PAY-01682-1", QueryEntity.PAYMENTS, "PAY-01682-1", False),
+    ("how many overdue invoices are there?", QueryEntity.INVOICES, None, True),
+    ("payments received this cycle", QueryEntity.PAYMENTS, None, False),
+    ("payments from this cycle", QueryEntity.PAYMENTS, None, False),
+])
+def test_interpreter_builds_direct_persisted_entity_queries(command, entity, reference, count_only) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is CommandIntentType.PRIORITIZE_CASES
+    assert result.query.entity is entity
+    assert result.query.exact_reference == reference
+    assert result.query.count_only is count_only
+
+
+def test_torture_test_aliases_preserve_requested_limit_and_receivables_order() -> None:
+    risky = RuleBasedCommandInterpreter().interpret(CommandRequest(command="gimme 6 risky clients"))
+    largest = RuleBasedCommandInterpreter().interpret(CommandRequest(command="who owes us the most?"))
+    assert risky.intent is CommandIntentType.PRIORITIZE_CASES
+    assert risky.query.limit == 6
+    assert risky.query.risk_levels == [PriorityLevel.HIGH, PriorityLevel.CRITICAL]
+    assert largest.intent is CommandIntentType.PRIORITIZE_CASES
+    assert largest.query.overdue is True
+    assert largest.query.sort_by is QuerySort.OVERDUE_EXPOSURE
+
+
+def test_direct_invoice_and_payment_queries_return_persisted_rows_and_counts() -> None:
+    customer = Customer(id=CUSTOMER_ID, name="Direct Query Account", account_reference="DIRECT-1")
+    invoice = Invoice(
+        id=INVOICE_ID, customer_id=CUSTOMER_ID, customer=customer, invoice_number="INV-083-03",
+        issue_date=TODAY - timedelta(days=90), due_date=TODAY - timedelta(days=60),
+        original_amount=Decimal("900000"), outstanding_amount=Decimal("600000"), status=InvoiceStatus.PARTIALLY_PAID,
+    )
+    payment = Payment(
+        id=uuid4(), invoice_id=INVOICE_ID, invoice=invoice, amount=Decimal("300000"),
+        payment_date=TODAY, reference="PAY-01682-1", created_at=datetime(2026, 8, 1, tzinfo=UTC),
+    )
+    invoice.payments = [payment]
+    customer.invoices = [invoice]
+    customer.promises_to_pay = []
+    customer.recovery_cases = []
+    tools = object.__new__(CommandTools)
+    tools.simulation_date = TODAY
+    tools._customers = [customer]
+    tools._latest_cycle_event_count = lambda: 0
+
+    invoices = tools.execute_direct_query(StructuredQuery(entity=QueryEntity.INVOICES, overdue=True, min_exposure=Decimal("500000")))
+    payments = tools.execute_direct_query(StructuredQuery(entity=QueryEntity.PAYMENTS, exact_reference="PAY-01682-1", time_scope=QueryTimeScope.LATEST_CYCLE))
+
+    assert invoices.inspected == 1 and invoices.matched == 1
+    assert invoices.records[0].invoice_number == "INV-083-03"
+    assert invoices.records[0].outstanding_amount == Decimal("600000")
+    assert payments.inspected == 1 and payments.matched == 1
+    assert payments.records[0].reference == "PAY-01682-1"
+    assert payments.records[0].amount == Decimal("300000")
 
 
 def test_decision_transition_filters_are_independent_facts() -> None:
@@ -600,7 +680,7 @@ def test_prioritization_exposes_grounded_query_and_ranking_evidence(monkeypatch)
     assert evidence["records_matched"] == 1
     assert evidence["records_returned"] == 1
     assert evidence["inspection_scope"] == {
-        "customers": 1, "invoices": 1, "promises": 1,
+        "customers": 1, "invoices": 1, "payments": 0, "promises": 1,
         "active_disputes": 0, "recovery_cases": 1, "latest_cycle_events": 0,
     }
     assert evidence["ranking"][0]["rank"] == 1
@@ -608,6 +688,19 @@ def test_prioritization_exposes_grounded_query_and_ranking_evidence(monkeypatch)
     assert evidence["ranking"][0]["raw_score"] == CUSTOMER_RESULT.raw_score
     assert "INR 450000 overdue" in evidence["ranking"][0]["facts"][0]
     assert evidence["ranking"][0]["decision"] == CUSTOMER_RESULT.recommendation.title + ": " + CUSTOMER_RESULT.recommendation.explanation
+
+
+def test_direct_invoice_endpoint_returns_exact_entity_shape(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    response = client.post("/commands", json={"command": "Show invoice INV-083-03"})
+    app.dependency_overrides.clear()
+    body = response.json()
+    assert response.status_code == 200
+    assert body["result_kind"] == QueryResultKind.EXACT_ENTITY.value
+    assert body["query_evidence"]["records_inspected"] == 1
+    assert body["query_evidence"]["records_matched"] == 1
+    assert body["query_evidence"]["records_returned"] == 1
+    assert body["direct_records"][0]["entity_type"] == "INVOICE"
 
 
 def test_latest_cycle_evidence_fails_closed_across_customers_and_cases() -> None:

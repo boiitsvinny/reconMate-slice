@@ -29,7 +29,7 @@ _NUMBER_WORDS = {
     "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
     "fifteen": 15, "twenty": 20, "twenty five": 25, "fifty": 50,
 }
-_QUERY_OPERATIONS = ("show", "list", "give", "which", "who", "find", "rank", "top", "count", "how many", "summarize", "summary", "explain")
+_QUERY_OPERATIONS = ("show", "list", "give", "gimme", "which", "who", "find", "rank", "top", "count", "how many", "summarize", "summary", "explain")
 _PREDICTIVE = ("churn", "next quarter", "forecast", "predict", "likelihood", "probability", "will pay", "future revenue")
 _UNSUPPORTED_DOMAINS = ("weather", "sport", "sports", "football", "cricket", "investment", "investments", "stock", "stocks", "crypto", "cryptocurrency")
 _DOMAIN_CONCEPTS = (
@@ -75,6 +75,10 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         if explanation and request.context_case_id is not None:
             return self._intent(CommandIntentType.EXPLAIN_RECOMMENDATION, .97, CommandScope.CASE, filters, query, "The request asks for an explanation of the selected case's current recommendation.")
         if request.context_customer_id is not None and self._customer_context_request(text, explanation):
+            if re.search(r"\b(?:recovery )?case\b", text):
+                query = query.model_copy(update={"entity": QueryEntity.RECOVERY_CASES})
+                filters = self._legacy_filters(query, text)
+                return self._intent(CommandIntentType.PRIORITIZE_CASES, .97, CommandScope.CUSTOMER, filters, query, "The named customer was resolved first, then its persisted recovery cases were queried.")
             query = query.model_copy(update={"entity": QueryEntity.CUSTOMERS})
             filters = self._legacy_filters(query, text)
             return self._intent(CommandIntentType.CUSTOMER_ANALYSIS, .96, CommandScope.CUSTOMER, filters, query, "A deterministic customer lookup resolved this request to the selected customer context.")
@@ -107,8 +111,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         if "portfolio" in text and self._has(text, ("analyze", "analysis", "overview", "health", "summarize", "summary")) and not self._has_query_condition(query):
             return self._intent(CommandIntentType.PORTFOLIO_ANALYSIS, .93, CommandScope.PORTFOLIO, filters, query, "The request asks for a current portfolio-level summary.")
 
-        if self._direct_invoice_request(text):
-            return self._unknown(filters, query, "The command result contract currently returns customer or recovery-case intelligence, not standalone invoice rows. Ask for customers with the invoice condition instead.")
+        if query.comparison_requested:
+            return self._intent(CommandIntentType.PRIORITIZE_CASES, .95, CommandScope.PORTFOLIO, filters, query, "The request asks for a deterministic comparison of two named persisted customer accounts.")
 
         if not self._has_domain_evidence(text, query):
             return self._unknown(filters, query, "ReconMate cannot answer this from the current receivables and recovery model. Supported dimensions include overdue exposure, payments, promises, disputes, recovery state, risk, and latest operational changes.")
@@ -116,6 +120,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         recognized = (
             self._has(text, _QUERY_OPERATIONS)
             or self._has_query_condition(query)
+            or query.entity in {QueryEntity.INVOICES, QueryEntity.PAYMENTS}
             or self._has(text, _BROAD_FOCUS_PHRASES)
             or self._has(text, ("risk", "risky", "riskiest", "exposure", "priority", "attention", "escalation"))
         )
@@ -132,7 +137,11 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
 
     def _structured_query(self, text: str) -> StructuredQuery:
         case_target = self._has(text, ("case", "recovery case"))
-        entity = QueryEntity.RECOVERY_CASES if case_target else QueryEntity.CUSTOMERS
+        payment_target = bool(re.search(r"\bpayments?\b", text)) and not bool(re.search(r"\b(?:customers?|accounts?|cases?)\b", text))
+        invoice_target = bool(re.search(r"\binvoices?\b", text)) and not bool(re.search(r"\b(?:customers?|accounts?|cases?)\b", text))
+        entity = QueryEntity.PAYMENTS if payment_target else QueryEntity.INVOICES if invoice_target else QueryEntity.RECOVERY_CASES if case_target else QueryEntity.CUSTOMERS
+        exact_reference = self._reference(text, "PAY") if entity is QueryEntity.PAYMENTS else self._reference(text, "INV") if entity is QueryEntity.INVOICES else None
+        comparison_requested = bool(re.search(r"\bcompare\b|\bversus\b|\bvs\b", text))
         limit = self._limit(text)
         risk_levels = self._risk_levels(text)
         dispute_excluded = bool(re.search(r"\b(?:without|excluding|exclude|no) (?:active )?disputes?\b|\bundisputed\b", text))
@@ -156,7 +165,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         descending = not self._has(text, ("lowest", "least", "smallest", "ascending"))
         if sort_by is QuerySort.LAST_PAYMENT and recent_payment is True:
             descending = False
-        more_days = re.search(r"\b(?:more than|over) (\d{1,3}) days? overdue\b", text)
+        more_days = re.search(r"\b(?:more than|over|older than) (\d{1,3}) days?(?: overdue)?\b", text)
         fewer_days = re.search(r"\b(?:less than|under) (\d{1,3}) days? overdue\b", text)
         more_score = re.search(r"\b(?:risk )?score (?:more than|over) (\d{1,3})\b", text)
         fewer_score = re.search(r"\b(?:risk )?score (?:less than|under) (\d{1,3})\b", text)
@@ -171,8 +180,10 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
 
         return StructuredQuery(
             entity=entity,
+            exact_reference=exact_reference,
+            comparison_requested=comparison_requested,
             risk_levels=risk_levels,
-            overdue=True if "overdue" in text else None,
+            overdue=True if "overdue" in text or "unpaid" in text or (entity is QueryEntity.INVOICES and more_days is not None) else None,
             broken_promise=True if broken_promise else None,
             active_promise=active_promise if active_promise is not None else True if re.search(r"\bpromises?\b", text) and not broken_promise else None,
             active_dispute=active_dispute,
@@ -213,7 +224,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
 
     @staticmethod
     def _limit(text: str) -> int | None:
-        digit = re.search(r"\b(?:top|first|limit)\s+(\d{1,3})\b|\b(\d{1,3})\s+(?:(?:high|low|critical)(?: risk)? )?(?:riskiest|highest|lowest|customers?|accounts?|cases?)\b", text)
+        digit = re.search(r"\b(?:top|first|limit)\s+(\d{1,3})\b|\b(\d{1,3})\s+(?:(?:high|low|critical|risky)(?: risk)? )?(?:riskiest|highest|lowest|customers?|accounts?|cases?)\b", text)
         if digit:
             return min(int(digit.group(1) or digit.group(2)), 50)
         for word, value in sorted(_NUMBER_WORDS.items(), key=lambda item: -len(item[0])):
@@ -238,7 +249,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         )) or query.min_days_overdue is not None or query.max_days_overdue is not None
         or query.min_score is not None or query.max_score is not None
         or query.min_exposure is not None or query.max_exposure is not None
-        or query.limit or query.count_only or query.time_scope is QueryTimeScope.LATEST_CYCLE)
+        or query.limit or query.count_only or query.exact_reference or query.comparison_requested
+        or query.time_scope is QueryTimeScope.LATEST_CYCLE)
 
     @staticmethod
     def _has_domain_evidence(text: str, query: StructuredQuery) -> bool:
@@ -269,8 +281,9 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         )
 
     @staticmethod
-    def _direct_invoice_request(text: str) -> bool:
-        return bool(re.search(r"\binvoices?\b", text)) and not bool(re.search(r"\b(?:customers?|accounts?|cases?)\b", text))
+    def _reference(text: str, prefix: str) -> str | None:
+        match = re.search(rf"\b{prefix.lower()}[ -]([a-z0-9]+)[ -]([a-z0-9]+)\b", text)
+        return f"{prefix}-{match.group(1).upper()}-{match.group(2).upper()}" if match else None
 
     @staticmethod
     def _normalize(command: str) -> str:
@@ -279,7 +292,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         text = re.sub(r"[^a-z0-9'.]+", " ", text)
         replacements = (
             (r"\banyone\b|\bpeople\b", "customers"),
-            (r"\b(?:late|unpaid) (?:customers?|accounts?|clients?|invoices?|receivables?)\b", "overdue customers"),
+            (r"\bwho owes us (?:the )?most\b", "customers largest overdue exposure"),
+            (r"\b(?:late|unpaid) (?:customers?|accounts?|clients?|receivables?)\b", "overdue customers"),
             (r"\baccounts?\b", "account"),
             (r"\bclients?\b", "customer"),
             (r"\bcases?\b", "case"),
@@ -330,6 +344,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             r"\b(?:city|country|region|province|postal code|zip code|geography|location|customer state|billing state)\b",
             text,
         )
+        if geography and re.search(r"\bfrom (?:this|the|current|latest|last) cycle\b", text):
+            geography = None
         if geography:
             place = geography.group(1).strip() if geography.lastindex and geography.group(1) else None
             unsupported.append(f"geography ({place})" if place else "geography")
