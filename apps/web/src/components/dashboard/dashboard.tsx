@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { QueryKey, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/app-header";
 import { useCommandSession } from "@/components/intelligence/command-session";
-import { useInsightMode } from "@/components/intelligence/insight-mode";
 import { apiFetch } from "@/lib/api";
 import { Customer, formatMoney as money, LatestIntelligenceCycle, PriorityCase, SimState, SimulationEvent, SimulationTickResult } from "./data";
 import { CaseWorkspace } from "./case-workspace";
@@ -18,7 +17,6 @@ import { CycleFeedback, ResetFeedback, SimulationControl, SimulationPhase } from
 import { AIPriorities } from "./todays-operational-focus";
 
 export function Dashboard() {
-  const { enabled: inspectionEnabled } = useInsightMode();
   const [auto, setAuto] = useState(false);
   const [lastTick, setLastTick] = useState<SimulationTickResult | null>(null);
   const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback | undefined>();
@@ -353,9 +351,9 @@ export function Dashboard() {
 
             {intelligence.data && <HomeRecoveryQueue items={recoveryQueue.queue} intelligence={intelligence.data} transitions={visibleTransitions} events={events.data} onSelect={openPreview} />}
 
-            <section aria-label="Portfolio simulation" className={`mt-7 grid gap-7 ${inspectionEnabled ? "xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]" : "max-w-5xl"}`}>
+            <section aria-label="Portfolio conditions and simulation" className="mt-7 grid gap-7 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,.85fr)]">
               <SimulationControl cycle={simulation.data.cycle} simulationDate={simulation.data.simulation_date} interval={simulation.data.tick_interval_seconds} busy={busy} resetting={resetDemo.isPending} auto={auto} feedback={cycleFeedback} resetFeedback={resetFeedback} phase={tickPhase} onAutoChange={setAuto} onTick={() => void runTick()} onReset={() => void runReset()} onReconcile={reconcile} />
-              {inspectionEnabled && <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />}
+              <PortfolioSignals signals={recovery.data} totalCases={recovery.data.total_cases} />
             </section>
           </>
         )}

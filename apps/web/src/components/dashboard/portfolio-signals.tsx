@@ -1,9 +1,10 @@
 import { Panel, SectionHeader } from "./ui";
 
-type Signals = { cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number };
+type Signals = { cases_eligible_for_recovery: number; cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number };
 
 export function PortfolioSignals({ signals, totalCases }: { signals: Signals; totalCases: number }) {
   const items = [
+    ["Recovery eligible", signals.cases_eligible_for_recovery, "Current opportunity for controlled recovery", "bg-emerald-300"],
     ["Escalated cases", signals.escalated_cases, "Broken or severe conditions", "bg-rose-400"],
     ["Disputes on hold", signals.cases_blocked_by_dispute, "Recovery automation blocked", "bg-amber-300"],
     ["Promise monitoring", signals.cases_awaiting_payment, "Recorded payment commitments", "bg-sky-400"],
@@ -11,8 +12,8 @@ export function PortfolioSignals({ signals, totalCases }: { signals: Signals; to
 
   return (
     <Panel>
-      <SectionHeader eyebrow="Portfolio conditions" title="Risk and opportunity" detail={`Share of ${totalCases} recovery cases`} prominent />
-      <div className="space-y-5 p-5">
+      <SectionHeader eyebrow="Live portfolio conditions" title="Risk and opportunity" detail={`Current share of ${totalCases} recovery cases`} prominent />
+      <div className="space-y-4 p-5">
         {items.map(([label, value, detail, dot]) => (
           <div key={label}>
             <div className="flex items-baseline justify-between gap-3">
