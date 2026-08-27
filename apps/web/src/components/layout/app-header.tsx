@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -48,12 +49,8 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
     <>
     <header className={`pointer-events-none sticky top-0 z-40 grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-2 transition-transform duration-300 ease-out sm:px-5 lg:px-7 ${navigationVisible ? "translate-y-0" : "-translate-y-full"}`}>
       <div className="header-glass pointer-events-auto flex w-fit min-w-0 items-center gap-2.5 rounded-2xl p-1.5 pr-3">
-        <button type="button" onClick={toggleInspection} aria-label="Toggle Intelligence Inspection" aria-pressed={inspectionEnabled} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-sky-200/25 bg-gradient-to-br from-sky-300/20 to-blue-500/10 shadow-[0_0_24px_rgba(56,189,248,.12)] transition hover:border-sky-200/45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60">
-          <svg aria-hidden="true" viewBox="0 0 32 32" className="h-7 w-7 fill-none stroke-sky-200" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M8 24V8h8.5a5 5 0 0 1 0 10H8" />
-            <path d="m16 18 7 6" />
-            <circle cx="23.5" cy="8.5" r="2" className="fill-emerald-300 stroke-none" />
-          </svg>
+        <button type="button" onClick={toggleInspection} aria-label="Toggle Intelligence Inspection" aria-pressed={inspectionEnabled} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-sky-200/25 bg-slate-950/35 p-1 shadow-[0_0_24px_rgba(56,189,248,.12)] transition hover:border-sky-200/45 hover:bg-sky-400/[.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60">
+          <Image src="/reconmate-mark.png" alt="" width={32} height={32} priority className="h-8 w-8 object-contain" />
         </button>
         <Link href="/" aria-label="ReconMate home" className="min-w-0">
         <div className="min-w-0">
