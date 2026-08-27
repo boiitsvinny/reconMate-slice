@@ -198,13 +198,12 @@ Prefer safe deferral over unsupported inference. Every candidate requires operat
 
 _EXTRACTION_SCHEMA = {
     "type": "object",
-    "additionalProperties": False,
     "required": ["candidates"],
     "properties": {
         "candidates": {
             "type": "array", "minItems": 1, "maxItems": 6,
             "items": {
-                "type": "object", "additionalProperties": False,
+                "type": "object",
                 "required": ["candidate_id", "fact_type", "confidence", "evidence_span", "proposed_data", "persistence_eligible", "defer_reason", "operator_confirmation_required"],
                 "properties": {
                     "candidate_id": {"type": "string"},
@@ -212,7 +211,7 @@ _EXTRACTION_SCHEMA = {
                     "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                     "evidence_span": {"type": "string"},
                     "proposed_data": {
-                        "type": "object", "additionalProperties": False,
+                        "type": "object",
                         "required": ["amount", "currency", "promised_date", "conditional", "reason", "status", "requires_payment_verification"],
                         "properties": {
                             "amount": {"type": ["string", "null"]},
@@ -232,6 +231,26 @@ _EXTRACTION_SCHEMA = {
         },
     },
 }
+
+_PROPOSED_DATA_KEYS = {
+    "amount", "currency", "promised_date", "conditional", "reason", "status",
+    "requires_payment_verification",
+}
+
+
+def _validate_transport_object_keys(payload: object) -> None:
+    """Keep closed-object enforcement local without sending it to Gemini."""
+    if not isinstance(payload, dict):
+        return
+    candidates = payload.get("candidates")
+    if not isinstance(candidates, list):
+        return
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        proposed_data = candidate.get("proposed_data")
+        if isinstance(proposed_data, dict) and set(proposed_data) - _PROPOSED_DATA_KEYS:
+            raise CandidateValidationError("The provider returned unsupported proposed-data fields.")
 
 
 class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProvider):
@@ -312,6 +331,7 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
             raise ProviderError("The live model returned an invalid or ungrounded extraction; no fact was written.") from exc
 
         try:
+            _validate_transport_object_keys(decoded)
             envelope = _CandidateEnvelope.model_validate(decoded)
             candidates = normalize_candidate_facts(
                 content, envelope.candidates, confidence_threshold=self.confidence_threshold,

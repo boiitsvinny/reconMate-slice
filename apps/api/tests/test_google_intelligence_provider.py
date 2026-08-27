@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from google import genai
+from google.genai import types as genai_types
 
 from app.intelligence import provider as provider_module
 from app.intelligence.evaluation import (
@@ -102,12 +104,66 @@ def test_live_provider_uses_read_only_structured_response_and_minimal_context() 
     assert "tools" not in call and "previous_interaction_id" not in call
 
 
+def test_installed_sdk_serializes_current_interactions_structured_output_shape() -> None:
+    captured = {}
+    payload = json.dumps({"candidates": [_candidate(proposed_data={
+        "amount": None,
+        "currency": None,
+        "promised_date": None,
+        "conditional": None,
+        "reason": None,
+        "status": "DISPUTED",
+        "requires_payment_verification": None,
+    })]})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["body"] = json.loads(request.content)
+        return httpx.Response(200, json={
+            "id": "interaction-test",
+            "object": "interaction",
+            "status": "completed",
+            "model": "gemini-3.7-flash",
+            "steps": [{"type": "model_output", "content": [{"type": "text", "text": payload}]}],
+        })
+
+    http_client = httpx.Client(transport=httpx.MockTransport(handler))
+    client = genai.Client(
+        api_key="test-key",
+        http_options=genai_types.HttpOptions(
+            base_url="https://gemini-serialization.test",
+            httpx_client=http_client,
+            retry_options=genai_types.HttpRetryOptions(attempts=1),
+        ),
+    )
+    provider = _provider()
+    provider.client = client
+    try:
+        result = provider.analyze(MESSAGE, date(2026, 8, 26))
+    finally:
+        client.close()
+
+    assert result.candidates[0].fact_type.value == "ACTIVE_DISPUTE"
+    body = captured["body"]
+    assert set(body) == {"model", "input", "response_format", "generation_config", "store"}
+    assert body["model"] == "gemini-3.7-flash"
+    assert body["store"] is False
+    assert body["generation_config"] == {"max_output_tokens": 1200}
+    assert body["response_format"]["type"] == "text"
+    assert body["response_format"]["mime_type"] == "application/json"
+    serialized_schema = body["response_format"]["schema"]
+    assert serialized_schema == provider_module._EXTRACTION_SCHEMA
+    assert "additionalProperties" not in json.dumps(serialized_schema)
+    assert not any(key in json.dumps(serialized_schema) for key in ("$defs", "$ref", "oneOf", "anyOf", "const"))
+    assert "response_mime_type" not in body
+
+
 @pytest.mark.parametrize("payload", [
     "not-json",
     json.dumps({"candidates": [_candidate(fact_type="AUTHORITATIVE_RISK_SCORE")]}),
     json.dumps({"candidates": [_candidate(confidence=1.2)]}),
     json.dumps({"candidates": [_candidate(evidence_span="words not present in source")]}),
     json.dumps({"candidates": [_candidate(),], "risk_score": 0, "recommendation": "CLOSE_CASE"}),
+    json.dumps({"candidates": [_candidate(proposed_data={"status": "DISPUTED", "risk_score": "100"})]}),
 ])
 def test_untrusted_or_authoritative_model_output_fails_closed(payload: str) -> None:
     with pytest.raises(ProviderError, match="invalid or ungrounded"):
