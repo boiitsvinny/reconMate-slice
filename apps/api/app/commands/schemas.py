@@ -118,6 +118,8 @@ class StructuredQuery(BaseModel):
     max_days_overdue: int | None = Field(default=None, ge=0)
     min_score: int | None = Field(default=None, ge=0, le=100)
     max_score: int | None = Field(default=None, ge=0, le=100)
+    min_exposure: Decimal | None = Field(default=None, ge=0)
+    max_exposure: Decimal | None = Field(default=None, ge=0)
     sort_by: QuerySort = QuerySort.RISK_SCORE
     descending: bool = True
     limit: int | None = Field(default=None, ge=1, le=50)

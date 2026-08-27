@@ -188,28 +188,37 @@ class CommandPlanner:
                 actions.append(self._case_recovery_proposal(plan_id, candidate))
 
         elif intent is CommandIntentType.PREPARE_PAYMENT_REMINDERS:
-            analyzed = tools.get_overdue_customers(interpreted.filters.top_n)
+            inspected = tools.get_overdue_customers(None)
             reminder_actions = [
                 self._reminder_proposal(
                     plan_id, item, tools.get_customer(item.entity_id), created_at,
                     tools.simulation_date,
                     tools.get_recovery_candidates(customer_ids={item.entity_id}, top_n=None),
                 )
-                for item in analyzed
+                for item in inspected
             ]
-            actions.extend(reminder_actions)
-            eligible = [
-                item for item, action in zip(analyzed, reminder_actions, strict=True)
+            eligible_pairs = [
+                (item, action) for item, action in zip(inspected, reminder_actions, strict=True)
                 if action.reminder_artifact and action.reminder_artifact.status == "PREPARED_FOR_REVIEW"
             ]
-            non_sendable = len(reminder_actions) - len(eligible)
+            non_sendable_pairs = [
+                (item, action) for item, action in zip(inspected, reminder_actions, strict=True)
+                if not action.reminder_artifact or action.reminder_artifact.status != "PREPARED_FOR_REVIEW"
+            ]
+            limit = interpreted.query.limit
+            returned_pairs = eligible_pairs if limit is None else eligible_pairs[:limit]
+            transparency_pairs = non_sendable_pairs[:max(5, limit or 0)]
+            analyzed = [item for item, _ in returned_pairs] + [item for item, _ in transparency_pairs]
+            actions.extend(action for _, action in returned_pairs + transparency_pairs)
+            eligible = [item for item, _ in eligible_pairs]
+            non_sendable = len(non_sendable_pairs)
             summary = (
                 f"Prepared {len(eligible)} deterministic payment-reminder draft(s) from current case-level policy. "
                 f"Separated {non_sendable} non-sendable account(s) for transparency."
             )
             evidence = QueryEvidence(
-                records_inspected=len(analyzed), records_matched=len(eligible),
-                records_excluded=non_sendable, records_returned=len(eligible),
+                records_inspected=len(inspected), records_matched=len(eligible),
+                records_excluded=non_sendable, records_returned=len(returned_pairs),
                 exclusions=[ExclusionCount(reason="Current case-level policy does not permit a payment reminder", count=non_sendable)] if non_sendable else [],
                 ranking=self._ranking_evidence(eligible), latest_cycle=tools.latest_cycle_evidence(eligible),
             )

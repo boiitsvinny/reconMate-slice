@@ -334,6 +334,7 @@ function CommunicationFactReview({ workspace, busy, request }: { workspace: Work
   const [pendingInterpretation, setPendingInterpretation] = useState<string | null>(null);
   const [pendingDecision, setPendingDecision] = useState<string | null>(null);
   const sandboxMode = messages.some((message) => message.analyses.some((analysis) => analysis.runtime_mode === "MOCK / DEV MODE"));
+  const liveModel = messages.some((message) => message.analyses.some((analysis) => analysis.runtime_mode === "LIVE MODEL"));
   const analyze = async (communicationId: string) => {
     setPendingInterpretation(communicationId);
     try { return await request(`/communications/${communicationId}/analyze`, {}); }
@@ -354,6 +355,7 @@ function CommunicationFactReview({ workspace, busy, request }: { workspace: Work
     <p className="text-[10px] font-bold uppercase tracking-[.15em] text-fuchsia-200">Bounded communication intelligence</p>
     <h3 className="mt-1.5 text-lg font-semibold text-white">Communication interpretation evidence</h3>
     <p className="mt-1 text-xs leading-5 text-slate-400">Interpretation extracts candidate evidence. Deterministic policy owns recovery decisions. Operators confirm uncertain evidence and approve material actions.</p>
+    <dl className="mt-4 grid gap-px overflow-hidden rounded-xl border border-white/[.07] bg-white/[.07] sm:grid-cols-3"><div className="bg-[#0a1323] p-3"><dt className="text-[9px] font-bold uppercase tracking-[.12em] text-fuchsia-200">Interpretation runtime</dt><dd className="mt-1 text-xs font-semibold text-white">{liveModel ? "Model-backed provider" : sandboxMode ? "Deterministic Evaluation Sandbox" : "On request · fail closed"}</dd></div><div className="bg-[#0a1323] p-3"><dt className="text-[9px] font-bold uppercase tracking-[.12em] text-sky-200">Financial decision authority</dt><dd className="mt-1 text-xs font-semibold text-white">Deterministic policy</dd></div><div className="bg-[#0a1323] p-3"><dt className="text-[9px] font-bold uppercase tracking-[.12em] text-amber-100">Execution authority</dt><dd className="mt-1 text-xs font-semibold text-white">Operator controlled</dd></div></dl>
     {sandboxMode && <div className="mt-4 rounded-xl border border-fuchsia-200/12 bg-black/10 px-4 py-3"><div className="flex flex-wrap items-center gap-2"><StatusPill tone="slate">Sandbox interpretation</StatusPill><p className="text-[11px] font-medium text-slate-300">Deterministic extraction is used in this deployment for reproducible evaluation.</p></div><p className="mt-1.5 text-[11px] leading-5 text-slate-500">Candidate facts still require operator confirmation before persistence. This is not presented as a live model result.</p></div>}
     {messages.length ? <div className="mt-4 space-y-3">{messages.map((message) => {
       const analysis = message.analyses[0];

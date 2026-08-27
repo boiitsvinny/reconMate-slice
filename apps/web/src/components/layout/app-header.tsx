@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { useInsightMode } from "@/components/intelligence/insight-mode";
 
-type AppHeaderProps = { connected: boolean; updating?: boolean };
+type AppHeaderProps = { connected?: boolean; updating?: boolean };
 
 const navigation = [
   ["/", "HOME"],
@@ -43,7 +43,7 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
     };
   }, []);
 
-  const systemLabel = updating ? "Synchronizing" : connected ? "System optimal" : "Connection degraded";
+  const systemLabel = connected === undefined ? "Connecting" : updating ? "Synchronizing" : connected ? "System optimal" : "Connection degraded";
 
   return (
     <>
@@ -66,7 +66,7 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
         })}
       </nav>
       <div className="pointer-events-auto justify-self-end">
-        {!home && <div className="header-glass hidden items-center gap-2 rounded-2xl p-1.5 pl-3 lg:flex"><span className={`text-[10px] font-semibold uppercase tracking-[0.13em] ${updating ? "text-sky-200" : connected ? "text-emerald-200" : "text-amber-100"}`}>{systemLabel}</span><span className={`h-2 w-2 rounded-full ${updating ? "animate-pulse bg-sky-300" : connected ? "bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,.8)]" : "bg-rose-400"}`} aria-label={updating ? "Refreshing live data" : connected ? "API connected" : "API unavailable"} /></div>}
+        {!home && <div className="header-glass hidden items-center gap-2 rounded-2xl p-1.5 pl-3 lg:flex"><span className={`text-[10px] font-semibold uppercase tracking-[0.13em] ${connected === undefined || updating ? "text-sky-200" : connected ? "text-emerald-200" : "text-amber-100"}`}>{systemLabel}</span><span className={`h-2 w-2 rounded-full ${connected === undefined || updating ? "animate-pulse bg-sky-300" : connected ? "bg-emerald-400 shadow-[0_0_10px_rgba(74,222,128,.8)]" : "bg-rose-400"}`} aria-label={connected === undefined ? "Connecting to API" : updating ? "Refreshing live data" : connected ? "API connected" : "API unavailable"} /></div>}
       </div>
     </header>
     <nav aria-label="Mobile navigation" className={`fixed inset-x-0 bottom-0 z-50 border-t border-white/[.09] bg-[#07111f]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl transition-transform duration-300 ease-out sm:hidden ${navigationVisible ? "translate-y-0" : "translate-y-full"}`}>

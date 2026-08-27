@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from decimal import Decimal
 import re
 
 from app.commands.schemas import (
@@ -84,7 +85,9 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         if (explanation or "analy" in text) and "case" in text and request.context_case_id is None and not self._has(text, _QUERY_OPERATIONS):
             return self._unknown(filters, query, "Case analysis requires context_case_id.")
 
-        reminder = "reminder" in text and self._has(text, ("draft", "prepare", "create"))
+        reminder = (
+            "reminder" in text and self._has(text, ("draft", "prepare", "create", "receive", "get", "eligible", "send", "should"))
+        ) or bool(re.search(r"\bsafe to remind\b|\bwho should (?:be )?remind(?:ed)?\b", text))
         recovery_prepare = self._has(text, ("prepare recovery", "prepare escalation", "create recovery", "recovery action", "recovery work"))
         follow_up = self._has(text, ("follow up", "contact again", "chase", "needs a response", "waiting for a response"))
         if recovery_prepare and follow_up:
@@ -137,11 +140,12 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         no_recent_payment = bool(re.search(r"\b(?:no|without) recent payments?\b", text))
         active_dispute = False if dispute_excluded else True if re.search(r"\b(?:active )?disput(?:e|ed|es)\b", text) else None
         active_promise = False if promise_excluded else True if re.search(r"\bactive (?:payment )?promises?\b|\bvalid promises?\b|\b(?:waiting|awaiting) (?:on |for )?(?:payment )?promises?\b", text) else None
+        broken_promise = bool(re.search(r"\b(?:broken|missed|failed) (?:payment |their )?promises?\b|\bbroke (?:their |a )?promises?\b|\bpromises? (?:were|was|are|is) (?:broken|missed)\b|\bpromised to pay but did not\b|\bpromise to pay but did not\b", text))
         recent_payment = False if no_recent_payment else True if re.search(r"\brecent (?:partial )?payments?\b|\blatest payment activity\b", text) else None
-        decision_changed = True if re.search(r"\b(?:decision|recommendation)s? changed\b|\bchanged (?:decision|recommendation)s?\b", text) else None
+        decision_changed = True if re.search(r"\b(?:decision|recommendation)s? changed\b|\bchanged (?:decision|recommendation)s?\b|\bwho changed (?:after|in) (?:the )?(?:latest|last|current) cycle\b", text) else None
         decision_held = True if re.search(r"\b(?:decision|recommendation)s? (?:held|unchanged|remained)\b|\bheld after (?:a )?fact change\b", text) else None
 
-        if self._has(text, ("exposure", "balance", "amount")):
+        if self._has(text, ("exposure", "balance", "amount")) or ("overdue" in text and self._has(text, ("biggest", "largest"))):
             sort_by = QuerySort.OVERDUE_EXPOSURE if "overdue" in text else QuerySort.TOTAL_EXPOSURE
         elif self._has(text, ("oldest", "longest overdue", "days overdue")):
             sort_by = QuerySort.DAYS_OVERDUE
@@ -156,13 +160,21 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         fewer_days = re.search(r"\b(?:less than|under) (\d{1,3}) days? overdue\b", text)
         more_score = re.search(r"\b(?:risk )?score (?:more than|over) (\d{1,3})\b", text)
         fewer_score = re.search(r"\b(?:risk )?score (?:less than|under) (\d{1,3})\b", text)
+        exposure = re.search(r"\b(?:exposure|balance|amount|outstanding)?\s*(?:more than|above|over)\s+(?:inr|rs)?\s*(\d+(?:\.\d+)?)(?!\s*days?\b)\s*(crores?|cr|lakhs?|lacs?|l)?\b", text)
+        below_exposure = re.search(r"\b(?:exposure|balance|amount|outstanding)?\s*(?:less than|below|under)\s+(?:inr|rs)?\s*(\d+(?:\.\d+)?)(?!\s*days?\b)\s*(crores?|cr|lakhs?|lacs?|l)?\b", text)
+
+        def money_value(match):
+            if not match:
+                return None
+            multiplier = 10_000_000 if match.group(2) in {"crore", "crores", "cr"} else 100_000 if match.group(2) in {"lakh", "lakhs", "lac", "lacs", "l"} else 1
+            return Decimal(match.group(1)) * multiplier
 
         return StructuredQuery(
             entity=entity,
             risk_levels=risk_levels,
             overdue=True if "overdue" in text else None,
-            broken_promise=True if re.search(r"\b(?:broken|missed|failed) (?:payment |their )?promises?\b|\bbroke (?:their |a )?promises?\b|\bpromises? (?:were|was|are|is) (?:broken|missed)\b|\bpromised to pay but did not\b|\bpromise to pay but did not\b", text) else None,
-            active_promise=active_promise,
+            broken_promise=True if broken_promise else None,
+            active_promise=active_promise if active_promise is not None else True if re.search(r"\bpromises?\b", text) and not broken_promise else None,
             active_dispute=active_dispute,
             partial_payment=True if re.search(r"\bpartial(?:ly)? paid\b|\bpartial payments?\b", text) else None,
             recent_payment=recent_payment,
@@ -175,6 +187,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             max_days_overdue=max(0, int(fewer_days.group(1)) - 1) if fewer_days else None,
             min_score=min(100, int(more_score.group(1)) + 1) if more_score else None,
             max_score=min(100, max(0, int(fewer_score.group(1)) - 1)) if fewer_score else None,
+            min_exposure=money_value(exposure),
+            max_exposure=money_value(below_exposure),
             sort_by=sort_by,
             descending=descending,
             limit=limit,
@@ -192,6 +206,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         # A named high-risk band remains a filter even when the operator also
         # asks for the top N. Superlatives such as "riskiest" only request order.
         if re.search(r"\bhigh(?: risk| priority)\b", text):
+            levels.extend(level for level in (PriorityLevel.HIGH, PriorityLevel.CRITICAL) if level not in levels)
+        if re.search(r"\brisky\b", text) and not re.search(r"\briskiest\b", text):
             levels.extend(level for level in (PriorityLevel.HIGH, PriorityLevel.CRITICAL) if level not in levels)
         return levels
 
@@ -221,6 +237,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             query.decision_changed, query.decision_held,
         )) or query.min_days_overdue is not None or query.max_days_overdue is not None
         or query.min_score is not None or query.max_score is not None
+        or query.min_exposure is not None or query.max_exposure is not None
         or query.limit or query.count_only or query.time_scope is QueryTimeScope.LATEST_CYCLE)
 
     @staticmethod
@@ -235,6 +252,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
                 query.partial_payment, query.recent_payment, query.actionable, query.blocked, query.monitoring,
                 query.decision_changed, query.decision_held,
                 query.min_days_overdue, query.max_days_overdue, query.min_score, query.max_score,
+                query.min_exposure, query.max_exposure,
             ))
         )
 
@@ -258,10 +276,12 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
     def _normalize(command: str) -> str:
         command = command.replace(">", " more than ").replace("<", " less than ")
         text = command.lower().replace("â€™", "'").replace("’", "'")
-        text = re.sub(r"[^a-z0-9']+", " ", text)
+        text = re.sub(r"[^a-z0-9'.]+", " ", text)
         replacements = (
             (r"\banyone\b|\bpeople\b", "customers"),
+            (r"\b(?:late|unpaid) (?:customers?|accounts?|clients?|invoices?|receivables?)\b", "overdue customers"),
             (r"\baccounts?\b", "account"),
+            (r"\bclients?\b", "customer"),
             (r"\bcases?\b", "case"),
             (r"\bfollow\s*ups?\b", "follow up"),
             (r"\bwho'?s\b", "who is"),
@@ -295,6 +315,8 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             return "The minimum overdue-day filter exceeds the maximum. Correct the numeric range; no filter was weakened."
         if query.min_score is not None and query.max_score is not None and query.min_score > query.max_score:
             return "The minimum score filter exceeds the maximum. Correct the numeric range; no filter was weakened."
+        if query.min_exposure is not None and query.max_exposure is not None and query.min_exposure > query.max_exposure:
+            return "The minimum exposure filter exceeds the maximum. Correct the amount range; no filter was weakened."
         return None
 
     @staticmethod

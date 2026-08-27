@@ -103,6 +103,8 @@ export type StructuredQuery = {
   max_days_overdue: number | null;
   min_score: number | null;
   max_score: number | null;
+  min_exposure: string | null;
+  max_exposure: string | null;
   sort_by: "RISK_SCORE" | "TOTAL_EXPOSURE" | "OVERDUE_EXPOSURE" | "DAYS_OVERDUE" | "LAST_PAYMENT";
   descending: boolean;
   limit: number | null;

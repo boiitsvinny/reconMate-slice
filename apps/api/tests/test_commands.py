@@ -276,6 +276,20 @@ def test_interpreter_accepts_realistic_operator_paraphrases(command: str, intent
 
 
 @pytest.mark.parametrize("command", [
+    "Show accounts that should receive a payment reminder",
+    "Who should get payment reminders?",
+    "Show 7 customers safe to remind",
+    "List customers eligible for a reminder",
+])
+def test_reminder_intent_variants_never_degrade_to_generic_risk_ranking(command: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is CommandIntentType.PREPARE_PAYMENT_REMINDERS
+    assert result.query.overdue is True
+    if "7" in command:
+        assert result.query.limit == 7
+
+
+@pytest.mark.parametrize("command", [
     "top risky customers",
     "who needs attention",
     "broken promises",
@@ -333,6 +347,11 @@ def test_high_risk_filter_is_distinct_from_riskiest_ranking() -> None:
     assert queries[1] == queries[2]
 
 
+def test_risky_customers_means_elevated_risk_not_an_unfiltered_default() -> None:
+    query = RuleBasedCommandInterpreter().interpret(CommandRequest(command="Show risky customers")).query
+    assert query.risk_levels == [PriorityLevel.HIGH, PriorityLevel.CRITICAL]
+
+
 @pytest.mark.parametrize(("command", "levels", "sort_by"), [
     ("Show the 5 riskiest customers", [], QuerySort.RISK_SCORE),
     ("Show 5 high-risk customers", [PriorityLevel.HIGH, PriorityLevel.CRITICAL], QuerySort.RISK_SCORE),
@@ -371,6 +390,11 @@ def test_ranking_ties_use_raw_score_then_stable_domain_facts() -> None:
     ("Customers with risk score over 80", {"min_score": 81}),
     ("Customers changed after latest cycle", {"time_scope": QueryTimeScope.LATEST_CYCLE}),
     ("Count customers with broken promises", {"count_only": True, "broken_promise": True}),
+    ("Broken promises above 5 lakh", {"broken_promise": True, "min_exposure": Decimal("500000")}),
+    ("Overdue customers above INR 2.5 lakh", {"overdue": True, "min_exposure": Decimal("250000.0")}),
+    ("Biggest overdue accounts", {"overdue": True, "sort_by": QuerySort.OVERDUE_EXPOSURE}),
+    ("Who changed after the last cycle?", {"decision_changed": True, "time_scope": QueryTimeScope.LATEST_CYCLE}),
+    ("Overdue clients with promises", {"overdue": True, "active_promise": True}),
 ])
 def test_interpreter_composes_independent_query_dimensions(command: str, expected: dict) -> None:
     result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
@@ -482,7 +506,7 @@ def test_generic_operations_do_not_supply_domain_evidence(command: str) -> None:
 
 
 def test_composed_predicates_all_apply_to_the_same_grounded_result() -> None:
-    query = StructuredQuery(broken_promise=True, active_dispute=False, recent_payment=True, min_days_overdue=30)
+    query = StructuredQuery(broken_promise=True, active_dispute=False, recent_payment=True, min_days_overdue=30, min_exposure=Decimal("400000"))
     assert CommandTools._matches(
         query, CUSTOMER_RESULT, partial=False, recent=True, blocked=False, monitoring=False, actionable=True,
     )
@@ -491,6 +515,12 @@ def test_composed_predicates_all_apply_to_the_same_grounded_result() -> None:
     assert not CommandTools._matches(
         query, disputed, partial=False, recent=True, blocked=True, monitoring=False, actionable=False,
     )
+
+
+def test_compare_request_fails_safely_instead_of_falling_back_to_top_risk() -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command="Compare Frontier and Greenfield"))
+    assert result.intent is CommandIntentType.UNKNOWN
+    assert result.guidance
 
 
 def test_decision_transition_filters_are_independent_facts() -> None:

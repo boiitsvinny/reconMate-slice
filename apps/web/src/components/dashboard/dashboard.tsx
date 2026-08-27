@@ -374,7 +374,7 @@ export function Dashboard() {
 
   return (
     <main className="workspace-home min-h-screen overflow-x-hidden">
-      <AppHeader connected={connectionsHealthy} updating={isUpdating} />
+      <AppHeader connected={!dataReady && !errorMessage ? undefined : connectionsHealthy} updating={isUpdating} />
       <div className="mx-auto max-w-[1580px] px-4 py-6 pb-24 sm:px-6 sm:py-8 sm:pb-10 lg:px-10 lg:py-10">
         {!dataReady && !errorMessage && <DashboardLoading />}
         {!dataReady && errorMessage && (
@@ -412,7 +412,6 @@ export function Dashboard() {
                 recovery={recovery.data}
                 latestCycle={latestCycleSnapshot}
                 approvalRequired={recoveryQueue.queue.filter((item) => item.humanApprovalRequired && item.state !== "RESOLVED").length}
-                recoveredThisCycle={recoveredThisCycle > 0 ? money(recoveredThisCycle) : "—"}
                 evaluationUpdatedAt={intelligence.dataUpdatedAt}
                 loading={intelligence.isLoading}
                 error={intelligenceError}

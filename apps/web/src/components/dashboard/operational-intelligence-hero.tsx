@@ -7,14 +7,13 @@ type Props = {
   recovery: Recovery;
   latestCycle: LatestIntelligenceCycle | null;
   approvalRequired: number;
-  recoveredThisCycle: string;
   evaluationUpdatedAt: number;
   loading: boolean;
   error: string | null;
   synchronizing: boolean;
 };
 
-export function OperationalIntelligenceHero({ intelligence, recovery, latestCycle, approvalRequired, recoveredThisCycle, evaluationUpdatedAt, loading, error, synchronizing }: Props) {
+export function OperationalIntelligenceHero({ intelligence, recovery, latestCycle, approvalRequired, evaluationUpdatedAt, loading, error, synchronizing }: Props) {
   if (loading) return <Panel className="h-52 animate-pulse bg-white/[.035]"><span className="sr-only">Loading ReconMate intelligence</span></Panel>;
 
   const holds = intelligence?.customers.filter((item) => item.recommendation.action === "MONITOR" || item.recommendation.action === "WAIT_FOR_PROMISE").length ?? 0;
@@ -35,13 +34,12 @@ export function OperationalIntelligenceHero({ intelligence, recovery, latestCycl
         prominent
         action={<StatusPill tone={synchronizing ? "sky" : "emerald"}>{synchronizing ? "Reassessing" : "Evaluation current"}</StatusPill>}
       />
-      <div className="grid grid-cols-2 gap-px bg-white/[.07] sm:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-px bg-white/[.07] sm:grid-cols-3 xl:grid-cols-5">
         <IntelligenceMetric label="Cases monitored" value={String(monitoredCases)} detail="Open recovery cases evaluated" />
         <IntelligenceMetric label="Reassessed this cycle" value={latestCycle ? String(latestCycle.customers_affected) : "—"} detail="Affected customer records" />
         <IntelligenceMetric label="Decisions changed" value={latestCycle ? String(latestCycle.recommendations_changed) : "—"} detail="Material recommendation moves" emphasis={Boolean(latestCycle?.recommendations_changed)} />
-        <IntelligenceMetric label="Approval required" value={String(approvalRequired)} detail="Recommendations requiring an operator" />
-        <IntelligenceMetric label="Deliberate holds" value={String(holds)} detail="Monitor or wait decisions" restraint />
-        <IntelligenceMetric label="Observed recovery this cycle" value={recoveredThisCycle} detail="Sum of persisted payment amounts" restraint={recoveredThisCycle !== "—"} />
+        <IntelligenceMetric label="Approval required" value={String(approvalRequired)} detail="Open cases; may overlap holds" />
+        <IntelligenceMetric label="Deliberate holds" value={String(holds)} detail="Customer decisions; may overlap approval" restraint />
       </div>
       <div className="flex flex-col gap-2 border-t border-white/[.06] px-5 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
         <p className={synchronizing ? "animate-pulse text-sky-200" : "text-slate-400"}>{activity}</p>

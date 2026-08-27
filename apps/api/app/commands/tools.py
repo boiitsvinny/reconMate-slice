@@ -372,6 +372,10 @@ class CommandTools:
             predicates.append((f"Score below {query.min_score}", lambda item: item[0].score >= query.min_score))
         if query.max_score is not None:
             predicates.append((f"Score above {query.max_score}", lambda item: item[0].score <= query.max_score))
+        if query.min_exposure is not None:
+            predicates.append((f"Exposure below {query.min_exposure}", lambda item: item[0].metrics.overdue_exposure >= query.min_exposure))
+        if query.max_exposure is not None:
+            predicates.append((f"Exposure above {query.max_exposure}", lambda item: item[0].metrics.overdue_exposure <= query.max_exposure))
         remaining = list(contexts)
         exclusions = []
         for label, predicate in predicates:
@@ -403,6 +407,8 @@ class CommandTools:
             and (query.max_days_overdue is None or metrics.max_days_overdue <= query.max_days_overdue)
             and (query.min_score is None or result.score >= query.min_score)
             and (query.max_score is None or result.score <= query.max_score)
+            and (query.min_exposure is None or metrics.overdue_exposure >= query.min_exposure)
+            and (query.max_exposure is None or metrics.overdue_exposure <= query.max_exposure)
             and all(expected is None or actual is expected for expected, actual in checks)
         )
 
