@@ -8,7 +8,6 @@ import pytest
 from google import genai
 from google.genai import types as genai_types
 
-from app.intelligence import provider as provider_module
 from app.intelligence.evaluation import (
     run_communication_extraction_evaluation,
     run_live_communication_extraction_evaluation,
@@ -69,11 +68,6 @@ def _failure_log(caplog) -> dict:
     return json.loads(record.message)
 
 
-def _self_test_log(caplog) -> dict:
-    record = next(record for record in reversed(caplog.records) if "gemini_provider_self_test" in record.message)
-    return json.loads(record.message)
-
-
 def _provider(payload=None, error=None, api_key="test-key"):
     provider = GoogleGenAICommunicationIntelligenceProvider(
         api_key=api_key, model="gemini-3.7-flash", timeout_seconds=3,
@@ -96,20 +90,19 @@ def test_provider_configuration_and_runtime_labels_are_explicit(caplog) -> None:
     assert live.runtime_mode == "LIVE MODEL" and live.model_version == "gemini-3.7-flash"
 
 
-def test_live_provider_uses_read_only_structured_response_and_minimal_context() -> None:
+def test_live_provider_uses_plain_text_call_with_prompted_json_contract() -> None:
     provider = _provider(json.dumps({"candidates": [_candidate()]}))
     result = provider.analyze(MESSAGE, date(2026, 8, 26))
     assert result.candidates[0].fact_type.value == "ACTIVE_DISPUTE"
     call = provider.client.interactions.calls[0]
-    assert call["store"] is False
-    assert call["response_format"]["mime_type"] == "application/json"
-    assert call["response_format"]["schema"] == provider_module._EXTRACTION_SCHEMA
-    assert call["model"] == "gemini-3.7-flash" and call["timeout"] == 3
+    assert set(call) == {"model", "input"}
+    assert call["model"] == "gemini-3.7-flash"
     assert MESSAGE in call["input"] and "portfolio" not in call["input"].lower()
-    assert "tools" not in call and "previous_interaction_id" not in call
+    assert "Return ONLY one JSON object" in call["input"]
+    assert '"candidates"' in call["input"]
 
 
-def test_installed_sdk_serializes_current_interactions_structured_output_shape() -> None:
+def test_installed_sdk_serializes_only_model_and_plain_text_input() -> None:
     captured = {}
     payload = json.dumps({"candidates": [_candidate(proposed_data={
         "amount": None,
@@ -137,7 +130,6 @@ def test_installed_sdk_serializes_current_interactions_structured_output_shape()
         http_options=genai_types.HttpOptions(
             base_url="https://gemini-serialization.test",
             httpx_client=http_client,
-            retry_options=genai_types.HttpRetryOptions(attempts=1),
         ),
     )
     provider = _provider()
@@ -149,45 +141,29 @@ def test_installed_sdk_serializes_current_interactions_structured_output_shape()
 
     assert result.candidates[0].fact_type.value == "ACTIVE_DISPUTE"
     body = captured["body"]
-    assert set(body) == {"model", "input", "response_format", "generation_config", "store"}
+    assert set(body) == {"model", "input"}
     assert body["model"] == "gemini-3.7-flash"
-    assert body["store"] is False
-    assert body["generation_config"] == {"max_output_tokens": 1200}
-    assert body["response_format"]["type"] == "text"
-    assert body["response_format"]["mime_type"] == "application/json"
-    serialized_schema = body["response_format"]["schema"]
-    assert serialized_schema == provider_module._EXTRACTION_SCHEMA
-    assert "additionalProperties" not in json.dumps(serialized_schema)
-    assert not any(key in json.dumps(serialized_schema) for key in ("$defs", "$ref", "oneOf", "anyOf", "const"))
-    assert "response_mime_type" not in body
+    assert MESSAGE in body["input"]
+    assert "Return ONLY one JSON object" in body["input"]
 
 
-def test_real_bad_request_metadata_is_sanitized_and_minimal_probe_is_comparable(caplog) -> None:
-    provider_module._MINIMAL_SELF_TEST_ATTEMPTED = False
+def test_real_plain_call_bad_request_metadata_is_sanitized_without_probe(caplog) -> None:
     captured = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured.append(json.loads(request.content))
-        if len(captured) == 1:
-            return httpx.Response(400, json={"error": {
-                "code": 400,
-                "status": "INVALID_ARGUMENT",
-                "message": f"raw message contains {SECRET} and {MESSAGE}",
-                "details": [{
-                    "@type": "type.googleapis.com/google.rpc.BadRequest",
-                    "fieldViolations": [{
-                        "field": "response_format.schema.properties.candidates",
-                        "description": f"Unsupported schema field; key={SECRET}; source={MESSAGE}",
-                    }],
+        return httpx.Response(400, json={"error": {
+            "code": 400,
+            "status": "INVALID_ARGUMENT",
+            "message": f"raw message contains {SECRET} and {MESSAGE}",
+            "details": [{
+                "@type": "type.googleapis.com/google.rpc.BadRequest",
+                "fieldViolations": [{
+                    "field": "model",
+                    "description": f"Unsupported model field; key={SECRET}; source={MESSAGE}",
                 }],
-            }})
-        return httpx.Response(200, json={
-            "id": "minimal-test",
-            "object": "interaction",
-            "status": "completed",
-            "model": "gemini-3.7-flash",
-            "steps": [{"type": "model_output", "content": [{"type": "text", "text": '{"result":"ok"}'}]}],
-        })
+            }],
+        }})
 
     http_client = httpx.Client(transport=httpx.MockTransport(handler))
     client = genai.Client(
@@ -195,7 +171,6 @@ def test_real_bad_request_metadata_is_sanitized_and_minimal_probe_is_comparable(
         http_options=genai_types.HttpOptions(
             base_url="https://gemini-error.test",
             httpx_client=http_client,
-            retry_options=genai_types.HttpRetryOptions(attempts=1),
         ),
     )
     provider = _provider(api_key=SECRET)
@@ -211,21 +186,11 @@ def test_real_bad_request_metadata_is_sanitized_and_minimal_probe_is_comparable(
     assert failure["exception_type"] == "BadRequestError"
     assert failure["google_error_status"] == "INVALID_ARGUMENT"
     assert failure["google_error_code"] == 400
-    assert failure["field_violation_path"] == "response_format.schema.properties.candidates"
-    assert "Unsupported schema field" in failure["field_violation_description"]
+    assert failure["field_violation_path"] == "model"
+    assert "Unsupported model field" in failure["field_violation_description"]
     assert SECRET not in json.dumps(failure) and MESSAGE not in json.dumps(failure)
-    probe = _self_test_log(caplog)
-    assert probe["outcome"] == "passed"
-    assert probe["same_model_and_request_options_as_reconmate"] is True
-    assert probe["input_mode"] == "fixed_non_customer_probe"
-    assert len(captured) == 2
-    reconmate, minimal = captured
-    assert set(reconmate) == set(minimal) == {"model", "input", "response_format", "generation_config", "store"}
-    assert reconmate["model"] == minimal["model"] == "gemini-3.7-flash"
-    assert reconmate["generation_config"] == minimal["generation_config"]
-    assert reconmate["store"] == minimal["store"] is False
-    assert reconmate["response_format"]["schema"] == provider_module._EXTRACTION_SCHEMA
-    assert minimal["response_format"]["schema"] == provider_module._MINIMAL_SELF_TEST_SCHEMA
+    assert len(captured) == 1
+    assert set(captured[0]) == {"model", "input"}
 
 
 @pytest.mark.parametrize("payload", [

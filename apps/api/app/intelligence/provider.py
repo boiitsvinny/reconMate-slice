@@ -7,11 +7,9 @@ import json
 import logging
 import re
 from time import perf_counter
-from threading import Lock
 from typing import Any
 
 from google import genai
-from google.genai import types as genai_types
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -33,15 +31,6 @@ _SAFE_FAILURE_MESSAGES = {
     "local_validation_failure": "Gemini output failed ReconMate's local grounding or schema validation.",
     "unknown_provider_error": "The Gemini provider request failed unexpectedly.",
 }
-
-_MINIMAL_SELF_TEST_SCHEMA = {
-    "type": "object",
-    "properties": {"result": {"type": "string"}},
-    "required": ["result"],
-}
-_MINIMAL_SELF_TEST_LOCK = Lock()
-_MINIMAL_SELF_TEST_ATTEMPTED = False
-
 
 def _parsed_error_body(exc: BaseException) -> dict[str, Any] | None:
     body = getattr(exc, "body", None)
@@ -175,37 +164,6 @@ def _log_provider_failure(
     }
     payload.update(_google_error_metadata(exc, secret=secret, sensitive_text=sensitive_text))
     logger.error(json.dumps(payload, separators=(",", ":")))
-
-
-def _log_self_test(
-    *, model: str, outcome: str, elapsed_ms: int, exc: BaseException | None = None,
-    secret: str | None = None,
-) -> None:
-    payload = {
-        "event": "gemini_provider_self_test",
-        "provider": "google",
-        "model": model,
-        "probe": "minimal_documented_schema",
-        "outcome": outcome,
-        "request_fields": ["generation_config", "input", "model", "response_format", "store"],
-        "same_model_and_request_options_as_reconmate": True,
-        "input_mode": "fixed_non_customer_probe",
-        "exception_type": exc.__class__.__name__ if exc else None,
-        "http_status": _http_status(exc) if exc else None,
-        "provider_error_code": _provider_error_code(exc, secret) if exc else None,
-        "elapsed_ms": max(0, elapsed_ms),
-    }
-    if exc:
-        payload.update(_google_error_metadata(exc, secret=secret, sensitive_text=None))
-        logger.error(json.dumps(payload, separators=(",", ":")))
-    else:
-        payload.update({
-            "google_error_status": None,
-            "google_error_code": None,
-            "field_violation_path": None,
-            "field_violation_description": None,
-        })
-        logger.info(json.dumps(payload, separators=(",", ":")))
 
 
 class ProviderError(RuntimeError):
@@ -342,6 +300,12 @@ _PROPOSED_DATA_KEYS = {
     "requires_payment_verification",
 }
 
+_PLAIN_JSON_INSTRUCTIONS = (
+    "Return ONLY one JSON object with no Markdown fences or commentary. "
+    "The object must match this candidate-envelope schema exactly: "
+    + json.dumps(_EXTRACTION_SCHEMA, separators=(",", ":"))
+)
+
 
 def _validate_transport_object_keys(payload: object) -> None:
     """Keep closed-object enforcement local without sending it to Gemini."""
@@ -374,53 +338,9 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
             _log_provider_failure(model=model, category="request_or_schema_error", exc=exc, elapsed_ms=0, secret=api_key)
             raise exc
         self.model_version = model
-        self.timeout_seconds = timeout_seconds
         self.confidence_threshold = confidence_threshold
         self._redaction_secret = api_key
-        self.client = genai.Client(
-            api_key=api_key,
-            http_options=genai_types.HttpOptions(
-                retry_options=genai_types.HttpRetryOptions(attempts=1),
-            ),
-            )
-
-    def _run_minimal_structured_output_self_test(self) -> None:
-        global _MINIMAL_SELF_TEST_ATTEMPTED
-        with _MINIMAL_SELF_TEST_LOCK:
-            if _MINIMAL_SELF_TEST_ATTEMPTED:
-                return
-            _MINIMAL_SELF_TEST_ATTEMPTED = True
-        started_at = perf_counter()
-        try:
-            interaction = self.client.interactions.create(
-                model=self.model_version,
-                input="Return a JSON object whose result field is the word ok.",
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": _MINIMAL_SELF_TEST_SCHEMA,
-                },
-                generation_config={"max_output_tokens": 1200},
-                store=False,
-                timeout=self.timeout_seconds,
-            )
-            decoded = json.loads(interaction.output_text or "")
-            if not isinstance(decoded, dict) or not isinstance(decoded.get("result"), str):
-                raise ValueError("Minimal structured output was malformed")
-        except Exception as exc:
-            _log_self_test(
-                model=self.model_version,
-                outcome="failed",
-                elapsed_ms=round((perf_counter() - started_at) * 1000),
-                exc=exc,
-                secret=self._redaction_secret,
-            )
-            return
-        _log_self_test(
-            model=self.model_version,
-            outcome="passed",
-            elapsed_ms=round((perf_counter() - started_at) * 1000),
-        )
+        self.client = genai.Client(api_key=api_key)
 
     def analyze(self, content: str, reference_date: date | None = None) -> CommunicationAnalysisResult:
         reference = reference_date or date.today()
@@ -430,17 +350,10 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
                 model=self.model_version,
                 input=(
                     f"{_SYSTEM_INSTRUCTIONS}\n\n"
+                    f"{_PLAIN_JSON_INSTRUCTIONS}\n\n"
                     f"Reference date for relative dates: {reference.isoformat()}\n"
                     f"Customer message:\n{content}"
                 ),
-                response_format={
-                    "type": "text",
-                    "mime_type": "application/json",
-                    "schema": _EXTRACTION_SCHEMA,
-                },
-                generation_config={"max_output_tokens": 1200},
-                store=False,
-                timeout=self.timeout_seconds,
             )
         except Exception as exc:
             category = _classify_provider_failure(exc)
@@ -452,8 +365,6 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
                 secret=self._redaction_secret,
                 sensitive_text=content,
             )
-            if category == "request_or_schema_error":
-                self._run_minimal_structured_output_self_test()
             if category == "timeout":
                 raise ProviderError("The live model timed out; no fact was written.") from exc
             raise ProviderError("The live model provider is unavailable; no fact was written.") from exc
