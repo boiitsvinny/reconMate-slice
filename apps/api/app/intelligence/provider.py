@@ -4,7 +4,10 @@ from abc import ABC, abstractmethod
 from datetime import date, timedelta
 from decimal import Decimal
 import json
+import logging
 import re
+from time import perf_counter
+from typing import Any
 
 from google import genai
 from google.genai import types as genai_types
@@ -14,6 +17,90 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from app.intelligence.candidates import CandidateValidationError, analysis_from_candidates, normalize_candidate_facts
 from app.intelligence.schemas import (CandidateFact, CommunicationAnalysisResult, DisputeSignal, Intent,
     PaymentCommitment, PaymentCompletedClaim, Sentiment, Urgency)
+
+
+logger = logging.getLogger(__name__)
+
+_SAFE_FAILURE_MESSAGES = {
+    "missing_key": "Gemini API credentials are not configured.",
+    "invalid_key/auth": "Gemini authentication or authorization failed.",
+    "quota_or_rate_limit": "Gemini quota or rate limit rejected the request.",
+    "model_not_found": "The configured Gemini model was not found or is unavailable.",
+    "timeout": "The Gemini request timed out.",
+    "request_or_schema_error": "Gemini rejected the request or structured-output schema.",
+    "malformed_provider_response": "Gemini returned an empty or malformed structured response.",
+    "local_validation_failure": "Gemini output failed ReconMate's local grounding or schema validation.",
+    "unknown_provider_error": "The Gemini provider request failed unexpectedly.",
+}
+
+
+def _http_status(exc: BaseException) -> int | None:
+    for value in (getattr(exc, "status_code", None), getattr(getattr(exc, "response", None), "status_code", None)):
+        if isinstance(value, int):
+            return value
+    code = getattr(exc, "code", None)
+    return code if isinstance(code, int) else None
+
+
+def _provider_error_code(exc: BaseException, secret: str | None) -> str | None:
+    values: list[Any] = [
+        getattr(exc, "error_code", None),
+        getattr(exc, "status", None),
+        getattr(exc, "code", None),
+    ]
+    body = getattr(exc, "body", None)
+    if isinstance(body, dict):
+        error = body.get("error")
+        if isinstance(error, dict):
+            values.extend((error.get("status"), error.get("code")))
+    for value in values:
+        if value is None:
+            continue
+        rendered = str(value)
+        if secret:
+            rendered = rendered.replace(secret, "[REDACTED]")
+        rendered = re.sub(r"AIza[0-9A-Za-z_-]{16,}", "[REDACTED]", rendered)
+        rendered = re.sub(r"[^A-Za-z0-9_.:/\[\]-]", "_", rendered)[:80]
+        if rendered:
+            return rendered
+    return None
+
+
+def _classify_provider_failure(exc: BaseException) -> str:
+    status = _http_status(exc)
+    code = str(getattr(exc, "status", "") or getattr(exc, "error_code", "") or getattr(exc, "code", "")).lower()
+    name = exc.__class__.__name__.lower()
+    if isinstance(exc, httpx.TimeoutException) or "timeout" in name or status in {408, 504}:
+        return "timeout"
+    if status == 429 or any(token in code for token in ("quota", "rate_limit", "resource_exhausted")):
+        return "quota_or_rate_limit"
+    if status in {401, 403} or any(token in code for token in ("unauth", "permission_denied", "forbidden")):
+        return "invalid_key/auth"
+    if status == 404 or "not_found" in code:
+        return "model_not_found"
+    if status in {400, 409, 422} or any(token in code for token in ("invalid_argument", "schema", "request")):
+        return "request_or_schema_error"
+    return "unknown_provider_error"
+
+
+def _log_provider_failure(
+    *, model: str | None, category: str, exc: BaseException, elapsed_ms: int,
+    secret: str | None = None,
+) -> None:
+    # This is deliberately an allowlisted payload: no prompt, headers, raw response,
+    # traceback, or exception string is emitted.
+    payload = {
+        "event": "gemini_provider_failure",
+        "provider": "google",
+        "model": model,
+        "failure_category": category,
+        "exception_type": exc.__class__.__name__,
+        "http_status": _http_status(exc),
+        "provider_error_code": _provider_error_code(exc, secret),
+        "message": _SAFE_FAILURE_MESSAGES[category],
+        "elapsed_ms": max(0, elapsed_ms),
+    }
+    logger.error(json.dumps(payload, separators=(",", ":")))
 
 
 class ProviderError(RuntimeError):
@@ -155,12 +242,17 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
 
     def __init__(self, *, api_key: str | None, model: str | None, timeout_seconds: float, confidence_threshold: float):
         if not api_key:
-            raise ProviderConfigurationError("GEMINI_API_KEY is required when AI_PROVIDER=google.")
+            exc = ProviderConfigurationError("GEMINI_API_KEY is required when AI_PROVIDER=google.")
+            _log_provider_failure(model=model, category="missing_key", exc=exc, elapsed_ms=0)
+            raise exc
         if not model:
-            raise ProviderConfigurationError("AI_MODEL is required when AI_PROVIDER=google.")
+            exc = ProviderConfigurationError("AI_MODEL is required when AI_PROVIDER=google.")
+            _log_provider_failure(model=model, category="request_or_schema_error", exc=exc, elapsed_ms=0, secret=api_key)
+            raise exc
         self.model_version = model
         self.timeout_seconds = timeout_seconds
         self.confidence_threshold = confidence_threshold
+        self._redaction_secret = api_key
         self.client = genai.Client(
             api_key=api_key,
             http_options=genai_types.HttpOptions(
@@ -170,6 +262,7 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
 
     def analyze(self, content: str, reference_date: date | None = None) -> CommunicationAnalysisResult:
         reference = reference_date or date.today()
+        started_at = perf_counter()
         try:
             interaction = self.client.interactions.create(
                 model=self.model_version,
@@ -187,26 +280,48 @@ class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProv
                 store=False,
                 timeout=self.timeout_seconds,
             )
-        except httpx.TimeoutException as exc:
-            raise ProviderError("The live model timed out; no fact was written.") from exc
         except Exception as exc:
-            # Interactions is generated separately from the legacy SDK surfaces,
-            # so contain every transport/client exception at this read-only call.
-            if exc.__class__.__name__ == "APITimeoutError":
+            category = _classify_provider_failure(exc)
+            _log_provider_failure(
+                model=self.model_version,
+                category=category,
+                exc=exc,
+                elapsed_ms=round((perf_counter() - started_at) * 1000),
+                secret=self._redaction_secret,
+            )
+            if category == "timeout":
                 raise ProviderError("The live model timed out; no fact was written.") from exc
             raise ProviderError("The live model provider is unavailable; no fact was written.") from exc
 
         try:
             if not interaction.output_text:
-                raise ProviderError("The model returned no structured extraction.")
-            envelope = _CandidateEnvelope.model_validate(json.loads(interaction.output_text))
+                exc = ValueError("Empty structured provider response")
+                _log_provider_failure(
+                    model=self.model_version, category="malformed_provider_response", exc=exc,
+                    elapsed_ms=round((perf_counter() - started_at) * 1000), secret=self._redaction_secret,
+                )
+                raise ProviderError("The model returned no structured extraction.") from exc
+            decoded = json.loads(interaction.output_text)
+        except ProviderError:
+            raise
+        except json.JSONDecodeError as exc:
+            _log_provider_failure(
+                model=self.model_version, category="malformed_provider_response", exc=exc,
+                elapsed_ms=round((perf_counter() - started_at) * 1000), secret=self._redaction_secret,
+            )
+            raise ProviderError("The live model returned an invalid or ungrounded extraction; no fact was written.") from exc
+
+        try:
+            envelope = _CandidateEnvelope.model_validate(decoded)
             candidates = normalize_candidate_facts(
                 content, envelope.candidates, confidence_threshold=self.confidence_threshold,
             )
             return analysis_from_candidates(candidates)
-        except ProviderError:
-            raise
-        except (json.JSONDecodeError, ValidationError, CandidateValidationError, ValueError) as exc:
+        except (ValidationError, CandidateValidationError, ValueError) as exc:
+            _log_provider_failure(
+                model=self.model_version, category="local_validation_failure", exc=exc,
+                elapsed_ms=round((perf_counter() - started_at) * 1000), secret=self._redaction_secret,
+            )
             raise ProviderError("The live model returned an invalid or ungrounded extraction; no fact was written.") from exc
 
 

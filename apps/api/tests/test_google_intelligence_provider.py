@@ -1,5 +1,6 @@
 import json
 from datetime import date
+import logging
 from types import SimpleNamespace
 
 import httpx
@@ -22,6 +23,7 @@ from app.intelligence.schemas import CommunicationAnalysisResult, Intent
 
 
 MESSAGE = "We raised a dispute because the invoice quantity is wrong."
+SECRET = "test-key-do-not-log"
 
 
 def _candidate(**overrides):
@@ -52,19 +54,37 @@ class FakeInteractions:
         return SimpleNamespace(output_text=self.payload)
 
 
-def _provider(payload=None, error=None):
+class FakeProviderFailure(Exception):
+    def __init__(self, message: str, *, status_code=None, code=None, body=None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.body = body
+
+
+def _failure_log(caplog) -> dict:
+    record = next(record for record in reversed(caplog.records) if "gemini_provider_failure" in record.message)
+    return json.loads(record.message)
+
+
+def _provider(payload=None, error=None, api_key="test-key"):
     provider = GoogleGenAICommunicationIntelligenceProvider(
-        api_key="test-key", model="gemini-3.7-flash", timeout_seconds=3,
+        api_key=api_key, model="gemini-3.7-flash", timeout_seconds=3,
         confidence_threshold=0.7,
     )
     provider.client = SimpleNamespace(interactions=FakeInteractions(payload, error))
     return provider
 
 
-def test_provider_configuration_and_runtime_labels_are_explicit() -> None:
+def test_provider_configuration_and_runtime_labels_are_explicit(caplog) -> None:
     assert get_provider("mock").runtime_mode == "MOCK / DEV MODE"
-    with pytest.raises(ProviderConfigurationError, match="GEMINI_API_KEY"):
-        get_provider("google", model="gemini-3.7-flash")
+    with caplog.at_level(logging.ERROR, logger="app.intelligence.provider"):
+        with pytest.raises(ProviderConfigurationError, match="GEMINI_API_KEY"):
+            get_provider("google", model="gemini-3.7-flash")
+    missing_key_log = _failure_log(caplog)
+    assert missing_key_log["failure_category"] == "missing_key"
+    assert missing_key_log["provider"] == "google"
+    assert missing_key_log["model"] == "gemini-3.7-flash"
     live = get_provider("google", api_key="test-key", model="gemini-3.7-flash")
     assert live.runtime_mode == "LIVE MODEL" and live.model_version == "gemini-3.7-flash"
 
@@ -94,13 +114,68 @@ def test_untrusted_or_authoritative_model_output_fails_closed(payload: str) -> N
         _provider(payload).analyze(MESSAGE, date(2026, 8, 26))
 
 
-def test_timeout_is_safe_and_does_not_retry_or_write() -> None:
+def test_timeout_is_safe_and_does_not_retry_or_write(caplog) -> None:
     interactions = FakeInteractions(error=httpx.ReadTimeout("timed out"))
     provider = _provider()
     provider.client = SimpleNamespace(interactions=interactions)
-    with pytest.raises(ProviderError, match="timed out"):
-        provider.analyze(MESSAGE, date(2026, 8, 26))
+    with caplog.at_level(logging.ERROR, logger="app.intelligence.provider"):
+        with pytest.raises(ProviderError, match="timed out"):
+            provider.analyze(MESSAGE, date(2026, 8, 26))
     assert len(interactions.calls) == 1
+    event = _failure_log(caplog)
+    assert event["failure_category"] == "timeout"
+    assert event["exception_type"] == "ReadTimeout"
+    assert isinstance(event["elapsed_ms"], int)
+
+
+@pytest.mark.parametrize(("status_code", "code", "expected"), [
+    (401, "UNAUTHENTICATED", "invalid_key/auth"),
+    (403, "PERMISSION_DENIED", "invalid_key/auth"),
+    (404, "NOT_FOUND", "model_not_found"),
+    (429, "RESOURCE_EXHAUSTED", "quota_or_rate_limit"),
+    (400, "INVALID_ARGUMENT", "request_or_schema_error"),
+])
+def test_provider_http_failures_are_classified_and_public_error_stays_generic(
+    caplog, status_code: int, code: str, expected: str,
+) -> None:
+    failure = FakeProviderFailure("provider details", status_code=status_code, code=code)
+    with caplog.at_level(logging.ERROR, logger="app.intelligence.provider"):
+        with pytest.raises(ProviderError) as raised:
+            _provider(error=failure).analyze(MESSAGE, date(2026, 8, 26))
+    assert str(raised.value) == "The live model provider is unavailable; no fact was written."
+    event = _failure_log(caplog)
+    assert event["failure_category"] == expected
+    assert event["http_status"] == status_code
+    assert event["provider_error_code"] == code
+
+
+def test_provider_log_is_allowlisted_and_never_leaks_secret_prompt_or_raw_error(caplog) -> None:
+    failure = FakeProviderFailure(
+        f"Authorization: Bearer {SECRET}; key={SECRET}; customer={MESSAGE}",
+        status_code=401,
+        code=f"AUTH_{SECRET}",
+        body={"error": {"message": f"raw response contains {SECRET} and {MESSAGE}"}},
+    )
+    with caplog.at_level(logging.ERROR, logger="app.intelligence.provider"):
+        with pytest.raises(ProviderError):
+            _provider(error=failure, api_key=SECRET).analyze(MESSAGE, date(2026, 8, 26))
+    rendered = json.dumps(_failure_log(caplog))
+    assert SECRET not in rendered
+    assert MESSAGE not in rendered
+    assert "Authorization" not in rendered and "Bearer" not in rendered
+
+
+@pytest.mark.parametrize(("payload", "expected"), [
+    ("not-json", "malformed_provider_response"),
+    (json.dumps({"candidates": [_candidate(fact_type="AUTHORITATIVE_RISK_SCORE")]}), "local_validation_failure"),
+])
+def test_malformed_and_local_schema_failures_are_distinguished(caplog, payload: str, expected: str) -> None:
+    with caplog.at_level(logging.ERROR, logger="app.intelligence.provider"):
+        with pytest.raises(ProviderError, match="invalid or ungrounded"):
+            _provider(payload).analyze(MESSAGE, date(2026, 8, 26))
+    event = _failure_log(caplog)
+    assert event["failure_category"] == expected
+    assert event["http_status"] is None
 
 
 def test_sdk_or_network_failure_is_contained_without_fallback() -> None:
