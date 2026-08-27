@@ -9,7 +9,7 @@ from app.intelligence.candidates import candidate_facts
 from app.intelligence.provider import (
     CommunicationIntelligenceProvider,
     MockCommunicationIntelligenceProvider,
-    OpenAICommunicationIntelligenceProvider,
+    GoogleGenAICommunicationIntelligenceProvider,
     ProviderError,
 )
 
@@ -98,13 +98,13 @@ def run_live_communication_extraction_evaluation(
     if not api_key or not model:
         return {
             "executed": False,
-            "provider": "openai",
+            "provider": "google",
             "model": model,
             "runtime_mode": "LIVE MODEL",
             "reason": "Live-model evaluation not executed because no configured credentials were available.",
             "direct_financial_mutations": 0,
         }
-    provider = OpenAICommunicationIntelligenceProvider(
+    provider = GoogleGenAICommunicationIntelligenceProvider(
         api_key=api_key, model=model, timeout_seconds=timeout_seconds,
         confidence_threshold=confidence_threshold,
     )

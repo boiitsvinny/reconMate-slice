@@ -15,7 +15,7 @@ def analyze_text(content: str, reference_date: date | None = None):
     try:
         provider = get_provider(
             settings.ai_provider,
-            api_key=settings.openai_api_key.get_secret_value() if settings.openai_api_key else None,
+            api_key=settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None,
             model=settings.ai_model,
             timeout_seconds=settings.ai_timeout_seconds,
             confidence_threshold=settings.ai_confidence_threshold,

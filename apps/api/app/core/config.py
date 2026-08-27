@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://reconmate:change-me-for-local-development@localhost:5432/reconmate"
     ai_provider: str = "mock"
     ai_model: str | None = None
-    openai_api_key: SecretStr | None = None
+    gemini_api_key: SecretStr | None = None
     ai_timeout_seconds: float = Field(default=12, gt=0, le=30)
     ai_confidence_threshold: float = Field(default=0.7, ge=0, le=1)
     ai_allow_mock_fallback: bool = False

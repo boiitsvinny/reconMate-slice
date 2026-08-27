@@ -4,15 +4,15 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from openai import APITimeoutError
 
+from app.intelligence import provider as provider_module
 from app.intelligence.evaluation import (
     run_communication_extraction_evaluation,
     run_live_communication_extraction_evaluation,
 )
 from app.intelligence.provider import (
     CommunicationIntelligenceProvider,
-    OpenAICommunicationIntelligenceProvider,
+    GoogleGenAICommunicationIntelligenceProvider,
     ProviderConfigurationError,
     ProviderError,
     get_provider,
@@ -39,7 +39,7 @@ def _candidate(**overrides):
     return value
 
 
-class FakeResponses:
+class FakeInteractions:
     def __init__(self, payload=None, error=None):
         self.payload = payload
         self.error = error
@@ -53,30 +53,33 @@ class FakeResponses:
 
 
 def _provider(payload=None, error=None):
-    provider = OpenAICommunicationIntelligenceProvider(
-        api_key="test-key", model="gpt-4o-mini", timeout_seconds=3,
+    provider = GoogleGenAICommunicationIntelligenceProvider(
+        api_key="test-key", model="gemini-3.7-flash", timeout_seconds=3,
         confidence_threshold=0.7,
     )
-    provider.client = SimpleNamespace(responses=FakeResponses(payload, error))
+    provider.client = SimpleNamespace(interactions=FakeInteractions(payload, error))
     return provider
 
 
 def test_provider_configuration_and_runtime_labels_are_explicit() -> None:
     assert get_provider("mock").runtime_mode == "MOCK / DEV MODE"
-    with pytest.raises(ProviderConfigurationError, match="OPENAI_API_KEY"):
-        get_provider("openai", model="gpt-4o-mini")
-    live = get_provider("openai", api_key="test-key", model="gpt-4o-mini")
-    assert live.runtime_mode == "LIVE MODEL" and live.model_version == "gpt-4o-mini"
+    with pytest.raises(ProviderConfigurationError, match="GEMINI_API_KEY"):
+        get_provider("google", model="gemini-3.7-flash")
+    live = get_provider("google", api_key="test-key", model="gemini-3.7-flash")
+    assert live.runtime_mode == "LIVE MODEL" and live.model_version == "gemini-3.7-flash"
 
 
 def test_live_provider_uses_read_only_structured_response_and_minimal_context() -> None:
     provider = _provider(json.dumps({"candidates": [_candidate()]}))
     result = provider.analyze(MESSAGE, date(2026, 8, 26))
     assert result.candidates[0].fact_type.value == "ACTIVE_DISPUTE"
-    call = provider.client.responses.calls[0]
-    assert call["store"] is False and call["text"]["format"]["strict"] is True
+    call = provider.client.interactions.calls[0]
+    assert call["store"] is False
+    assert call["response_format"]["mime_type"] == "application/json"
+    assert call["response_format"]["schema"] == provider_module._EXTRACTION_SCHEMA
+    assert call["model"] == "gemini-3.7-flash" and call["timeout"] == 3
     assert MESSAGE in call["input"] and "portfolio" not in call["input"].lower()
-    assert "tools" not in call and "previous_response_id" not in call
+    assert "tools" not in call and "previous_interaction_id" not in call
 
 
 @pytest.mark.parametrize("payload", [
@@ -92,12 +95,21 @@ def test_untrusted_or_authoritative_model_output_fails_closed(payload: str) -> N
 
 
 def test_timeout_is_safe_and_does_not_retry_or_write() -> None:
-    responses = FakeResponses(error=APITimeoutError(request=httpx.Request("POST", "https://api.openai.com/v1/responses")))
+    interactions = FakeInteractions(error=httpx.ReadTimeout("timed out"))
     provider = _provider()
-    provider.client = SimpleNamespace(responses=responses)
+    provider.client = SimpleNamespace(interactions=interactions)
     with pytest.raises(ProviderError, match="timed out"):
         provider.analyze(MESSAGE, date(2026, 8, 26))
-    assert len(responses.calls) == 1
+    assert len(interactions.calls) == 1
+
+
+def test_sdk_or_network_failure_is_contained_without_fallback() -> None:
+    interactions = FakeInteractions(error=RuntimeError("generated SDK failure"))
+    provider = _provider()
+    provider.client = SimpleNamespace(interactions=interactions)
+    with pytest.raises(ProviderError, match="provider is unavailable"):
+        provider.analyze(MESSAGE, date(2026, 8, 26))
+    assert len(interactions.calls) == 1
 
 
 def test_low_confidence_defers_and_duplicates_are_normalized() -> None:
@@ -140,7 +152,7 @@ def test_multiple_signal_extraction_preserves_supported_types() -> None:
 
 def test_no_silent_live_to_mock_fallback(monkeypatch) -> None:
     settings = SimpleNamespace(
-        ai_provider="openai", openai_api_key=None, ai_model="gpt-4o-mini",
+        ai_provider="google", gemini_api_key=None, ai_model="gemini-3.7-flash",
         ai_timeout_seconds=3, ai_confidence_threshold=0.7, ai_allow_mock_fallback=False,
     )
     monkeypatch.setattr("app.intelligence.service.get_settings", lambda: settings)
@@ -152,7 +164,7 @@ def test_no_silent_live_to_mock_fallback(monkeypatch) -> None:
 
 
 class EvaluationProvider(CommunicationIntelligenceProvider):
-    name = "openai"
+    name = "google"
     model_version = "evaluation-double"
     runtime_mode = "LIVE MODEL"
 
@@ -163,7 +175,7 @@ class EvaluationProvider(CommunicationIntelligenceProvider):
 def test_evaluation_runner_separates_mock_live_and_missing_credentials() -> None:
     mock_result = run_communication_extraction_evaluation()
     live_result = run_communication_extraction_evaluation(EvaluationProvider())
-    unavailable = run_live_communication_extraction_evaluation(api_key=None, model="gpt-4o-mini")
+    unavailable = run_live_communication_extraction_evaluation(api_key=None, model="gemini-3.7-flash")
     assert mock_result["runtime_mode"] == "MOCK / DEV MODE"
     assert live_result["runtime_mode"] == "LIVE MODEL" and live_result["exact"] == 30
     assert unavailable["executed"] is False

@@ -162,7 +162,7 @@ def case_workspace(case_id: UUID, db: Session = Depends(get_db)) -> dict[str, An
             "id": str(item.id), "direction": item.direction.value, "content": item.content, "occurred_at": item.occurred_at,
             "analyses": [{
                 "id": str(analysis.id), "provider": analysis.provider, "model_version": analysis.model_version,
-                "runtime_mode": "LIVE MODEL" if analysis.provider == "openai" else "MOCK / DEV MODE",
+                "runtime_mode": "LIVE MODEL" if analysis.provider == "google" else "MOCK / DEV MODE",
                 "analyzed_at": analysis.analyzed_at, "result": analysis.result,
                 "candidates": [
                     {**candidate.model_dump(mode="json"), "decision_result": decisions.get((str(analysis.id), candidate.candidate_id))}

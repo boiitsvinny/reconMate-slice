@@ -6,7 +6,9 @@ from decimal import Decimal
 import json
 import re
 
-from openai import APIError, APITimeoutError, OpenAI, OpenAIError
+from google import genai
+from google.genai import types as genai_types
+import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from app.intelligence.candidates import CandidateValidationError, analysis_from_candidates, normalize_candidate_facts
@@ -145,45 +147,65 @@ _EXTRACTION_SCHEMA = {
 }
 
 
-class OpenAICommunicationIntelligenceProvider(CommunicationIntelligenceProvider):
-    """Read-only OpenAI Responses API extraction with strict structured output."""
+class GoogleGenAICommunicationIntelligenceProvider(CommunicationIntelligenceProvider):
+    """Read-only Gemini Interactions API extraction with strict structured output."""
 
-    name = "openai"
+    name = "google"
     runtime_mode = "LIVE MODEL"
 
     def __init__(self, *, api_key: str | None, model: str | None, timeout_seconds: float, confidence_threshold: float):
         if not api_key:
-            raise ProviderConfigurationError("OPENAI_API_KEY is required when AI_PROVIDER=openai.")
+            raise ProviderConfigurationError("GEMINI_API_KEY is required when AI_PROVIDER=google.")
         if not model:
-            raise ProviderConfigurationError("AI_MODEL is required when AI_PROVIDER=openai.")
+            raise ProviderConfigurationError("AI_MODEL is required when AI_PROVIDER=google.")
         self.model_version = model
+        self.timeout_seconds = timeout_seconds
         self.confidence_threshold = confidence_threshold
-        self.client = OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=0)
+        self.client = genai.Client(
+            api_key=api_key,
+            http_options=genai_types.HttpOptions(
+                retry_options=genai_types.HttpRetryOptions(attempts=1),
+            ),
+        )
 
     def analyze(self, content: str, reference_date: date | None = None) -> CommunicationAnalysisResult:
         reference = reference_date or date.today()
         try:
-            response = self.client.responses.create(
+            interaction = self.client.interactions.create(
                 model=self.model_version,
-                instructions=_SYSTEM_INSTRUCTIONS,
-                input=f"Reference date for relative dates: {reference.isoformat()}\nCustomer message:\n{content}",
-                text={"format": {"type": "json_schema", "name": "reconmate_candidate_facts", "strict": True, "schema": _EXTRACTION_SCHEMA}},
-                max_output_tokens=1200,
+                input=(
+                    f"{_SYSTEM_INSTRUCTIONS}\n\n"
+                    f"Reference date for relative dates: {reference.isoformat()}\n"
+                    f"Customer message:\n{content}"
+                ),
+                response_format={
+                    "type": "text",
+                    "mime_type": "application/json",
+                    "schema": _EXTRACTION_SCHEMA,
+                },
+                generation_config={"max_output_tokens": 1200},
                 store=False,
+                timeout=self.timeout_seconds,
             )
-            if not response.output_text:
+        except httpx.TimeoutException as exc:
+            raise ProviderError("The live model timed out; no fact was written.") from exc
+        except Exception as exc:
+            # Interactions is generated separately from the legacy SDK surfaces,
+            # so contain every transport/client exception at this read-only call.
+            if exc.__class__.__name__ == "APITimeoutError":
+                raise ProviderError("The live model timed out; no fact was written.") from exc
+            raise ProviderError("The live model provider is unavailable; no fact was written.") from exc
+
+        try:
+            if not interaction.output_text:
                 raise ProviderError("The model returned no structured extraction.")
-            envelope = _CandidateEnvelope.model_validate(json.loads(response.output_text))
+            envelope = _CandidateEnvelope.model_validate(json.loads(interaction.output_text))
             candidates = normalize_candidate_facts(
                 content, envelope.candidates, confidence_threshold=self.confidence_threshold,
             )
             return analysis_from_candidates(candidates)
         except ProviderError:
             raise
-        except APITimeoutError as exc:
-            raise ProviderError("The live model timed out; no fact was written.") from exc
-        except (APIError, OpenAIError) as exc:
-            raise ProviderError("The live model provider is unavailable; no fact was written.") from exc
         except (json.JSONDecodeError, ValidationError, CandidateValidationError, ValueError) as exc:
             raise ProviderError("The live model returned an invalid or ungrounded extraction; no fact was written.") from exc
 
@@ -198,9 +220,9 @@ def get_provider(
 ) -> CommunicationIntelligenceProvider:
     if name.lower() == "mock":
         return MockCommunicationIntelligenceProvider()
-    if name.lower() == "openai":
-        return OpenAICommunicationIntelligenceProvider(
+    if name.lower() == "google":
+        return GoogleGenAICommunicationIntelligenceProvider(
             api_key=api_key, model=model, timeout_seconds=timeout_seconds,
             confidence_threshold=confidence_threshold,
         )
-    raise ProviderConfigurationError(f"AI provider '{name}' is not supported. Use AI_PROVIDER=mock or AI_PROVIDER=openai.")
+    raise ProviderConfigurationError(f"AI provider '{name}' is not supported. Use AI_PROVIDER=mock or AI_PROVIDER=google.")

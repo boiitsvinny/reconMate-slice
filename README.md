@@ -201,11 +201,16 @@ Set these Render environment variables:
 APP_ENV=production
 DATABASE_URL=<SUPABASE_SESSION_POOLER_DATABASE_URL>
 API_CORS_ORIGINS=https://your-project.vercel.app
-AI_PROVIDER=mock
+AI_PROVIDER=google
+AI_MODEL=gemini-3.7-flash
+GEMINI_API_KEY=<GOOGLE_AI_STUDIO_API_KEY>
+AI_TIMEOUT_SECONDS=12
+AI_CONFIDENCE_THRESHOLD=0.70
+AI_ALLOW_MOCK_FALLBACK=false
 SIMULATION_TICK_INTERVAL_SECONDS=15
 ```
 
-`DATABASE_URL` is server-only and must never be exposed through a `NEXT_PUBLIC_` variable. Render supplies `PORT`; do not set it manually. Multiple allowed browser origins can be supplied as a comma-separated list in `API_CORS_ORIGINS`. Do not use `*` in production.
+`DATABASE_URL` and `GEMINI_API_KEY` are server-only and must never be exposed through a `NEXT_PUBLIC_` variable. Render supplies `PORT`; do not set it manually. Multiple allowed browser origins can be supplied as a comma-separated list in `API_CORS_ORIGINS`. Do not use `*` in production.
 
 The start command applies pending Alembic migrations before accepting traffic, so a deployment cannot run newer API code against an older Supabase schema. Seeding remains an explicit local operation because it creates or replaces portfolio data. Verify the deployed service at `https://your-render-service.onrender.com/health/ready`.
 

@@ -61,7 +61,7 @@ def _response(record: CommunicationAnalysis) -> AnalysisResponse:
     result = CommunicationAnalysisResult.model_validate(record.result)
     return AnalysisResponse(analysis_id=str(record.id), provider=record.provider, model_version=record.model_version,
         analyzed_at=record.analyzed_at.isoformat() if record.analyzed_at else None,
-        runtime_mode="LIVE MODEL" if record.provider == "openai" else "MOCK / DEV MODE",
+        runtime_mode="LIVE MODEL" if record.provider == "google" else "MOCK / DEV MODE",
         result=result, candidates=candidate_facts(record.communication.content, result))
 
 @router.post("/intelligence/analyze-preview", response_model=AnalysisResponse, summary="Interpret draft text without storing it")

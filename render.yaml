@@ -17,10 +17,10 @@ services:
       - key: DATABASE_URL
         sync: false
       - key: AI_PROVIDER
-        value: openai
+        value: google
       - key: AI_MODEL
-        value: gpt-4o-mini-2024-07-18
-      - key: OPENAI_API_KEY
+        value: gemini-3.7-flash
+      - key: GEMINI_API_KEY
         sync: false
       - key: AI_TIMEOUT_SECONDS
         value: "12"
