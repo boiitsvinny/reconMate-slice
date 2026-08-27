@@ -5,9 +5,7 @@
 ::selection { background: rgba(64, 156, 255, 0.35); color: white; }
 :root {
   color-scheme: dark;
-  background:
-    radial-gradient(circle at 75% 20%, rgba(48, 69, 171, 0.22), transparent 42%),
-    linear-gradient(135deg, #050505 0%, #090b14 55%, #111936 100%);
+  background: linear-gradient(135deg, #000000, #3045ab);
   background-attachment: fixed;
 }
 * { box-sizing: border-box; }
@@ -31,12 +29,12 @@ body {
   position: absolute;
   left: 0;
   top: 0;
-  width: 520px;
-  height: 520px;
+  width: 510px;
+  height: 510px;
   border-radius: 999px;
   opacity: 0;
-  background: radial-gradient(circle, rgba(48, 69, 171, .12) 0%, rgba(48, 69, 171, .055) 34%, transparent 70%);
-  filter: blur(10px);
+  background: radial-gradient(circle, rgba(87, 111, 226, .2) 0%, rgba(48, 69, 171, .09) 34%, transparent 70%);
+  filter: blur(8px);
   will-change: transform, opacity;
   transition: opacity 500ms ease;
 }
@@ -87,18 +85,18 @@ main {
   z-index: 1;
   background: transparent;
 }
-.workspace-home { background: linear-gradient(180deg, rgba(5, 8, 15, .22), rgba(5, 7, 12, .42)); }
-.workspace-reports { background: linear-gradient(180deg, rgba(8, 11, 19, .28), rgba(5, 7, 12, .48)); }
-.workspace-analyze { background: radial-gradient(circle at 82% 12%, rgba(48, 69, 171, .08), transparent 31%), rgba(5, 7, 12, .35); }
-.workspace-history { background: linear-gradient(180deg, rgba(7, 9, 15, .46), rgba(5, 7, 12, .58)); font-variant-numeric: tabular-nums; }
+.workspace-home { background: linear-gradient(180deg, rgba(0, 0, 0, .08), rgba(2, 4, 12, .18)); }
+.workspace-reports { background: linear-gradient(180deg, rgba(0, 0, 0, .1), rgba(2, 4, 12, .22)); }
+.workspace-analyze { background: radial-gradient(circle at 82% 12%, rgba(92, 113, 222, .06), transparent 31%), rgba(0, 0, 0, .13); }
+.workspace-history { background: linear-gradient(180deg, rgba(0, 0, 0, .14), rgba(2, 4, 12, .26)); font-variant-numeric: tabular-nums; }
 .workspace-reports .workspace-panel { box-shadow: 0 12px 34px rgba(0, 0, 0, .18); }
 .workspace-panel {
-  background: rgba(8, 13, 23, .74);
+  background: rgba(7, 11, 20, .64);
   backdrop-filter: blur(14px) saturate(112%);
   -webkit-backdrop-filter: blur(14px) saturate(112%);
   transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
-.workspace-panel:hover { border-color: rgba(139, 157, 222, .16); background: rgba(8, 13, 23, .78); box-shadow: 0 20px 52px rgba(0, 0, 0, .3); }
+.workspace-panel:hover { border-color: rgba(139, 157, 222, .18); background: rgba(7, 11, 20, .69); box-shadow: 0 20px 52px rgba(0, 0, 0, .3); }
 .interactive-card { transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease, transform 180ms ease; }
 .interactive-card:hover { border-color: rgba(125, 211, 252, .2); background-color: rgba(255, 255, 255, .035); box-shadow: 0 12px 28px rgba(0, 0, 0, .16); transform: translateY(-1px); }
 .proof-hero { background: radial-gradient(circle at 18% 0%, rgba(48, 69, 171, .1), transparent 42%), rgba(8, 13, 23, .9); }

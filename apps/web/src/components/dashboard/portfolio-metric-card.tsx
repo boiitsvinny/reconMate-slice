@@ -11,7 +11,7 @@ export function PortfolioMetricCard({ label, value, detail, impact, state, tone 
   };
 
   return (
-    <article className={cx("group relative min-h-[144px] overflow-hidden rounded-2xl border bg-[#08111f]/95 p-5 shadow-[0_14px_36px_rgba(0,0,0,.16)] transition duration-300 hover:-translate-y-0.5", emphasis && "border-current/30 shadow-[0_18px_44px_rgba(0,0,0,.28)]", tones[tone], className)}>
+    <article className={cx("group relative min-h-[144px] overflow-hidden rounded-2xl border bg-[#07101d]/[.68] p-5 shadow-[0_14px_36px_rgba(0,0,0,.16)] backdrop-blur-[14px] transition duration-300 hover:-translate-y-0.5 hover:bg-[#07101d]/[.74]", emphasis && "border-current/30 shadow-[0_18px_44px_rgba(0,0,0,.28)]", tones[tone], className)}>
       <div className="absolute inset-x-0 top-0 h-px bg-current opacity-30" />
       <div className="flex items-start justify-between gap-3">
         <p className="text-[11px] font-bold uppercase tracking-[0.15em] text-slate-300">{label}</p>

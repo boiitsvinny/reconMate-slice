@@ -57,7 +57,7 @@ export function HomeRecoveryQueue({ items, intelligence, transitions, events, on
       <SectionHeader eyebrow="Operational work" title="Recovery Queue" detail="Meaningful decisions and recovery signals—not a raw invoice register." prominent />
       <div className="hide-scrollbar flex gap-2 overflow-x-auto border-b border-white/[.06] px-4 py-3" aria-label="Recovery queue filters">{filters.map((filter) => <button key={filter.key} type="button" aria-pressed={activeFilter === filter.key} onClick={() => { setActiveFilter(filter.key); setFilterSelected(true); }} className={cx("whitespace-nowrap rounded-lg border px-3 py-2 text-[11px] font-semibold transition", activeFilter === filter.key ? "border-sky-300/35 bg-sky-300/[.1] text-sky-100" : "border-white/[.07] text-slate-400 hover:text-white")}>{filter.label}</button>)}</div>
       <div className="hidden grid-cols-[minmax(180px,1.1fr)_110px_minmax(190px,1.2fr)_minmax(190px,1.15fr)_110px] gap-4 border-b border-white/[.05] px-5 py-3 text-[11px] font-bold uppercase tracking-[.12em] text-slate-400 lg:grid"><span>Customer</span><span>Exposure</span><span>Decision</span><span>Important trigger</span><span>Status</span></div>
-      <div className="divide-y divide-white/[.055]">
+      <div className="operational-scrollbar max-h-[32rem] divide-y divide-white/[.055] overflow-y-auto overscroll-contain bg-[#050914]/45" role="region" aria-label="Recovery queue records" tabIndex={0}>
         {visible.map((item) => {
           const intel = intelligenceByCustomer.get(item.customerId);
           const transition = transitionByCustomer.get(item.customerId);

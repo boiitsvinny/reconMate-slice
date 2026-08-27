@@ -53,7 +53,7 @@ export function OperationalIntelligenceHero({ intelligence, recovery, latestCycl
 
 function IntelligenceMetric({ label, value, detail, emphasis = false, restraint = false }: { label: string; value: string; detail: string; emphasis?: boolean; restraint?: boolean }) {
   return (
-    <article className={`relative bg-[#08111f] p-4 ${emphasis ? "shadow-[inset_0_3px_0_rgba(251,191,36,.5)]" : restraint ? "shadow-[inset_0_3px_0_rgba(110,231,183,.35)]" : ""}`}>
+    <article className={`relative bg-[#07101d]/[.70] p-4 backdrop-blur-sm ${emphasis ? "shadow-[inset_0_3px_0_rgba(251,191,36,.5)]" : restraint ? "shadow-[inset_0_3px_0_rgba(110,231,183,.35)]" : ""}`}>
       <p className="text-[10px] font-bold uppercase leading-4 tracking-[.12em] text-slate-400">{label}</p>
       <p className={`mt-2 text-[28px] font-semibold tabular-nums tracking-[-.03em] ${emphasis ? "text-amber-100" : restraint ? "text-emerald-200" : "text-white"}`}>{value}</p>
       <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>

@@ -22,7 +22,7 @@ export function AmbientBackdrop() {
     const render = () => {
       currentX += (targetX - currentX) * 0.075;
       currentY += (targetY - currentY) * 0.075;
-      glow.style.transform = `translate3d(${currentX - 260}px, ${currentY - 260}px, 0)`;
+      glow.style.transform = `translate3d(${currentX - 255}px, ${currentY - 255}px, 0)`;
       frame = window.requestAnimationFrame(render);
     };
     const onPointerMove = (event: PointerEvent) => {
