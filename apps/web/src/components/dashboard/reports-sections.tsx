@@ -27,7 +27,7 @@ export function RecoveryEvidenceReport(props: ReportProps) {
   const casesById = new Map(props.queue.map((item) => [item.id, item]));
   for (const item of props.queue) if (!casesByCustomer.has(item.customerId) || item.recommendationPriority === "CRITICAL") casesByCustomer.set(item.customerId, item);
   const intelligenceByCustomer = new Map(props.intelligence.customers.map((item) => [item.entity_id, item]));
-  return <div className="space-y-6"><BatchRecoveryProofPanel {...props} casesById={casesById} /><ExecutiveSnapshot {...props} /><MaterialChanges {...props} casesByCustomer={casesByCustomer} casesById={casesById} /><DecisionReport {...props} casesByCustomer={casesByCustomer} /><DeliberateRestraint {...props} casesByCustomer={casesByCustomer} /><OperatorActivity {...props} casesById={casesById} /><OutstandingExceptions {...props} intelligenceByCustomer={intelligenceByCustomer} casesById={casesById} /></div>;
+  return <div className="space-y-6"><BatchRecoveryProofPanel {...props} casesById={casesById} /><MaterialChanges {...props} casesByCustomer={casesByCustomer} casesById={casesById} /><DecisionReport {...props} casesByCustomer={casesByCustomer} /><DeliberateRestraint {...props} casesByCustomer={casesByCustomer} /><OperatorActivity {...props} casesById={casesById} /><OutstandingExceptions {...props} intelligenceByCustomer={intelligenceByCustomer} casesById={casesById} /></div>;
 }
 
 function BatchRecoveryProofPanel({ batchRecovery: proof, casesById, onSelectCase }: ReportProps & { casesById: Map<string, PriorityCase> }) {
@@ -67,34 +67,28 @@ function BatchRecoveryProofPanel({ batchRecovery: proof, casesById, onSelectCase
     </div>
     <div className="border-t border-white/[.06] bg-[#08111f] px-5 py-3 text-[11px] leading-5 text-slate-400 sm:px-6"><strong className="text-slate-200">Exception decomposition:</strong> {proof.stopping_rules.unresolved_exception_categories.elevated_open_cases} elevated open cases · {proof.stopping_rules.unresolved_exception_categories.broken_promise_cases} broken-promise cases · {proof.stopping_rules.unresolved_exception_categories.active_dispute_cases} active-dispute cases · {proof.stopping_rules.unresolved_exception_categories.workflow_requests_awaiting_approval} workflow requests awaiting approval. {proof.stopping_rules.exception_categories_overlap ? "Categories overlap; the headline is a deduplicated case total." : "Categories are mutually exclusive in this snapshot."} Resolved/paid cases excluded from active recovery: {proof.stopping_rules.resolved_or_paid_case_count}.</div>
     <div className="grid gap-px border-t border-white/[.06] bg-white/[.06] xl:grid-cols-2">
+      <section className="bg-[#08111f]">
+        <details className="group p-5 sm:p-6">
+          <summary className="cursor-pointer list-none text-sm font-semibold text-white">Payment evidence <span className="ml-2 text-xs font-normal text-slate-500">{proof.payment_evidence.length} records · expand audit trail</span></summary>
+          <div className="mt-3 flex flex-wrap gap-2">{proof.payment_provenance.map((item) => <span key={item.source} className="rounded-full border border-white/[.07] px-2.5 py-1 text-[10px] text-slate-400">{item.source}: {item.payment_count} payments · {formatMoney(item.amount)}</span>)}</div>
+          <div className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-2">{proof.payment_evidence.map((payment) => {
+            const recoveryCase = payment.case_id ? casesById.get(payment.case_id) : undefined;
+            return <article key={payment.payment_id} className="rounded-xl border border-white/[.07] bg-white/[.02] p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-semibold text-white">{payment.invoice_number} · {formatMoney(payment.amount)}</p><p className="mt-1 text-[10px] text-slate-500">{payment.payment_date} · {payment.provenance}</p></div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="text-[11px] font-semibold text-sky-300">Open case →</button>}</div><p className="mt-2 break-all text-[10px] leading-5 text-slate-400">Payment {payment.provider_payment_reference ?? payment.payment_reference ?? payment.payment_id}{payment.event_reference ? ` · Event ${payment.event_reference}` : ""}{payment.request_reference ? ` · Request ${payment.request_reference}` : ""}</p>{payment.outstanding_before !== null && payment.outstanding_after !== null && <p className="mt-1 text-[11px] text-emerald-200">Outstanding {formatMoney(payment.outstanding_before)} → {formatMoney(payment.outstanding_after)}</p>}</article>;
+          })}{!proof.payment_evidence.length && <p className="py-5 text-xs text-slate-500">No qualifying post-due payment records exist in this batch.</p>}</div>
+        </details>
+        <div className="border-t border-white/[.06] p-5 sm:p-6">
+          <div className="max-h-80 space-y-2 overflow-y-auto pr-2">{proof.stopping_rules.hold_evidence.map((hold) => {
+            const recoveryCase = casesById.get(hold.case_id);
+            return <article key={hold.case_id} className="rounded-xl border border-emerald-300/10 bg-emerald-300/[.025] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-white">{hold.customer_name}</p><p className="mt-1 text-[10px] text-slate-500">{hold.invoice_number ?? "Portfolio case"} · {hold.provenance}</p></div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="text-[11px] font-semibold text-sky-300">Open case →</button>}</div><p className="mt-2 text-[11px] text-emerald-200">Recovery intentionally withheld: {hold.reasons.map(label).join(" · ")}</p><p className="mt-1 text-[10px] text-slate-500">Current recommendation: {label(hold.current_recommendation)}</p></article>;
+          })}{!proof.stopping_rules.hold_evidence.length && <p className="py-5 text-xs text-slate-500">No current stopping-rule holds exist in this batch.</p>}</div>
+        </div>
+      </section>
       <section className="bg-[#08111f] p-5 sm:p-6">
         <p className="text-[10px] font-bold uppercase tracking-[.14em] text-sky-200">Persisted action and outcome chain</p>
         <div className="mt-4 flex flex-wrap gap-2">{actionOutcomes.map(([name, count]) => <span key={name} className="rounded-full border border-white/[.08] bg-white/[.025] px-3 py-1.5 text-xs text-slate-300"><strong className="mr-1.5 tabular-nums text-white">{count}</strong>{name}</span>)}</div>
         {proof.action_outcomes.duplicate_provider_events_ignored > 0 && <p className="mt-4 text-xs text-emerald-200">{proof.action_outcomes.duplicate_provider_events_ignored} duplicate provider event(s) ignored; no second financial mutation was counted.</p>}
         {proof.action_outcomes.payment_requests_created === 0 && proof.action_outcomes.provider_events_received === 0 && <p className="mt-4 text-xs text-slate-500">No provider-demo outcome has been exercised in the current demo state. The persisted payments above are not being presented as provider events.</p>}
       </section>
-      <section className="bg-[#08111f] p-5 sm:p-6">
-        <p className="text-[10px] font-bold uppercase tracking-[.14em] text-sky-200">Same-scope baseline</p>
-        <div className="mt-3 grid grid-cols-3 gap-3"><BaselineValue value={proof.baseline.age_only_target_count} label="Age-only targets" /><BaselineValue value={proof.baseline.reconmate_immediate_action_count} label="ReconMate actions" /><BaselineValue value={proof.baseline.blocker_violations_avoided} label="Unsafe attempts avoided" /></div>
-        <p className="mt-4 text-[11px] leading-5 text-slate-500">{proof.baseline.limitation}</p>
-      </section>
-    </div>
-    <div className="grid gap-px border-t border-white/[.06] bg-white/[.06] xl:grid-cols-2">
-      <details className="group bg-[#08111f] p-5 sm:p-6">
-        <summary className="cursor-pointer list-none text-sm font-semibold text-white">Payment evidence <span className="ml-2 text-xs font-normal text-slate-500">{proof.payment_evidence.length} records · expand audit trail</span></summary>
-        <div className="mt-3 flex flex-wrap gap-2">{proof.payment_provenance.map((item) => <span key={item.source} className="rounded-full border border-white/[.07] px-2.5 py-1 text-[10px] text-slate-400">{item.source}: {item.payment_count} payments · {formatMoney(item.amount)}</span>)}</div>
-        <div className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-2">{proof.payment_evidence.map((payment) => {
-          const recoveryCase = payment.case_id ? casesById.get(payment.case_id) : undefined;
-          return <article key={payment.payment_id} className="rounded-xl border border-white/[.07] bg-white/[.02] p-3"><div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-semibold text-white">{payment.invoice_number} · {formatMoney(payment.amount)}</p><p className="mt-1 text-[10px] text-slate-500">{payment.payment_date} · {payment.provenance}</p></div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="text-[11px] font-semibold text-sky-300">Open case →</button>}</div><p className="mt-2 break-all text-[10px] leading-5 text-slate-400">Payment {payment.provider_payment_reference ?? payment.payment_reference ?? payment.payment_id}{payment.event_reference ? ` · Event ${payment.event_reference}` : ""}{payment.request_reference ? ` · Request ${payment.request_reference}` : ""}</p>{payment.outstanding_before !== null && payment.outstanding_after !== null && <p className="mt-1 text-[11px] text-emerald-200">Outstanding {formatMoney(payment.outstanding_before)} → {formatMoney(payment.outstanding_after)}</p>}</article>;
-        })}{!proof.payment_evidence.length && <p className="py-5 text-xs text-slate-500">No qualifying post-due payment records exist in this batch.</p>}</div>
-      </details>
-      <details className="group bg-[#08111f] p-5 sm:p-6">
-        <summary className="cursor-pointer list-none text-sm font-semibold text-white">Stopping-rule evidence <span className="ml-2 text-xs font-normal text-slate-500">{proof.stopping_rules.hold_evidence.length} records · recovery intentionally withheld</span></summary>
-        <div className="mt-4 max-h-80 space-y-2 overflow-y-auto pr-2">{proof.stopping_rules.hold_evidence.map((hold) => {
-          const recoveryCase = casesById.get(hold.case_id);
-          return <article key={hold.case_id} className="rounded-xl border border-emerald-300/10 bg-emerald-300/[.025] p-3"><div className="flex items-start justify-between gap-3"><div><p className="text-xs font-semibold text-white">{hold.customer_name}</p><p className="mt-1 text-[10px] text-slate-500">{hold.invoice_number ?? "Portfolio case"} · {hold.provenance}</p></div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="text-[11px] font-semibold text-sky-300">Open case →</button>}</div><p className="mt-2 text-[11px] text-emerald-200">Recovery intentionally withheld: {hold.reasons.map(label).join(" · ")}</p><p className="mt-1 text-[10px] text-slate-500">Current recommendation: {label(hold.current_recommendation)}</p></article>;
-        })}{!proof.stopping_rules.hold_evidence.length && <p className="py-5 text-xs text-slate-500">No current stopping-rule holds exist in this batch.</p>}</div>
-      </details>
     </div>
   </Panel>;
 }
@@ -102,18 +96,6 @@ function BatchRecoveryProofPanel({ batchRecovery: proof, casesById, onSelectCase
 function ProofAmount({ label: amountLabel, value, detail, tone = "sky", money = true, meta }: { label: string; value: string; detail: string; tone?: "sky" | "emerald" | "rose"; money?: boolean; meta?: { unit: string; scope: string; window: string } }) {
   const colors = { sky: "text-sky-200", emerald: "text-emerald-200", rose: "text-rose-200" };
   return <article className="proof-amount interactive-card bg-[#08111f] p-5 sm:p-6"><p className="text-[10px] font-bold uppercase tracking-[.13em] text-slate-300">{amountLabel}</p><p className={`mt-2 text-2xl font-semibold tabular-nums tracking-[-.03em] sm:text-3xl ${colors[tone]}`}>{money ? formatMoney(value) : value}</p><p className="mt-1 text-[11px] leading-5 text-slate-400">{detail}</p>{meta && <p className="mt-2 text-[9px] uppercase leading-4 tracking-[.09em] text-slate-600">Unit {meta.unit} · scope {meta.scope} · {meta.window}</p>}</article>;
-}
-
-function BaselineValue({ value, label: baselineLabel }: { value: number; label: string }) {
-  return <div><p className="text-xl font-semibold tabular-nums text-white">{value}</p><p className="mt-1 text-[10px] leading-4 text-slate-500">{baselineLabel}</p></div>;
-}
-
-function ExecutiveSnapshot({ recovery, intelligence, latestCycle, events, actions }: ReportProps) {
-  const elevated = intelligence.level_counts.CRITICAL + intelligence.level_counts.HIGH;
-  const recovered = events.filter((event) => event.cycle === latestCycle?.cycle).reduce((sum, event) => sum + Number(event.metadata.payment_amount ?? 0), 0);
-  const awaiting = actions.filter((item) => item.status === "PENDING_APPROVAL").length;
-  const executed = actions.filter((item) => item.status === "EXECUTED").length;
-  return <Panel className="overflow-hidden"><SectionHeader eyebrow="Portfolio position" title="Executive Recovery Snapshot" detail={`Current persisted position evaluated across ${intelligence.customer_count} customer accounts.`} prominent /><div className="grid grid-cols-2 gap-px bg-white/[.06] md:grid-cols-3 xl:grid-cols-6"><ReportMetric label="Overdue exposure" value={formatMoney(recovery.overdue_exposure)} detail="INR · current overdue cohort" tone="rose" /><ReportMetric label="Elevated accounts" value={String(elevated)} detail={`${intelligence.level_counts.CRITICAL} critical · ${intelligence.level_counts.HIGH} high · customers`} tone="amber" /><ReportMetric label="Payments this cycle" value={recovered ? formatMoney(recovered) : "—"} detail="INR · current-cycle persisted events" tone="emerald" /><ReportMetric label="Current blocker cases" value={String(recovery.cases_blocked_by_dispute + recovery.cases_awaiting_payment)} detail={`${recovery.cases_blocked_by_dispute} disputes · ${recovery.cases_awaiting_payment} promises`} tone="sky" /><ReportMetric label="Workflow requests awaiting approval" value={String(awaiting)} detail="Persisted workflows · current status" tone="amber" /><ReportMetric label="Executed workflows" value={String(executed)} detail="Persisted internal workflow history" tone="emerald" /></div></Panel>;
 }
 
 function MaterialChanges({ latestCycle, events, casesByCustomer, casesById, onSelectCase }: ReportProps & { casesByCustomer: Map<string, PriorityCase>; casesById: Map<string, PriorityCase> }) {

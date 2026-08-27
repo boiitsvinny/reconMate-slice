@@ -161,13 +161,6 @@ export function CommandActivityPanel() {
   );
 }
 
-export function CommandNotices() {
-  const { result } = useCommandSession();
-  if (!result || (!result.warnings.length && !result.limitations.length)) return null;
-  const notices = [...result.warnings, ...result.limitations];
-  return <details className="mt-7 rounded-2xl border border-white/[.08] bg-[#08111f]/80 p-4 sm:p-5"><summary className="cursor-pointer text-sm font-semibold text-slate-300">Notices and operating boundaries ({notices.length})</summary><ul className="mt-3 space-y-2 text-xs leading-5 text-slate-500">{notices.map((item) => <li key={item}>• {item}</li>)}</ul></details>;
-}
-
 function activityStatus(status: "COMPLETED" | "PREPARED" | "AWAITING_CONFIRMATION" | "EXECUTED" | "FAILED") {
   return status === "AWAITING_CONFIRMATION" ? "Decision required" : status === "EXECUTED" ? "Action recorded" : status === "COMPLETED" ? "Analysis complete" : status.replaceAll("_", " ");
 }

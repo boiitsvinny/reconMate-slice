@@ -15,7 +15,7 @@ export function InvestigationWorkbench({ result, onOpenTarget }: { result: Comma
     {result.analyzed_entities.length > 1 && <ComparisonPanel result={result} />}
     <Panel className="overflow-hidden">
       <SectionHeader eyebrow="Investigate further" title="How each decision was derived" detail="Scoped facts, deterministic score contributions, blockers, and current recommendations." prominent />
-      <div className="operational-scrollbar max-h-[48rem] divide-y divide-white/[.06] overflow-y-auto overscroll-contain" role="region" aria-label="Decision investigations" tabIndex={0}>{result.analyzed_entities.map((entity, index) => <EntityInspector key={entity.entity_type + "-" + entity.entity_id} entity={entity} rank={result.query_evidence.ranking.find((item) => item.entity_id === entity.entity_id)} open={result.analyzed_entities.length === 1 || index === 0} onOpenTarget={onOpenTarget} />)}</div>
+      <div className="divide-y divide-white/[.06]" role="region" aria-label="Decision investigations">{result.analyzed_entities.map((entity, index) => <EntityInspector key={entity.entity_type + "-" + entity.entity_id} entity={entity} rank={result.query_evidence.ranking.find((item) => item.entity_id === entity.entity_id)} open={result.analyzed_entities.length === 1 || index === 0} onOpenTarget={onOpenTarget} />)}</div>
     </Panel>
   </div>;
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { AppHeader } from "@/components/layout/app-header";
-import { CommandActivityPanel, CommandCenter, CommandNotices } from "@/components/intelligence/command-center";
+import { CommandActivityPanel, CommandCenter } from "@/components/intelligence/command-center";
 import { CaseWorkspace } from "./case-workspace";
 import { CustomerPreview, useCasePreview } from "./customer-preview";
 import { LiveEventFeed } from "./live-event-feed";
@@ -33,7 +33,7 @@ export function AnalyticsPage() {
   const openCustomerWorkspace = (customerId: string) => {
     const match = queue.find((item) => item.customerId === customerId);
     if (!match) return false;
-    setSelected(match);
+    openPreview(match);
     return true;
   };
 
@@ -60,7 +60,6 @@ export function AnalyticsPage() {
             }} />
             <CommandActivityPanel />
           </section>
-          <CommandNotices />
         </>}
       </div>
       <CustomerPreview preview={preview} onClose={closePreview} onViewMore={(item) => { closePreview(); setSelected(item); }} />

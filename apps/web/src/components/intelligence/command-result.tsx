@@ -213,7 +213,7 @@ function CustomerOperationalBrief({ customer, cases, entity, result, onOpenWorks
   const approvalRequired = cases.some((item) => item.humanApprovalRequired);
   const recentEvidence = result.query_evidence.latest_cycle?.observations.slice(0, 2) ?? [];
   return <Panel className="overflow-hidden border-sky-300/20">
-    <SectionHeader eyebrow="Matched customer account" title={customer.name} detail={`${customer.account_reference} · Deterministic lookup against current customer records`} prominent action={onOpenWorkspace && cases.length ? <button type="button" onClick={() => onOpenWorkspace(customer.id)} className={buttonStyles.primary}>Open full Case Workspace</button> : undefined} />
+    <SectionHeader eyebrow="Matched customer account" title={customer.name} detail={`${customer.account_reference} · Deterministic lookup against current customer records`} prominent action={onOpenWorkspace && cases.length ? <button type="button" onClick={() => onOpenWorkspace(customer.id)} className={buttonStyles.primary}>Preview recovery case</button> : undefined} />
     <div className="grid gap-px bg-white/[.06] sm:grid-cols-2 xl:grid-cols-4">
       <SemanticSummary label="Total exposure" value={formatMoney(entity.metrics.total_outstanding_amount)} detail="Current outstanding receivables" />
       <SemanticSummary label="Overdue exposure" value={formatMoney(entity.metrics.overdue_exposure)} detail={`${entity.metrics.overdue_invoice_count} overdue invoice(s)`} />
