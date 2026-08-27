@@ -6,7 +6,7 @@ import { AppHeader } from "@/components/layout/app-header";
 import { useCommandSession } from "@/components/intelligence/command-session";
 import { useInsightMode } from "@/components/intelligence/insight-mode";
 import { apiFetch } from "@/lib/api";
-import { formatMoney as money, LatestIntelligenceCycle, PriorityCase, SimState, SimulationEvent, SimulationTickResult } from "./data";
+import { Customer, formatMoney as money, LatestIntelligenceCycle, PriorityCase, SimState, SimulationEvent, SimulationTickResult } from "./data";
 import { CaseWorkspace } from "./case-workspace";
 import { CustomerPreview, useCasePreview } from "./customer-preview";
 import { HomeRecoveryQueue } from "./home-recovery-queue";
@@ -23,7 +23,7 @@ export function Dashboard() {
   const [lastTick, setLastTick] = useState<SimulationTickResult | null>(null);
   const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback | undefined>();
   const [resetFeedback, setResetFeedback] = useState<ResetFeedback | undefined>();
-  const [tickPhase, setTickPhase] = useState<SimulationPhase>("READY");
+  const [tickPhase, setTickPhase] = useState<SimulationPhase>("PREPARING");
   const [selected, setSelected] = useState<PriorityCase | null>(null);
   const { preview, openPreview, closePreview } = useCasePreview();
   const operationInFlight = useRef(false);
@@ -59,11 +59,19 @@ export function Dashboard() {
   }, [queryClient]);
 
   const tick = useMutation({
-    onMutate: () => {
+    onMutate: async () => {
       tickStartedAt.current = performance.now();
       tickResponseAt.current = 0;
       setResetFeedback(undefined);
       setTickPhase("REQUESTING");
+      await Promise.all([
+        queryKeys.portfolio,
+        queryKeys.recovery,
+        queryKeys.portfolioIntelligence,
+        queryKeys.customers,
+        queryKeys.cases,
+        queryKeys.recommendations,
+      ].map((queryKey) => queryClient.cancelQueries({ queryKey, exact: true })));
     },
     mutationFn: async () => {
       const startedAt = performance.now();
@@ -112,21 +120,37 @@ export function Dashboard() {
       });
       queryClient.setQueryData<LatestIntelligenceCycle>(queryKeys.latestIntelligenceCycle, latestCycleFromTick(result));
 
-      const criticalRefreshes = await Promise.allSettled([
-        refetchCycleQuery("portfolio_summary", queryKeys.portfolio),
-        refetchCycleQuery("recovery_summary", queryKeys.recovery),
-        refetchCycleQuery("portfolio_intelligence", queryKeys.portfolioIntelligence),
-      ]);
-      const refreshFailed = criticalRefreshes.some((item) => item.status === "rejected");
+      let refreshFailed = false;
+      let blockingRefetches = 0;
+      if (result.dashboard_snapshot) {
+        queryClient.setQueryData(queryKeys.portfolio, result.dashboard_snapshot.portfolio);
+        queryClient.setQueryData(queryKeys.recovery, result.dashboard_snapshot.recovery);
+        queryClient.setQueryData(queryKeys.portfolioIntelligence, result.dashboard_snapshot.intelligence);
+        const outstandingByCustomer = new Map(result.dashboard_snapshot.intelligence.customers.map((item) => [item.entity_id, String(item.metrics.total_outstanding_amount)]));
+        queryClient.setQueryData<Customer[]>(queryKeys.customers, (current) => current?.map((customer) => ({
+          ...customer,
+          outstanding_amount: outstandingByCustomer.get(customer.id) ?? customer.outstanding_amount,
+        })));
+      } else {
+        const criticalRefreshes = await Promise.allSettled([
+          refetchCycleQuery("portfolio_summary", queryKeys.portfolio),
+          refetchCycleQuery("recovery_summary", queryKeys.recovery),
+          refetchCycleQuery("portfolio_intelligence", queryKeys.portfolioIntelligence),
+        ]);
+        blockingRefetches = 3;
+        refreshFailed = criticalRefreshes.some((item) => item.status === "rejected");
+      }
       setLastTick(result);
       setCycleFeedback(buildCycleFeedback(result, refreshFailed));
+      setTickPhase(refreshFailed ? "FAILED" : "READY_AGAIN");
       const readyAt = performance.now();
       logFrontendTiming("cycle_ready", {
         status: refreshFailed ? "partial" : "success",
         cycle: result.cycle,
         post_response_refresh_ms: Math.round(readyAt - tickResponseAt.current),
         total_ms: Math.round(readyAt - tickStartedAt.current),
-        blocking_refetches: 3,
+        blocking_refetches: blockingRefetches,
+        response_snapshot: result.dashboard_snapshot ? "used" : "unavailable_fallback_used",
         background_refetches: 2,
       });
 
@@ -139,7 +163,9 @@ export function Dashboard() {
         failed_requests: results.filter((item) => item.status === "rejected").length,
       }));
     },
-    onSettled: (_result, error) => setTickPhase(error ? "FAILED" : "READY"),
+    onSettled: (_result, error) => {
+      if (error) setTickPhase("FAILED");
+    },
   });
   const resetDemo = useMutation({
     mutationFn: async () => {
@@ -184,6 +210,10 @@ export function Dashboard() {
   const isUpdating = busy || connectedQueries.some((query) => query.isFetching);
   const mutateTick = tick.mutateAsync;
   const mutateReset = resetDemo.mutateAsync;
+
+  useEffect(() => {
+    if (tickPhase === "PREPARING" && dataReady && intelligence.data) setTickPhase("READY");
+  }, [dataReady, intelligence.data, tickPhase]);
 
   const runTick = useCallback(async () => {
     if (operationInFlight.current) return;

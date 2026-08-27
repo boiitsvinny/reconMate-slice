@@ -218,7 +218,6 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               {reminderDraft && <ReminderArtifact artifact={reminderDraft} />}
             </section>
             <CommunicationFactReview workspace={workspace} busy={busy} request={request} />
-            <RecoveryLoopSummary workspace={workspace} latest={latest} latestPayment={followingPayment} />
             <section className="rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
               <p className="text-[10px] font-semibold uppercase tracking-[.15em] text-slate-500">Operator decision</p>
               <h3 className="mt-1.5 text-lg font-semibold tracking-[-.02em] text-white sm:text-xl">Choose the controlled workflow response</h3>
@@ -270,6 +269,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
             <PaymentRequestPanel workspace={workspace} />
             {latestPayment && <OutcomeEvidenceChain payment={latestPayment} precedingAction={precedingAction} currentExposure={workspace.invoice?.outstanding_amount ?? "0"} recommendation={workspace.intelligence.recommendation.action} />}
             <CaseEvidenceTimeline entries={workspace.evidence_timeline ?? []} />
+            <RecoveryLoopSummary workspace={workspace} latest={latest} latestPayment={followingPayment} />
           </div>
         )}
         {decisionDialog && <DecisionDialog verb={decisionDialog} reason={decisionReason} busy={busy} onReasonChange={setDecisionReason} onCancel={() => setDecisionDialog(null)} onConfirm={() => void submitDecision()} />}
@@ -291,11 +291,17 @@ function RecoveryLoopSummary({ workspace, latest, latestPayment }: { workspace: 
     { label: "Workflow", value: latest ? label(latest.status) : "Not created", tone: latest?.status === "EXECUTED" ? "text-emerald-200" : "text-slate-300" },
     { label: "Later outcome", value: latestPayment ? `${money(latestPayment.amount)} payment persisted` : "No later payment evidence", tone: latestPayment ? "text-emerald-200" : "text-slate-500" },
   ];
-  return <section className="rounded-2xl border border-sky-300/15 bg-sky-300/[.025] p-5" aria-label="Case recovery control loop">
-    <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[.15em] text-sky-300">Evidence-to-outcome control loop</p><h3 className="mt-1.5 text-lg font-semibold text-white">How this case moved through ReconMate</h3><p className="mt-1 text-xs leading-5 text-slate-400">Only stages supported by persisted case data are shown as complete.</p></div><a href="#case-evidence-timeline" className="text-xs font-semibold text-sky-300 hover:text-sky-200">Open audit evidence ↓</a></div>
-    <ol className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{stages.map((stage, index) => <li key={stage.label} className="interactive-card rounded-xl border border-white/[.07] bg-black/10 p-3"><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">{index + 1}. {stage.label}</p><p className={`mt-1.5 text-xs font-semibold leading-5 ${stage.tone}`}>{stage.value}</p></li>)}</ol>
-    <div className="mt-4 grid gap-2 rounded-xl border border-white/[.07] bg-black/10 p-3 text-[11px] leading-5 sm:grid-cols-3"><p><strong className="text-fuchsia-200">Interpretation:</strong> extracts candidate evidence from communication.</p><p><strong className="text-sky-200">Deterministic policy:</strong> calculates risk, blockers, and recovery action.</p><p><strong className="text-amber-100">Operator:</strong> confirms evidence and approves material workflow actions.</p></div>
-  </section>;
+  return <details className="group rounded-2xl border border-sky-300/15 bg-sky-300/[.025]" aria-label="Case recovery control loop">
+    <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-5 [&::-webkit-details-marker]:hidden">
+      <div><p className="text-[10px] font-bold uppercase tracking-[.15em] text-sky-300">Evidence-to-outcome control loop</p><h3 className="mt-1.5 text-lg font-semibold text-white">How this case moved through ReconMate</h3><p className="mt-1 text-xs leading-5 text-slate-400">Expand the persisted case journey and control boundaries.</p></div>
+      <span className="shrink-0 text-lg text-sky-300 transition-transform group-open:rotate-180" aria-hidden="true">⌄</span>
+    </summary>
+    <div className="border-t border-white/[.07] p-5 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs leading-5 text-slate-400">Only stages supported by persisted case data are shown as complete.</p><a href="#case-evidence-timeline" className="text-xs font-semibold text-sky-300 hover:text-sky-200">Open audit evidence ↑</a></div>
+      <ol className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{stages.map((stage, index) => <li key={stage.label} className="interactive-card rounded-xl border border-white/[.07] bg-black/10 p-3"><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">{index + 1}. {stage.label}</p><p className={`mt-1.5 text-xs font-semibold leading-5 ${stage.tone}`}>{stage.value}</p></li>)}</ol>
+      <div className="mt-4 grid gap-2 rounded-xl border border-white/[.07] bg-black/10 p-3 text-[11px] leading-5 sm:grid-cols-3"><p><strong className="text-fuchsia-200">Interpretation:</strong> extracts candidate evidence from communication.</p><p><strong className="text-sky-200">Deterministic policy:</strong> calculates risk, blockers, and recovery action.</p><p><strong className="text-amber-100">Operator:</strong> confirms evidence and approves material workflow actions.</p></div>
+    </div>
+  </details>;
 }
 
 function ExecutedActionResult({ action, latestPayment }: { action: Workspace["actions"][number]; latestPayment?: NonNullable<Workspace["payments"]>[number] }) {

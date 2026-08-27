@@ -144,7 +144,7 @@ def test_tick_defers_recovery_commit_until_transition_evidence_is_persisted(monk
         def flush(self):
             calls.append("flush")
 
-    monkeypatch.setattr(simulation_service, "_capture_intelligence", lambda _db: {})
+    monkeypatch.setattr(simulation_service, "_capture_intelligence", lambda _db, _context, _date: {})
     monkeypatch.setattr(simulation_service, "_available_event_kinds", lambda *_args: ["PARTIAL_PAYMENT"])
     monkeypatch.setattr(simulation_service, "_roll_event_plan", lambda *_args: ("PARTIAL_PAYMENT", 0))
     monkeypatch.setattr(simulation_service, "_apply_generated_event", lambda *_args: {
@@ -152,14 +152,38 @@ def test_tick_defers_recovery_commit_until_transition_evidence_is_persisted(monk
         "invoice_id": None, "case_id": None, "metadata": {"family": "PAYMENT"},
         "cycle": state.cycle, "occurred_at": datetime(2026, 8, 5, tzinfo=UTC),
     })
-    monkeypatch.setattr(simulation_service, "synchronize_recovery_states", lambda _db, _date, *, commit: calls.append(f"sync_commit:{commit}") or {"cases_evaluated": 0, "cases_changed": 0})
-    monkeypatch.setattr(simulation_service, "_build_transitions", lambda *_args: [])
+    monkeypatch.setattr(simulation_service, "synchronize_recovery_states", lambda _db, _date, *, commit, **_kwargs: calls.append(f"sync_commit:{commit}") or {"cases_evaluated": 0, "cases_changed": 0})
+    monkeypatch.setattr(simulation_service, "_build_transitions", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(simulation_service, "_dashboard_snapshot", lambda *_args: {})
     monkeypatch.setattr(simulation_service, "_persist_transition_audits", lambda *_args: calls.append("transition_commit"))
 
     result = simulation_service.run_tick(FakeSession(), seed=99)  # type: ignore[arg-type]
     assert result["cycle"] == 4
     assert "sync_commit:False" in calls
     assert calls[-1] == "transition_commit"
+
+
+def test_cycle_dashboard_snapshot_reuses_current_factual_graph() -> None:
+    customer = Customer(id=uuid4(), name="Snapshot Test", account_reference="SNAPSHOT-1")
+    invoice = Invoice(
+        id=uuid4(), customer=customer, invoice_number="SNAP-1",
+        issue_date=date(2026, 7, 1), due_date=date(2026, 7, 20),
+        original_amount=Decimal("1000"), outstanding_amount=Decimal("700"),
+        status=InvoiceStatus.OVERDUE,
+    )
+    RecoveryCase(
+        id=uuid4(), customer=customer, invoice=invoice,
+        current_state=RecoveryState.IN_PROGRESS, priority=RecoveryPriority.NORMAL,
+    )
+    context = simulation_service._context_from_customers([customer])
+    intelligence = simulation_service.evaluate_portfolio_intelligence([customer], date(2026, 8, 5))
+
+    snapshot = simulation_service._dashboard_snapshot(context, date(2026, 8, 5), intelligence)
+
+    assert snapshot["portfolio"]["total_outstanding_amount"] == Decimal("700")
+    assert snapshot["portfolio"]["total_recovered_amount"] == Decimal("300")
+    assert snapshot["recovery"]["overdue_exposure"] == Decimal("700")
+    assert snapshot["intelligence"]["customers"][0]["entity_id"] == str(customer.id)
 
 
 def test_latest_intelligence_cycle_returns_persisted_decision_evidence() -> None:

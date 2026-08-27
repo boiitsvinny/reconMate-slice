@@ -443,3 +443,31 @@ def portfolio_summary(session: Session, operating_date: date | None = None) -> d
         "active_disputes": sum(invoice.status is InvoiceStatus.DISPUTED for invoice in current_invoices),
         "recovery_cases": counts.recovery_cases or 0,
     }
+
+
+def portfolio_summary_from_records(
+    customers: list[Customer],
+    invoices: list[Invoice],
+    promises: list[PromiseToPay],
+    recovery_cases: list[RecoveryCase],
+    operating_date: date,
+) -> dict[str, int | Decimal]:
+    """Calculate the established portfolio summary from an already-loaded graph."""
+    current_invoices = [invoice for invoice in invoices if invoice.issue_date <= operating_date]
+    invoice_facts = [(invoice, evaluate_invoice(invoice, operating_date)) for invoice in current_invoices]
+    payments = [payment for invoice in invoices for payment in invoice.payments]
+    original_amount = sum((invoice.original_amount for invoice in current_invoices), Decimal("0"))
+    return {
+        "customers": len(customers),
+        "invoices": len(invoices),
+        "open_invoices": sum(invoice.outstanding_amount > 0 for invoice in current_invoices),
+        "overdue_invoices": sum(facts.state == "OVERDUE" for _, facts in invoice_facts),
+        "outstanding_amount": sum((invoice.outstanding_amount for invoice in current_invoices), Decimal("0")),
+        "overdue_amount": sum((facts.outstanding_amount for _, facts in invoice_facts if facts.state == "OVERDUE"), Decimal("0")),
+        "original_amount": original_amount,
+        "payments": len(payments),
+        "promises": len(promises),
+        "broken_promises": sum(promise.status is PromiseStatus.BROKEN for promise in promises),
+        "active_disputes": sum(invoice.status is InvoiceStatus.DISPUTED for invoice in current_invoices),
+        "recovery_cases": len(recovery_cases),
+    }

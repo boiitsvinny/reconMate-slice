@@ -206,21 +206,29 @@ def _audit_once(
         existing.add(key)
 
 
-def synchronize_recovery_states(session: Session, simulation_date: date, *, commit: bool = True) -> dict[str, int]:
+def synchronize_recovery_states(
+    session: Session,
+    simulation_date: date,
+    *,
+    commit: bool = True,
+    loaded_cases: list[RecoveryCase] | None = None,
+    loaded_invoices: list[Invoice] | None = None,
+    loaded_promises: list[PromiseToPay] | None = None,
+) -> dict[str, int]:
     """Apply only factual case-state changes and append auditable transition events."""
     started_at = perf_counter()
     stage_started = perf_counter()
-    cases = session.scalars(select(RecoveryCase).options(
+    cases = loaded_cases if loaded_cases is not None else session.scalars(select(RecoveryCase).options(
         selectinload(RecoveryCase.customer), selectinload(RecoveryCase.invoice).selectinload(Invoice.payments),
         selectinload(RecoveryCase.invoice).selectinload(Invoice.promises_to_pay).selectinload(PromiseToPay.source_communication),
         selectinload(RecoveryCase.actions),
     )).all()
     load_cases_ms = elapsed_ms(stage_started)
     stage_started = perf_counter()
-    invoices = session.scalars(select(Invoice)).all()
+    invoices = loaded_invoices if loaded_invoices is not None else session.scalars(select(Invoice)).all()
     load_invoices_ms = elapsed_ms(stage_started)
     stage_started = perf_counter()
-    promises = session.scalars(select(PromiseToPay).options(
+    promises = loaded_promises if loaded_promises is not None else session.scalars(select(PromiseToPay).options(
         selectinload(PromiseToPay.invoice).selectinload(Invoice.payments), selectinload(PromiseToPay.source_communication),
     )).all()
     load_promises_ms = elapsed_ms(stage_started)
@@ -286,16 +294,13 @@ def synchronize_recovery_states(session: Session, simulation_date: date, *, comm
     return {"cases_evaluated": len(cases), "cases_changed": changed}
 
 
-def recovery_summary(session: Session, simulation_date: date) -> dict[str, int | Decimal]:
-    cases = session.scalars(select(RecoveryCase).options(
-        selectinload(RecoveryCase.customer), selectinload(RecoveryCase.invoice).selectinload(Invoice.payments),
-        selectinload(RecoveryCase.invoice).selectinload(Invoice.promises_to_pay).selectinload(PromiseToPay.source_communication),
-        selectinload(RecoveryCase.actions),
-    )).all()
-    invoices = session.scalars(select(Invoice)).all()
-    promises = session.scalars(select(PromiseToPay).options(
-        selectinload(PromiseToPay.invoice).selectinload(Invoice.payments), selectinload(PromiseToPay.source_communication),
-    )).all()
+def recovery_summary_from_records(
+    cases: list[RecoveryCase],
+    invoices: list[Invoice],
+    promises: list[PromiseToPay],
+    simulation_date: date,
+) -> dict[str, int | Decimal]:
+    """Calculate the established recovery summary from an already-loaded graph."""
     evaluations = [evaluate_case(case, simulation_date) for case in cases if case.invoice is None or case.invoice.issue_date <= simulation_date]
     invoice_facts = [(invoice, evaluate_invoice(invoice, simulation_date)) for invoice in invoices]
     promise_facts = [evaluate_promise(promise, simulation_date) for promise in promises]
@@ -315,3 +320,16 @@ def recovery_summary(session: Session, simulation_date: date) -> dict[str, int |
         "escalated_cases": sum(item.derived_state == RecoveryState.ESCALATED.value for item in evaluations),
         "on_hold_cases": sum(item.derived_state == RecoveryState.AWAITING_CUSTOMER.value for item in evaluations),
     }
+
+
+def recovery_summary(session: Session, simulation_date: date) -> dict[str, int | Decimal]:
+    cases = list(session.scalars(select(RecoveryCase).options(
+        selectinload(RecoveryCase.customer), selectinload(RecoveryCase.invoice).selectinload(Invoice.payments),
+        selectinload(RecoveryCase.invoice).selectinload(Invoice.promises_to_pay).selectinload(PromiseToPay.source_communication),
+        selectinload(RecoveryCase.actions),
+    )).all())
+    invoices = list(session.scalars(select(Invoice)).all())
+    promises = list(session.scalars(select(PromiseToPay).options(
+        selectinload(PromiseToPay.invoice).selectinload(Invoice.payments), selectinload(PromiseToPay.source_communication),
+    )).all())
+    return recovery_summary_from_records(cases, invoices, promises, simulation_date)

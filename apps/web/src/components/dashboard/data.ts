@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import type { IntelligenceResult } from "@/lib/intelligence-api";
+import type { IntelligenceResult, PortfolioIntelligence } from "@/lib/intelligence-api";
 
 export type Portfolio = { simulation_date: string | null; total_outstanding_amount: string; total_invoices: number; total_customers: number };
 export type Recovery = { overdue_exposure: string; broken_promise_exposure: string; cases_eligible_for_recovery: number; cases_requiring_attention?: number; cases_awaiting_payment: number; cases_blocked_by_dispute: number; escalated_cases: number; open_cases?: number; active_cases?: number; total_cases: number };
@@ -49,6 +49,7 @@ export type SimulationTickResult = {
   recovery_synchronization: { cases_evaluated: number; cases_changed: number };
   generation: { seed: number; mode: "NORMAL" | "JUDGE"; primary_event_id: string; secondary_event_count: number; families: string[] };
   change_summary: { customers_affected: number; material_customers: number; recommendations_changed: number; recommendations_unchanged: number; blockers_added: number; blockers_removed: number };
+  dashboard_snapshot?: { portfolio: Portfolio; recovery: Recovery; intelligence: PortfolioIntelligence };
 };
 export type LatestIntelligenceCycle = {
   cycle: number;

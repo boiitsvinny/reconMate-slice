@@ -17,8 +17,8 @@ from app.core.config import get_settings
 from app.core.timing import elapsed_ms, log_timing
 from app.intelligence.service import persist_analysis
 from app.intelligence.provider import MockCommunicationIntelligenceProvider
-from app.intelligence.operational_schemas import IntelligenceResult
-from app.intelligence.operational_service import evaluate_case_intelligence
+from app.intelligence.operational_schemas import IntelligenceResult, PortfolioIntelligence
+from app.intelligence.operational_service import evaluate_case_intelligence, evaluate_portfolio_intelligence
 from app.intelligence.transitions import compare_intelligence
 from app.commands.tools import CommandTools
 from app.models.domain import (
@@ -26,9 +26,9 @@ from app.models.domain import (
     Invoice, InvoiceStatus, Payment, PromiseStatus, PromiseToPay, RecoveryCase,
     RecoveryPriority, RecoveryState, SimulationEvent, SimulationState,
 )
-from app.recovery.engine import synchronize_recovery_states
+from app.recovery.engine import recovery_summary_from_records, synchronize_recovery_states
 from app.recommendations.service import recommend_case
-from app.seed.portfolio import seed_database
+from app.seed.portfolio import portfolio_summary_from_records, seed_database
 from app.simulation.config import SCENARIO_CONFIG
 
 
@@ -45,9 +45,9 @@ def _audit(db: Session, entity_type: str, entity_id: uuid.UUID, event_type: str,
 
 
 def _case_for(db: Session, invoice: Invoice, when: datetime) -> RecoveryCase:
-    case = db.scalar(select(RecoveryCase).where(RecoveryCase.invoice_id == invoice.id, RecoveryCase.closed_at.is_(None)))
+    case = next((item for item in invoice.customer.recovery_cases if item.invoice_id == invoice.id and item.closed_at is None), None)
     if case is None:
-        case = RecoveryCase(id=uuid.uuid5(uuid.NAMESPACE_URL, f"reconmate.simulation/case/{invoice.id}"), customer_id=invoice.customer_id, invoice=invoice, current_state=RecoveryState.NEW,
+        case = RecoveryCase(id=uuid.uuid5(uuid.NAMESPACE_URL, f"reconmate.simulation/case/{invoice.id}"), customer=invoice.customer, invoice=invoice, current_state=RecoveryState.NEW,
                             priority=RecoveryPriority.HIGH if invoice.outstanding_amount >= Decimal("150000") else RecoveryPriority.NORMAL,
                             opened_at=when, updated_at=when)
         db.add(case)
@@ -84,8 +84,59 @@ class _IntelligenceSnapshot:
     recommendation_title: str
 
 
-def _capture_intelligence(db: Session) -> dict[tuple[str, str], _IntelligenceSnapshot]:
+@dataclass(frozen=True)
+class _CycleContext:
+    customers: list[Customer]
+    invoices: list[Invoice]
+    promises: list[PromiseToPay]
+    cases: list[RecoveryCase]
+
+
+def _load_cycle_context(db: Session) -> _CycleContext:
+    """Load the complete cycle graph once so later deterministic stages can reuse it."""
+    customers = list(db.scalars(select(Customer).options(
+        selectinload(Customer.invoices).selectinload(Invoice.payments),
+        selectinload(Customer.invoices).selectinload(Invoice.promises_to_pay).selectinload(PromiseToPay.source_communication),
+        selectinload(Customer.promises_to_pay).selectinload(PromiseToPay.invoice).selectinload(Invoice.payments),
+        selectinload(Customer.promises_to_pay).selectinload(PromiseToPay.source_communication),
+        selectinload(Customer.recovery_cases).selectinload(RecoveryCase.actions),
+        selectinload(Customer.recovery_cases).selectinload(RecoveryCase.invoice),
+    ).order_by(Customer.account_reference)).all())
+    return _context_from_customers(customers)
+
+
+def _context_from_customers(customers: list[Customer]) -> _CycleContext:
+    return _CycleContext(
+        customers=customers,
+        invoices=[invoice for customer in customers for invoice in customer.invoices],
+        promises=[promise for customer in customers for promise in customer.promises_to_pay],
+        cases=[case for customer in customers for case in customer.recovery_cases],
+    )
+
+
+def _capture_intelligence(
+    db: Session,
+    context: _CycleContext | None = None,
+    calculated_at=None,
+) -> dict[tuple[str, str], _IntelligenceSnapshot]:
     """Capture an ephemeral comparison baseline; no intelligence history is persisted."""
+    if context is not None:
+        snapshots: dict[tuple[str, str], _IntelligenceSnapshot] = {}
+        if calculated_at is None:
+            calculated_at = db.scalar(select(SimulationState.simulation_date).where(SimulationState.name == "default"))
+        portfolio = evaluate_portfolio_intelligence(context.customers, calculated_at)
+        for result in portfolio.customers:
+            snapshots[("CUSTOMER", result.entity_id)] = _IntelligenceSnapshot(
+                result, result.recommendation.action.value, result.recommendation.title,
+            )
+        for case in context.cases:
+            result = evaluate_case_intelligence(case, portfolio.calculated_at)
+            recommendation = recommend_case(case, portfolio.calculated_at)
+            snapshots[("RECOVERY_CASE", str(case.id))] = _IntelligenceSnapshot(
+                result, recommendation.recommended_action.value,
+                recommendation.recommended_action.value.replace("_", " ").title(),
+            )
+        return snapshots
     tools = CommandTools(db)
     snapshots: dict[tuple[str, str], _IntelligenceSnapshot] = {}
     for result in tools.get_portfolio_intelligence().customers:
@@ -108,8 +159,13 @@ def _build_transitions(
     before: dict[tuple[str, str], _IntelligenceSnapshot],
     events: list[dict[str, Any]],
     cycle: int,
+    *,
+    post_portfolio=None,
+    context: _CycleContext | None = None,
 ) -> list[dict[str, Any]]:
-    tools = CommandTools(db)
+    tools = CommandTools(db) if context is None else None
+    customer_results = {item.entity_id: item for item in post_portfolio.customers} if post_portfolio is not None else {}
+    cases_by_id = {str(case.id): case for case in context.cases} if context is not None else {}
     transitions = []
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for event in events:
@@ -120,16 +176,26 @@ def _build_transitions(
     for (entity_type, entity_id), related_events in grouped.items():
         event = related_events[0]
         if entity_type == "CUSTOMER":
-                result = tools.get_customer_intelligence(uuid.UUID(entity_id))
+                result = customer_results.get(entity_id) or (tools.get_customer_intelligence(uuid.UUID(entity_id)) if tools else None)
                 current_recommendation = result.recommendation.action.value if result else None
                 current_title = result.recommendation.title if result else None
                 current_explanation = result.recommendation.explanation if result else None
                 operator_next_step = None
                 workflow_effect = None
         else:
-                case = tools.get_case(entity_id)
-                result = tools.get_case_intelligence(uuid.UUID(entity_id)) if case else None
-                recommendation = recommend_case(case, tools.simulation_date) if case else None
+                case = cases_by_id.get(entity_id) or (tools.get_case(entity_id) if tools else None)
+                calculated_at = post_portfolio.calculated_at if post_portfolio is not None else tools.simulation_date if tools else None
+                if case and post_portfolio is not None:
+                    customer_result = customer_results.get(str(case.customer_id))
+                    invoice_label = case.invoice.invoice_number if case.invoice is not None else "account-level case"
+                    result = customer_result.model_copy(update={
+                        "entity_type": "RECOVERY_CASE",
+                        "entity_id": str(case.id),
+                        "entity_name": f"{case.customer.name} / {invoice_label}",
+                    }) if customer_result else None
+                else:
+                    result = tools.get_case_intelligence(uuid.UUID(entity_id)) if case and tools else None
+                recommendation = recommend_case(case, calculated_at) if case and calculated_at else None
                 current_recommendation = recommendation.recommended_action.value if recommendation else None
                 current_title = recommendation.recommended_action.value.replace("_", " ").title() if recommendation else None
                 current_explanation = recommendation.operator_explanation if recommendation else None
@@ -309,7 +375,10 @@ def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> di
     if state is None:
         raise ValueError("Synthetic simulation state has not been seeded.")
     stage_started = perf_counter()
-    before_intelligence = _capture_intelligence(db)
+    context = _load_cycle_context(db)
+    load_cycle_context_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
+    before_intelligence = _capture_intelligence(db, context, state.simulation_date)
     capture_before_intelligence_ms = elapsed_ms(stage_started)
     previous_cycle, previous_simulation_date = state.cycle, state.simulation_date
     selected_seed = SCENARIO_CONFIG.judge_seed if judge else seed if seed is not None else secrets.randbits(63)
@@ -321,8 +390,8 @@ def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> di
     advance_cycle_ms = elapsed_ms(stage_started)
     when, cycle, events = _when(state), state.cycle, []
     stage_started = perf_counter()
-    invoices = db.scalars(select(Invoice).options(selectinload(Invoice.customer), selectinload(Invoice.payments), selectinload(Invoice.promises_to_pay)).order_by(Invoice.due_date, Invoice.id)).all()
-    active_promises = db.scalars(select(PromiseToPay).options(selectinload(PromiseToPay.invoice), selectinload(PromiseToPay.customer)).where(PromiseToPay.status == PromiseStatus.ACTIVE).order_by(PromiseToPay.promised_date)).all()
+    invoices = sorted(context.invoices, key=lambda item: (item.due_date, item.id))
+    active_promises = sorted((item for item in context.promises if item.status == PromiseStatus.ACTIVE), key=lambda item: item.promised_date)
     load_operational_facts_ms = elapsed_ms(stage_started)
     # Business time, not wall-clock time, determines when an operational invoice
     # crosses into overdue status. Disputed and settled documents retain their facts.
@@ -350,14 +419,27 @@ def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> di
     db.flush()
     persist_generated_facts_ms = elapsed_ms(stage_started)
     stage_started = perf_counter()
-    synchronization = synchronize_recovery_states(db, state.simulation_date, commit=False)
+    current_context = _context_from_customers(context.customers)
+    synchronization = synchronize_recovery_states(
+        db, state.simulation_date, commit=False,
+        loaded_cases=current_context.cases,
+        loaded_invoices=current_context.invoices,
+        loaded_promises=current_context.promises,
+    )
     recovery_synchronization_ms = elapsed_ms(stage_started)
     stage_started = perf_counter()
-    transitions = _build_transitions(db, before_intelligence, events, cycle)
+    post_portfolio = evaluate_portfolio_intelligence(current_context.customers, state.simulation_date)
+    transitions = _build_transitions(
+        db, before_intelligence, events, cycle,
+        post_portfolio=post_portfolio, context=current_context,
+    )
     build_transitions_ms = elapsed_ms(stage_started)
     customer_transitions = [item for item in transitions if item["entity_type"] == "CUSTOMER"]
     families = sorted({item["metadata"]["family"] for item in events})
     summary = {"customers_affected": len({item["customer_id"] for item in events if item.get("customer_id")}), "material_customers": sum(bool(item["material"]) for item in customer_transitions), "recommendations_changed": sum("RECOMMENDATION_CHANGED" in item["classifications"] for item in customer_transitions), "recommendations_unchanged": sum("RECOMMENDATION_CHANGED" not in item["classifications"] for item in customer_transitions), "blockers_added": sum("NEW_BLOCKER" in item["classifications"] for item in customer_transitions), "blockers_removed": sum("BLOCKER_RESOLVED" in item["classifications"] for item in customer_transitions)}
+    stage_started = perf_counter()
+    dashboard_snapshot = _dashboard_snapshot(current_context, state.simulation_date, post_portfolio)
+    build_dashboard_snapshot_ms = elapsed_ms(stage_started)
     stage_started = perf_counter()
     _persist_transition_audits(db, state, cycle, len(events), transitions, summary)
     persist_transition_audits_ms = elapsed_ms(stage_started)
@@ -366,6 +448,7 @@ def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> di
         cycle=cycle,
         total_ms=elapsed_ms(started_at),
         state_lock_ms=state_lock_ms,
+        load_cycle_context_ms=load_cycle_context_ms,
         capture_before_intelligence_ms=capture_before_intelligence_ms,
         advance_cycle_ms=advance_cycle_ms,
         load_operational_facts_ms=load_operational_facts_ms,
@@ -374,13 +457,45 @@ def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> di
         persist_generated_facts_ms=persist_generated_facts_ms,
         recovery_synchronization_ms=recovery_synchronization_ms,
         build_transitions_ms=build_transitions_ms,
+        build_dashboard_snapshot_ms=build_dashboard_snapshot_ms,
         persist_transition_audits_ms=persist_transition_audits_ms,
         invoices_loaded=len(invoices),
         active_promises_loaded=len(active_promises),
         events_generated=len(events),
         transitions_built=len(transitions),
     )
-    return {"previous_cycle": previous_cycle, "previous_simulation_date": previous_simulation_date, "cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "intelligence_transitions": transitions, "recovery_synchronization": synchronization, "generation": {"seed": selected_seed, "mode": "JUDGE" if judge else "NORMAL", "primary_event_id": primary["id"], "secondary_event_count": len(events) - 1, "families": families}, "change_summary": summary}
+    return {"previous_cycle": previous_cycle, "previous_simulation_date": previous_simulation_date, "cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "intelligence_transitions": transitions, "recovery_synchronization": synchronization, "generation": {"seed": selected_seed, "mode": "JUDGE" if judge else "NORMAL", "primary_event_id": primary["id"], "secondary_event_count": len(events) - 1, "families": families}, "change_summary": summary, "dashboard_snapshot": dashboard_snapshot}
+
+
+def _dashboard_snapshot(
+    context: _CycleContext,
+    simulation_date,
+    intelligence: PortfolioIntelligence,
+) -> dict[str, Any]:
+    portfolio = portfolio_summary_from_records(
+        context.customers, context.invoices, context.promises, context.cases, simulation_date,
+    )
+    outstanding = Decimal(portfolio["outstanding_amount"])
+    recovery = recovery_summary_from_records(context.cases, context.invoices, context.promises, simulation_date)
+    return {
+        "portfolio": {
+            "simulation_date": simulation_date,
+            "total_customers": int(portfolio["customers"]),
+            "total_invoices": int(portfolio["invoices"]),
+            "open_invoices": int(portfolio["open_invoices"]),
+            "overdue_invoices": int(portfolio["overdue_invoices"]),
+            "total_outstanding_amount": outstanding,
+            "total_overdue_amount": Decimal(portfolio["overdue_amount"]),
+            "total_recovered_amount": Decimal(portfolio["original_amount"]) - outstanding,
+            "total_payments": int(portfolio["payments"]),
+            "total_promises": int(portfolio["promises"]),
+            "broken_promises": int(portfolio["broken_promises"]),
+            "active_disputes": int(portfolio["active_disputes"]),
+            "recovery_cases": int(portfolio["recovery_cases"]),
+        },
+        "recovery": recovery,
+        "intelligence": intelligence.model_dump(mode="json"),
+    }
 
 
 def reset_simulation(db: Session) -> dict[str, Any]:

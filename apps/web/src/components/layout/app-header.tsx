@@ -47,15 +47,15 @@ export function AppHeader({ connected, updating = false }: AppHeaderProps) {
 
   return (
     <>
-    <header className={`pointer-events-none sticky top-0 z-40 grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-2 transition-transform duration-300 ease-out sm:px-5 lg:px-7 ${navigationVisible ? "translate-y-0" : "-translate-y-full"}`}>
-      <div className="header-glass pointer-events-auto flex w-fit min-w-0 items-center gap-2.5 rounded-2xl p-1.5 pr-3">
-        <button type="button" onClick={toggleInspection} aria-label="Toggle Intelligence Inspection" aria-pressed={inspectionEnabled} className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-xl border border-sky-200/25 bg-slate-950/35 p-1 shadow-[0_0_24px_rgba(56,189,248,.12)] transition hover:border-sky-200/45 hover:bg-sky-400/[.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60">
-          <Image src="/reconmate-mark.png" alt="" width={32} height={32} priority className="h-8 w-8 object-contain" />
+    <header className={`pointer-events-none sticky top-0 z-40 grid grid-cols-[1fr_auto_1fr] items-center gap-3 px-3 py-1.5 transition-transform duration-300 ease-out sm:px-5 lg:px-7 ${navigationVisible ? "translate-y-0" : "-translate-y-full"}`}>
+      <div className="header-glass pointer-events-auto flex w-fit min-w-0 items-center gap-2 rounded-xl p-1 pr-2.5">
+        <button type="button" onClick={toggleInspection} aria-label="Toggle Intelligence Inspection" aria-pressed={inspectionEnabled} className="grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-lg border border-sky-200/25 bg-slate-950/35 p-0.5 shadow-[0_0_18px_rgba(56,189,248,.1)] transition hover:border-sky-200/45 hover:bg-sky-400/[.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/60">
+          <Image src="/reconmate-mark.png" alt="" width={24} height={24} priority className="h-6 w-6 object-contain" />
         </button>
         <Link href="/" aria-label="ReconMate home" className="min-w-0">
         <div className="min-w-0">
-          <div className="text-base font-semibold tracking-[-0.025em] text-white">ReconMate</div>
-          <div className="truncate text-[9px] font-semibold uppercase tracking-[0.18em] text-slate-500 sm:text-[10px]">Recovery operations</div>
+          <div className="text-sm font-semibold tracking-[-0.02em] text-white">ReconMate</div>
+          <div className="truncate text-[8px] font-semibold uppercase tracking-[0.16em] text-slate-500 sm:text-[9px]">Recovery operations</div>
         </div>
         </Link>
       </div>
