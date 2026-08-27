@@ -1,229 +1,699 @@
 # ReconMate
 
-ReconMate is a closed-loop AI revenue recovery system for B2B receivables. This initial vertical-slice foundation supplies a Next.js frontend, FastAPI backend, PostgreSQL, and an end-to-end health check. Recovery workflow and AI logic are intentionally not implemented yet.
+**AI-assisted revenue recovery for B2B receivables — with deterministic financial decisioning, human control, and auditable outcomes.**
 
-## Repository layout
+ReconMate is a revenue-recovery operations system built for **Razorpay Buildathon — Track 03: AI Revenue Recovery**.
+
+It continuously reassesses overdue B2B receivables using invoice state, payment behaviour, promises-to-pay, disputes, communications, and recovery history to answer three questions:
+
+1. **Which accounts actually need intervention?**
+2. **What is the safest next recovery action?**
+3. **When should the system deliberately do nothing?**
+
+ReconMate is intentionally not an autonomous collections spam bot.
+
+Its core thesis is simple:
+
+> **Revenue recovery requires knowing when to act, when to wait, and being able to prove why.**
+
+---
+
+## Live Demo
+
+**Application:**
+https://recon-mate-slice.vercel.app/
+
+The hosted build contains a deterministic synthetic B2B portfolio designed for reproducible evaluation.
+
+---
+
+# What ReconMate Does
+
+ReconMate models receivables recovery as a continuously changing operating system rather than a static overdue-invoice list.
+
+A customer can move through states such as:
+
+**healthy → overdue → promise active → promise broken → recovery prioritized → approval required → workflow completed → recovered / held / escalated**
+
+Every reassessment uses the latest available facts.
+
+### ReconMate can:
+
+* identify overdue and at-risk receivables;
+* prioritize recovery cases using deterministic policy;
+* distinguish between cases that require action and cases that should be deliberately held;
+* monitor active promises-to-pay;
+* detect broken promises;
+* block recovery while an active dispute exists;
+* prepare controlled escalation when facts justify it;
+* require operator approval before material recovery actions;
+* reject stale or duplicate workflow actions;
+* maintain an auditable history of decisions and actions;
+* simulate changing portfolio conditions across operating cycles;
+* reconcile batch-level recovery evidence without claiming unsupported causal impact.
+
+---
+
+# The Important Part: Intelligent Restraint
+
+Most collection systems reduce the problem to:
+
+> **Overdue → contact customer**
+
+ReconMate does not.
+
+Examples:
+
+### Active payment promise
+
+The customer has committed to pay within an active promise window.
+
+**Decision:** Monitor.
+**Do not escalate yet.**
+
+### Active dispute
+
+The outstanding amount is currently disputed.
+
+**Decision:** Hold recovery.
+**Do not create conflicting collection pressure.**
+
+### Broken promise
+
+A promised payment date has passed without supporting payment evidence.
+
+**Decision:** Increase recovery priority or prepare escalation.
+
+### Severe overdue exposure
+
+Material balance, high aging, repeated broken promises, and no active blocker.
+
+**Decision:** Prioritize controlled recovery action.
+
+The system treats **not acting** as a valid and sometimes safer recovery decision.
+
+---
+
+# Decision Architecture
+
+ReconMate deliberately separates probabilistic interpretation from financial authority.
+
+```text
+Customer / portfolio evidence
+            ↓
+Communication interpretation
+            ↓
+Candidate structured facts
+            ↓
+Validation / confidence boundary
+            ↓
+Deterministic recovery policy
+            ↓
+Recommendation + blockers + stopping rules
+            ↓
+Human approval where required
+            ↓
+Bounded recovery workflow
+            ↓
+Outcome + audit evidence
+```
+
+## AI interprets. Policy decides.
+
+Model-backed intelligence is useful for interpreting ambiguous or unstructured customer communication.
+
+It is **not** allowed to independently decide:
+
+* whether money has actually been received;
+* whether an invoice is paid;
+* whether a dispute is resolved;
+* whether financial escalation is allowed;
+* whether a customer should be contacted;
+* whether a recovery workflow may bypass policy.
+
+Financial authority remains deterministic and auditable.
+
+For reproducible evaluation, the hosted sandbox can use deterministic communication interpretation. Model-backed interpretation sits behind a **fail-closed provider boundary**.
+
+If interpretation is unavailable, malformed, ambiguous, or insufficiently grounded, ReconMate does not invent a financial fact.
+
+---
+
+# Recovery Decisioning
+
+The recovery engine evaluates facts including:
+
+* outstanding exposure;
+* invoice age;
+* days overdue;
+* payment behaviour;
+* active promises-to-pay;
+* broken promises;
+* disputes;
+* recent recovery activity;
+* recovery cooldowns;
+* case state;
+* previous actions;
+* behavioural deterioration.
+
+Each recommendation can expose:
+
+* current recommendation;
+* contributing factors;
+* score contribution;
+* blockers;
+* actionability;
+* evidence used;
+* what changed since the previous evaluation;
+* what future fact would change the decision.
+
+This keeps recovery logic inspectable instead of hiding it behind an unexplained AI score.
+
+---
+
+# Human Control & Workflow Safety
+
+ReconMate treats recovery actions as controlled financial operations.
+
+Depending on the case, workflows can require explicit operator approval before execution.
+
+The workflow layer is designed around:
+
+* approval gates;
+* stale-recommendation checks;
+* duplicate-action prevention;
+* re-evaluation before execution;
+* action cooldowns;
+* stopping rules;
+* dispute blockers;
+* active-promise blockers;
+* audit history.
+
+A recommendation that was safe earlier cannot simply be executed after the underlying facts have materially changed.
+
+---
+
+# Batch Recovery Proof
+
+ReconMate includes a **Batch Recovery Proof** designed to make recovery reporting inspectable rather than promotional.
+
+It reconciles a defined overdue cohort across:
+
+```text
+Starting overdue exposure
+        =
+Observed post-due recovery
+        +
+Remaining overdue exposure
+```
+
+The report also surfaces:
+
+* recovered and remaining exposure;
+* partial and complete recovery;
+* blocked cases;
+* deliberate holds;
+* unresolved exceptions;
+* approval state;
+* stopping-rule outcomes;
+* payment provenance;
+* recovery-case history;
+* policy baseline comparisons.
+
+## Measurement boundary
+
+ReconMate deliberately distinguishes:
+
+**observed payment recovery**
+
+from
+
+**proven causal recovery created by ReconMate**
+
+The synthetic sandbox demonstrates recovery operations and reconciliation mechanics. It does not present simulated portfolio outcomes as production merchant revenue or claim unsupported causal attribution.
+
+---
+
+# Demo Simulation
+
+The application includes a persisted virtual operating environment.
+
+The deterministic development portfolio contains:
+
+* **56 B2B customers**
+* **296 invoices**
+* payments;
+* promises-to-pay;
+* customer communications;
+* disputes;
+* recovery cases;
+* recovery actions;
+* audit events;
+* simulation history.
+
+Customer behaviours include:
+
+* healthy payers;
+* predictably late customers;
+* deteriorating accounts;
+* broken promises;
+* partial payments;
+* disputes;
+* strategic high-value customers;
+* severely overdue accounts.
+
+Advancing the operating cycle changes portfolio facts and forces ReconMate to reassess affected recovery decisions.
+
+---
+
+# 5-Minute Judge Path
+
+For the fastest evaluation:
+
+### 1. Home
+
+Open the portfolio overview.
+
+Inspect:
+
+* outstanding exposure;
+* active recovery cases;
+* changed decisions;
+* recovery queue;
+* deliberate holds.
+
+### 2. Open a recovery case
+
+Inspect:
+
+* why the account is prioritized or held;
+* source facts;
+* blockers;
+* score contributions;
+* previous vs. current decision;
+* what would change the recommendation.
+
+### 3. Review the recommended workflow
+
+Observe:
+
+* actionability;
+* approval requirement;
+* stopping rules;
+* duplicate / stale-action protection;
+* recorded workflow outcome.
+
+### 4. Advance the operating cycle
+
+Use the simulation controls to introduce new portfolio facts.
+
+Watch ReconMate reassess affected accounts and change recommendations when evidence changes.
+
+### 5. Reports
+
+Open **Batch Recovery Proof**.
+
+Inspect:
+
+* starting exposure;
+* observed post-due payments;
+* remaining exposure;
+* holds and exceptions;
+* reconciliation;
+* audit provenance.
+
+### 6. Analyze / History
+
+Use the deeper decision-analysis and historical views to inspect why decisions changed over time.
+
+---
+
+# Product Surfaces
+
+### Home
+
+Operational portfolio overview and recovery queue.
+
+### Reports
+
+Batch Recovery Proof and portfolio-level outcome evidence.
+
+### Analyze
+
+Decision inspection and recovery reasoning.
+
+### History
+
+Invoice and portfolio history across the simulated operating environment.
+
+---
+
+# Tech Stack
+
+## Frontend
+
+* Next.js
+* React
+* TypeScript
+* App Router
+
+## Backend
+
+* FastAPI
+* Python
+* SQLAlchemy
+* Alembic
+
+## Data
+
+* PostgreSQL
+* Supabase in production
+
+## Deployment
+
+```text
+Browser
+   ↓
+Vercel — Next.js frontend
+   ↓
+Render — FastAPI backend
+   ↓
+Supabase — PostgreSQL
+```
+
+## Intelligence
+
+* deterministic recovery policy;
+* deterministic evaluation and stopping rules;
+* model-backed communication interpretation through a provider boundary;
+* Google Gemini provider support;
+* confidence validation and fail-closed handling.
+
+---
+
+# Repository Structure
 
 ```text
 reconMate/
 ├── apps/
-│   ├── api/                 # FastAPI REST service
-│   │   ├── app/             # Routes and configuration
-│   │   ├── tests/           # Backend tests
+│   ├── api/
+│   │   ├── app/
+│   │   ├── tests/
 │   │   ├── .env.example
 │   │   ├── Dockerfile
 │   │   └── pyproject.toml
-│   └── web/                 # Next.js App Router application
-│       ├── src/app/         # Pages and styles
-│       ├── src/components/  # UI components
+│   │
+│   └── web/
+│       ├── src/app/
+│       ├── src/components/
 │       ├── .env.local.example
 │       ├── Dockerfile
 │       └── package.json
-├── compose.yaml             # PostgreSQL + API + frontend stack
-└── .env.example             # Compose environment template
+│
+├── compose.yaml
+├── render.yaml
+├── .env.example
+├── LICENSE
+└── README.md
 ```
+
+---
+
+# Run Locally
 
 ## Prerequisites
 
-- Node.js 20.9 or newer and npm
-- Python 3.11 through 3.14
-- Docker Desktop (recommended for PostgreSQL and the full stack)
+* Node.js 20.9+
+* npm
+* Python 3.11–3.14
+* Docker Desktop recommended
 
-## Run with Docker Compose
+---
+
+## Full stack with Docker Compose
 
 ```powershell
 Copy-Item .env.example .env
 Copy-Item apps/api/.env.example apps/api/.env
+
 docker compose up --build
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The browser calls the API origin configured by `NEXT_PUBLIC_API_URL` (which defaults to `http://localhost:8000` in the supplied local configuration). Stop the stack with `docker compose down`. Use `docker compose down -v` only if you intentionally want to remove PostgreSQL data.
+Open:
 
-## Run applications locally
+```text
+http://localhost:3000
+```
 
-Start PostgreSQL:
+Stop the environment:
+
+```powershell
+docker compose down
+```
+
+Use `docker compose down -v` only when you intentionally want to delete PostgreSQL data.
+
+---
+
+# Run Applications Separately
+
+## Start PostgreSQL
 
 ```powershell
 Copy-Item .env.example .env
 docker compose up postgres -d
 ```
 
-Start the API in one terminal:
+## Start API
 
 ```powershell
 Copy-Item apps/api/.env.example apps/api/.env
+
 Set-Location apps/api
+
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
+
 uvicorn app.main:app --reload --port 8000
 ```
 
-Start the frontend in another terminal:
+## Start frontend
+
+In another terminal:
 
 ```powershell
 Set-Location apps/web
+
 Copy-Item .env.local.example .env.local
+
 npm install
 npm run dev
 ```
 
-## Checks
+---
+
+# Database Setup
+
+Apply migrations:
 
 ```powershell
 Set-Location apps/api
 .\.venv\Scripts\Activate.ps1
-pytest
 
-Set-Location ..\web
-npm run lint
-npm run typecheck
-```
-
-## Database domain model
-
-The API uses SQLAlchemy with PostgreSQL and Alembic. The initial migration defines the core receivables-recovery model:
-
-- `customers` own invoices, promises to pay, communications, and recovery cases.
-- `invoices` carry dated original and outstanding balances; `payments` are linked to their invoice.
-- `promises_to_pay` belong to a customer and can optionally reference an invoice and the communication from which they were captured.
-- `communications` record inbound/outbound channel activity and reserve explicit metadata fields for future AI processing, without making AI calls.
-- `recovery_cases` can cover a customer or a specific invoice; `recovery_actions` record their planned, approval-gated, and executed operational steps.
-- `audit_events` are append-only-style records for state-history consumers. They intentionally have no mutable timestamp fields; application code should only insert them.
-- `simulation_states` stores the named global virtual date (`default`) for the later simulation engine.
-
-The model uses PostgreSQL enums for business states, foreign keys with restrictive deletion for financial ownership, and `SET NULL` for optional contextual references. Amounts and promise confidence also have database-level validation constraints.
-
-Apply migrations after starting PostgreSQL:
-
-```powershell
-Set-Location apps/api
-.\.venv\Scripts\Activate.ps1
 alembic upgrade head
 ```
 
-When using Docker Compose, run the same command in the API container:
+With Docker:
 
 ```powershell
 docker compose exec api alembic upgrade head
 ```
 
-`GET /health` remains a liveness check. `GET /health/ready` performs a lightweight database query and returns `503` if PostgreSQL is unavailable.
+---
 
-## Synthetic development portfolio
+# Seed the Demo Portfolio
 
-The deterministic seed module creates 56 B2B customers and 296 invoices as of the virtual date **2026-08-01**. It covers healthy, predictably late, deteriorating, promise-breaking, partial-paying, disputed, strategic high-value, and severely overdue behaviours. Payments, promises, communications, recovery cases/actions, simulation state/events, and audit events are generated as a coherent persisted history.
-
-Seed a fresh development database:
+Create the deterministic development portfolio:
 
 ```powershell
 docker compose exec api python -m app.seed
 ```
 
-To explicitly replace existing development domain data with the same deterministic world:
+Reset it explicitly:
 
 ```powershell
 docker compose exec api python -m app.seed --reset
 ```
 
-Read-only inspection endpoints are available at `GET /customers`, `GET /customers/{customer_id}`, `GET /invoices`, and `GET /portfolio/summary`.
+The reset command intentionally replaces existing development-domain data.
 
-## Deterministic recovery evaluation
+---
 
-The recovery engine uses the simulation date to calculate invoice and payment-promise facts without AI interpretation. Invoice facts are `PAID`, `OPEN`, `DUE`, or `OVERDUE`; case states map to the existing lifecycle values `NEW`, `IN_PROGRESS`, `AWAITING_CUSTOMER` (on hold), `PROMISE_MONITORING`, `ESCALATED`, `RESOLVED`, and `CLOSED`.
+# Recovery Evaluation
 
-Run the explicit state synchronisation after seeding to append audit events and apply only factual case transitions:
+Run factual recovery-state synchronization:
 
 ```powershell
 docker compose exec api python -m app.recovery
 ```
 
-It blocks automated recovery for active disputes, active payment promises, closed/paid cases, and a short action cooldown. Read-only engine endpoints are `GET /recovery/cases`, `GET /recovery/cases/{case_id}`, `GET /recovery/cases/{case_id}/evaluation`, `GET /customers/{customer_id}/recovery-status`, and `GET /recovery/portfolio/summary`.
+The engine calculates receivable and promise state using the active simulation date and applies only factual case transitions.
 
-## Production deployment
+Automated recovery is blocked for conditions including:
 
-Production uses three independently hosted components:
+* active disputes;
+* active promises;
+* paid or closed cases;
+* applicable recovery cooldowns.
 
-```text
-Browser -> Vercel (Next.js) -> Render (FastAPI) -> Supabase (PostgreSQL)
-```
+---
 
-### 1. Create the Supabase database
+# Checks
 
-Create a Supabase project and copy its **Session pooler** connection string from the project's **Connect** dialog. Use the session pooler on port `5432` because Render connects to external databases over IPv4. Keep the database password URL-encoded if it contains reserved URL characters. The resulting value has this shape:
-
-```text
-postgresql://postgres.your-project-ref:your-url-encoded-password@aws-0-your-region.pooler.supabase.com:5432/postgres
-```
-
-Do not add this value to a tracked file. From a local PowerShell terminal, install the backend and apply all existing Alembic migrations to Supabase:
+## Backend
 
 ```powershell
 Set-Location apps/api
-python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install .
-$env:DATABASE_URL = "<SUPABASE_SESSION_POOLER_DATABASE_URL>"
-alembic upgrade head
-alembic current
+
+pytest
 ```
 
-Seed the deterministic ReconMate portfolio after the migration succeeds:
+## Frontend
 
 ```powershell
-python -m app.seed
+Set-Location apps/web
+
+npm run lint
+npm run typecheck
 ```
 
-The seed command intentionally refuses to overwrite an existing portfolio. Use `python -m app.seed --reset` only when you explicitly want to replace all existing ReconMate domain data. Remove the credential from the current terminal when finished:
+---
 
-```powershell
-Remove-Item Env:DATABASE_URL
-```
+# Health Endpoints
 
-### 2. Deploy the native Python API to Render
-
-The root `render.yaml` defines a free native Python Web Service. It does not use the backend Dockerfile and does not provision a Render database. The equivalent manual Render settings are:
+Basic API liveness:
 
 ```text
-Root Directory: apps/api
-Language: Python 3
-Build Command: pip install --upgrade pip && pip install .
-Start Command: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
-Health Check Path: /health/ready
-Instance Type: Free
+GET /health
 ```
 
-Set these Render environment variables:
+Database readiness:
 
 ```text
-APP_ENV=production
-DATABASE_URL=<SUPABASE_SESSION_POOLER_DATABASE_URL>
-API_CORS_ORIGINS=https://your-project.vercel.app
-AI_PROVIDER=google
-AI_MODEL=gemini-3.7-flash
-GEMINI_API_KEY=<GOOGLE_AI_STUDIO_API_KEY>
-AI_TIMEOUT_SECONDS=12
-AI_CONFIDENCE_THRESHOLD=0.70
-AI_ALLOW_MOCK_FALLBACK=false
-SIMULATION_TICK_INTERVAL_SECONDS=15
+GET /health/ready
 ```
 
-`DATABASE_URL` and `GEMINI_API_KEY` are server-only and must never be exposed through a `NEXT_PUBLIC_` variable. Render supplies `PORT`; do not set it manually. Multiple allowed browser origins can be supplied as a comma-separated list in `API_CORS_ORIGINS`. Do not use `*` in production.
+`/health/ready` performs a lightweight database check and returns `503` when PostgreSQL is unavailable.
 
-The start command applies pending Alembic migrations before accepting traffic, so a deployment cannot run newer API code against an older Supabase schema. Seeding remains an explicit local operation because it creates or replaces portfolio data. Verify the deployed service at `https://your-render-service.onrender.com/health/ready`.
+---
 
-### 3. Connect the Vercel frontend
+# Core Read APIs
 
-Deploy the Next.js application to Vercel with `apps/web` as its Root Directory. Set the Vercel Production environment variable below **before** deploying, using the Render service's HTTPS URL with no trailing slash:
+Examples include:
 
 ```text
-NEXT_PUBLIC_API_URL=https://your-render-service.onrender.com
+GET /customers
+GET /customers/{customer_id}
+
+GET /invoices
+
+GET /portfolio/summary
+
+GET /recovery/cases
+GET /recovery/cases/{case_id}
+GET /recovery/cases/{case_id}/evaluation
+
+GET /customers/{customer_id}/recovery-status
+GET /recovery/portfolio/summary
 ```
 
-Redeploy the Vercel project after adding or changing this build-time public variable. The frontend never receives the Supabase connection string and continues to access data only through the FastAPI contracts.
+The product contains additional APIs for simulation, workflow, intelligence, evidence, and reporting flows used by the live application.
 
-## Manual configuration
+---
 
-The checked-in values are development defaults. Before using a shared or production environment, set a suitable `DATABASE_URL`, configure the API's `API_CORS_ORIGINS` with explicit browser origins, and set Vercel's `NEXT_PUBLIC_API_URL` to the reachable API origin. Do not commit `.env` or `.env.local` files.
+# Production Deployment
+
+The hosted architecture is:
+
+```text
+Vercel
+   ↓
+Render
+   ↓
+Supabase
+```
+
+The frontend receives only the public FastAPI origin.
+
+Database credentials and AI-provider credentials remain server-side.
+
+Production deployments use explicit CORS configuration rather than wildcard origins.
+
+Pending Alembic migrations are applied before the backend begins serving the newer API version.
+
+---
+
+# Environment Notes
+
+Do not commit:
+
+```text
+.env
+.env.local
+```
+
+Sensitive values such as the database connection string and model-provider API keys must remain server-side.
+
+The frontend should receive only values intentionally exposed through `NEXT_PUBLIC_*`.
+
+---
+
+# Scope
+
+ReconMate is currently a **Buildathon evaluation sandbox**, not a production collections deployment.
+
+The project demonstrates:
+
+* continuously reassessed B2B recovery decisions;
+* deterministic financial policy;
+* controlled recovery workflows;
+* AI-assisted communication interpretation boundaries;
+* operator approval;
+* recovery safety;
+* auditability;
+* simulation;
+* batch-level recovery evidence.
+
+External customer communication and production money movement are outside the claims made by the current sandbox unless explicitly represented as simulated.
+
+---
+
+# Why ReconMate
+
+Revenue recovery should not mean contacting every overdue customer more aggressively.
+
+A useful system needs to understand:
+
+> **Who needs action?**
+
+> **Who should be left alone?**
+
+> **What changed?**
+
+> **Why is this action safe?**
+
+> **When must the workflow stop?**
+
+> **What actually happened afterward?**
+
+ReconMate is built around those questions.
+
+---
+
+## License
+
+See [`LICENSE`](./LICENSE) for repository licensing terms.
