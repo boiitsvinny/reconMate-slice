@@ -20,6 +20,13 @@ from app.workflow.service import approve_action, cancel_action, create_action, e
 
 router = APIRouter(prefix="/recovery", tags=["recovery workflow"])
 
+_SAFE_INTERPRETATION_FAILURES = {
+    "The live model timed out; no fact was written.",
+    "The live model provider is unavailable; no fact was written.",
+    "The model returned no structured extraction.",
+    "The live model returned an invalid or ungrounded extraction; no fact was written.",
+}
+
 
 def _simulation_date(db: Session):
     value = db.scalar(select(SimulationState.simulation_date).where(SimulationState.name == "default"))
@@ -57,6 +64,13 @@ def _action_response(action: RecoveryAction) -> RecoveryActionResponse:
         executed_at=action.executed_at, executed_by=action.executed_by, operator_note=action.operator_note,
         created_at=action.created_at,
     )
+
+
+def _safe_interpretation_failure(communication: Communication) -> str | None:
+    if communication.ai_processing_status.value != "FAILED":
+        return None
+    reason = (communication.ai_processing_metadata or {}).get("error")
+    return reason if isinstance(reason, str) and reason in _SAFE_INTERPRETATION_FAILURES else "Interpretation provider failed; no fact was written."
 
 
 def _action_or_404(db: Session, action_id: UUID) -> RecoveryAction:
@@ -159,10 +173,13 @@ def case_workspace(case_id: UUID, db: Session = Depends(get_db)) -> dict[str, An
         "promises": [{"id": str(item.id), "status": item.status.value, "promised_amount": item.promised_amount, "promised_date": item.promised_date} for item in case.invoice.promises_to_pay] if case.invoice else [],
         "payments": [{"id": str(item.id), "amount": item.amount, "payment_date": item.payment_date, "reference": item.reference} for item in sorted(case.invoice.payments, key=lambda item: item.payment_date, reverse=True)] if case.invoice else [],
         "communications": [{
-            "id": str(item.id), "direction": item.direction.value, "content": item.content, "occurred_at": item.occurred_at,
+            "id": str(item.id), "direction": item.direction.value, "channel": item.channel.value, "content": item.content, "occurred_at": item.occurred_at,
+            "ai_processing_status": item.ai_processing_status.value,
+            "interpretation_failure": _safe_interpretation_failure(item),
             "analyses": [{
                 "id": str(analysis.id), "provider": analysis.provider, "model_version": analysis.model_version,
                 "runtime_mode": "LIVE MODEL" if analysis.provider == "google" else "MOCK / DEV MODE",
+                "review_status": analysis.review_status.value,
                 "analyzed_at": analysis.analyzed_at, "result": analysis.result,
                 "candidates": [
                     {**candidate.model_dump(mode="json"), "decision_result": decisions.get((str(analysis.id), candidate.candidate_id))}

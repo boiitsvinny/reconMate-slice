@@ -58,7 +58,7 @@ def _category(event_type: str) -> str:
 
 def _title(event_type: str) -> str:
     if event_type == "AI_CANDIDATE_EXTRACTED":
-        return "AI candidate extracted"
+        return "Candidate evidence extracted"
     if event_type == "AI_CANDIDATE_ACCEPTED":
         return "Operator accepted candidate"
     if event_type == "AI_CANDIDATE_REJECTED":
@@ -99,6 +99,15 @@ def _entry(
     before, after = _changes(payload)
     historical = event_type.startswith("RECOVERY_ACTION_") or "INTELLIGENCE" in event_type
     detail = payload.get("what_changed") or payload.get("reason") or payload.get("financial_mutation")
+    if event_type.startswith("AI_CANDIDATE"):
+        fact = str(payload.get("candidate_fact") or "Candidate evidence").replace("_", " ").title()
+        evidence = payload.get("evidence_span")
+        confidence = payload.get("confidence")
+        detail = fact
+        if evidence:
+            detail += f': “{evidence}”'
+        if confidence is not None:
+            detail += f" · {round(float(confidence) * 100)}% confidence"
     if event_type == "PROVIDER_DUPLICATE_EVENT_IGNORED":
         detail = (
             f"Original event: {payload.get('original_event', 'unavailable')} · "

@@ -7,10 +7,12 @@ import pytest
 from app.intelligence.candidates import candidate_facts
 from app.intelligence.evaluation import COMMUNICATION_EXTRACTION_EVALUATION, run_communication_extraction_evaluation
 from app.intelligence.fact_review import review_candidate_fact
+from app.api.routes.workflow import _safe_interpretation_failure
 from app.intelligence.provider import MockCommunicationIntelligenceProvider, ProviderError, get_provider
 from app.intelligence.schemas import CandidateDecision, CandidateFact, CommunicationAnalysisResult
 from app.models.domain import (
     AnalysisReviewStatus,
+    AIProcessingStatus,
     AuditEvent,
     Communication,
     CommunicationAnalysis,
@@ -118,6 +120,7 @@ def test_operator_acceptance_persists_fact_then_reassesses_without_financial_mut
     assert response.recommendation_before != "HOLD_FOR_DISPUTE"
     assert response.recommendation_after == "HOLD_FOR_DISPUTE"
     assert response.blockers_before == [] and response.blockers_after == ["ACTIVE_DISPUTE"]
+    assert analysis.review_status is AnalysisReviewStatus.NOT_REQUIRED
     events = [item for item in db.added if isinstance(item, AuditEvent)]
     assert [item.event_type for item in events] == [
         "AI_CANDIDATE_EXTRACTED", "AI_CANDIDATE_ACCEPTED", "DISPUTE_OPENED", "AI_FACT_INTELLIGENCE_REASSESSMENT",
@@ -145,6 +148,16 @@ def test_unavailable_provider_fails_without_domain_mutation() -> None:
     with pytest.raises(ProviderError):
         get_provider("not-configured")
     assert (invoice.status, invoice.outstanding_amount, recommend_case(case, OPERATING_DATE).recommended_action) == before
+
+
+def test_workspace_failure_reason_only_exposes_known_safe_provider_messages() -> None:
+    _, _, _, communication, _ = _scope()
+    communication.ai_processing_status = AIProcessingStatus.FAILED
+    communication.ai_processing_metadata = {"error": "The live model timed out; no fact was written."}
+    assert _safe_interpretation_failure(communication) == "The live model timed out; no fact was written."
+
+    communication.ai_processing_metadata = {"error": "secret-looking untrusted provider payload"}
+    assert _safe_interpretation_failure(communication) == "Interpretation provider failed; no fact was written."
 
 
 def test_fixed_communication_extraction_evaluation() -> None:

@@ -111,9 +111,9 @@ export type Workspace = {
   promises: { status: string; promised_amount: string; promised_date: string }[];
   payments?: { id: string; amount: string; payment_date: string; reference: string | null }[];
   communications: {
-    id: string; direction: string; content: string; occurred_at: string;
+    id: string; direction: string; channel: string; content: string; occurred_at: string; ai_processing_status: "NOT_REQUESTED" | "PENDING" | "PROCESSED" | "FAILED"; interpretation_failure: string | null;
     analyses: {
-      id: string; provider: string; model_version: string | null; runtime_mode: "LIVE MODEL" | "MOCK / DEV MODE"; analyzed_at: string | null; result: { intent: string };
+      id: string; provider: string; model_version: string | null; runtime_mode: "LIVE MODEL" | "MOCK / DEV MODE"; review_status: "PENDING_REVIEW" | "NOT_REQUIRED"; analyzed_at: string | null; result: { intent: string; requires_human_review?: boolean; review_reasons?: string[] };
       candidates: {
         candidate_id: string; fact_type: string; confidence: number; evidence_span: string;
         proposed_data: Record<string, string | boolean | null>; persistence_eligible: boolean; defer_reason: string | null;

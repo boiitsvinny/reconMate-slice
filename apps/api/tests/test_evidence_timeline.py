@@ -104,7 +104,7 @@ def test_ai_interpretation_fact_and_reassessment_are_scoped_and_ordered() -> Non
     analysis_id = uuid4()
     other_case_id = uuid4()
     base = datetime(2026, 8, 4, 18, tzinfo=UTC)
-    common = {"customer_id": str(case.customer.id), "case_id": str(case.id), "invoice_id": str(case.invoice.id), "candidate_fact": "ACTIVE_DISPUTE"}
+    common = {"customer_id": str(case.customer.id), "case_id": str(case.id), "invoice_id": str(case.invoice.id), "candidate_fact": "ACTIVE_DISPUTE", "evidence_span": "invoice quantity is wrong", "confidence": 0.93}
     audits = [
         AuditEvent(id=uuid4(), entity_type="CommunicationAnalysis", entity_id=analysis_id, event_type="AI_CANDIDATE_EXTRACTED", payload=common, occurred_at=base),
         AuditEvent(id=uuid4(), entity_type="CommunicationAnalysis", entity_id=analysis_id, event_type="AI_CANDIDATE_ACCEPTED", payload=common, occurred_at=base.replace(microsecond=1)),
@@ -118,5 +118,7 @@ def test_ai_interpretation_fact_and_reassessment_are_scoped_and_ordered() -> Non
         "AI_CANDIDATE_EXTRACTED", "AI_CANDIDATE_ACCEPTED", "DISPUTE_OPENED", "AI_FACT_INTELLIGENCE_REASSESSMENT",
     ]
     assert ai_chain[0]["category"] == "AI_INTERPRETATION"
+    assert ai_chain[0]["title"] == "Candidate evidence extracted"
+    assert ai_chain[0]["detail"] == "Active Dispute: “invoice quantity is wrong” · 93% confidence"
     assert ai_chain[-1]["category"] == "INTELLIGENCE_REASSESSMENT"
     assert all(item["case_id"] == str(case.id) and item["invoice_id"] == str(case.invoice.id) for item in ai_chain)
