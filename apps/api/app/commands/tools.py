@@ -88,6 +88,7 @@ class CommandTools:
         self._customers: list[Customer] | None = None
         self._cases: list[RecoveryCase] | None = None
         self._portfolio: PortfolioIntelligence | None = None
+        self._customer_intelligence: dict[str, IntelligenceResult] = {}
 
     def customers(self) -> list[Customer]:
         if self._customers is None:
@@ -102,11 +103,21 @@ class CommandTools:
     def get_portfolio_intelligence(self) -> PortfolioIntelligence:
         if self._portfolio is None:
             self._portfolio = evaluate_portfolio_intelligence(self.customers(), self.simulation_date)
+            self._customer_intelligence.update({item.entity_id: item for item in self._portfolio.customers})
         return self._portfolio
 
     def get_customer_intelligence(self, customer_id: UUID) -> IntelligenceResult | None:
+        cache = getattr(self, "_customer_intelligence", {})
+        cached = cache.get(str(customer_id))
+        if cached is not None:
+            return cached
         customer = next((item for item in self.customers() if item.id == customer_id), None)
-        return evaluate_customer_intelligence(customer, self.simulation_date) if customer is not None else None
+        if customer is None:
+            return None
+        result = evaluate_customer_intelligence(customer, self.simulation_date)
+        cache[str(customer_id)] = result
+        self._customer_intelligence = cache
+        return result
 
     def get_customer(self, customer_id: UUID | str) -> Customer | None:
         return next((item for item in self.customers() if str(item.id) == str(customer_id)), None)
@@ -120,7 +131,12 @@ class CommandTools:
 
     def _case_scoped_customer_intelligence(self, case: RecoveryCase) -> IntelligenceResult:
         """Keep case identity while using the portfolio's authoritative current score."""
-        current = evaluate_customer_intelligence(case.customer, self.simulation_date)
+        cache = getattr(self, "_customer_intelligence", {})
+        current = cache.get(str(case.customer_id))
+        if current is None:
+            current = evaluate_customer_intelligence(case.customer, self.simulation_date)
+            cache[str(case.customer_id)] = current
+            self._customer_intelligence = cache
         invoice_label = case.invoice.invoice_number if case.invoice is not None else "account-level case"
         return current.model_copy(update={
             "entity_type": "RECOVERY_CASE",

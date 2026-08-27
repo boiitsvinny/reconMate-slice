@@ -13,12 +13,14 @@ type Props = {
   auto: boolean;
   feedback?: CycleFeedback;
   resetFeedback?: ResetFeedback;
-  phase?: "STARTING" | "APPLYING_EVENTS" | "REEVALUATING" | "SYNCHRONIZING" | "TAKING_LONGER";
+  phase?: SimulationPhase;
   onAutoChange: (enabled: boolean) => void;
   onTick: () => void;
   onReset: () => void;
   onReconcile: () => void;
 };
+
+export type SimulationPhase = "READY" | "REQUESTING" | "RECONCILING" | "TAKING_LONGER" | "FAILED";
 
 export type CycleFeedback = {
   status: "MATERIAL_CHANGE" | "NO_MATERIAL_CHANGE" | "REFRESH_FAILED";
@@ -37,11 +39,11 @@ export type ResetFeedback = {
 };
 
 const phaseLabel = {
-  STARTING: "Starting the next operating cycle…",
-  APPLYING_EVENTS: "Applying deterministic portfolio events…",
-  REEVALUATING: "Re-evaluating recovery intelligence…",
-  SYNCHRONIZING: "Synchronizing refreshed portfolio state…",
+  READY: "Ready for the next operating cycle.",
+  REQUESTING: "Contacting the backend and running the deterministic cycle…",
+  RECONCILING: "Cycle persisted; refreshing judge-critical portfolio state…",
   TAKING_LONGER: "This cycle is taking longer than usual. The backend may still be finishing safely.",
+  FAILED: "The cycle did not complete. Review the error and retry safely.",
 };
 
 export function SimulationControl({ cycle, simulationDate, interval, busy, resetting, auto, feedback, resetFeedback, phase, onAutoChange, onTick, onReset, onReconcile }: Props) {
@@ -87,7 +89,7 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
       </div>
       <div className="mt-4 flex flex-wrap gap-2 pl-2">
         <button disabled={busy} onClick={() => onAutoChange(!auto)} className={cx(buttonStyles.secondary, "max-sm:flex-1")}>{auto ? "Pause" : "Start / Resume"}</button>
-        <button disabled={busy} onClick={onTick} className={cx(buttonStyles.primary, "max-sm:flex-1")}>{busy && !resetting ? "Applying..." : "Run now"}</button>
+        <button disabled={busy} onClick={onTick} className={cx(buttonStyles.primary, "max-sm:flex-1")}>{busy && !resetting ? phase === "RECONCILING" ? "Refreshing..." : "Running..." : "Run now"}</button>
         <button
           disabled={busy}
           onClick={() => {
@@ -101,18 +103,18 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
       {busy && <div className="mt-4 border-t border-sky-300/10 pl-2 pt-3" role="status" aria-live="polite"><p className="text-[11px] font-semibold text-sky-200">{resetting ? "Restoring the seeded portfolio and refreshing every operational view..." : phase ? phaseLabel[phase] : "Persisting facts and synchronizing dashboard intelligence..."}</p>{!resetting && phase === "TAKING_LONGER" && <button type="button" onClick={onReconcile} className="mt-2 text-[11px] font-semibold text-sky-100 underline decoration-sky-300/40 underline-offset-4">Refresh current state</button>}</div>}
       {!busy && feedback && (
         <div className={cx("live-enter mt-4 border-t pl-2 pt-3", feedback.status === "REFRESH_FAILED" ? "border-amber-300/15" : "border-emerald-300/10")} role="status" aria-live="polite">
-          <p className={cx("text-[11px] font-semibold", feedback.status === "REFRESH_FAILED" ? "text-amber-100" : "text-emerald-200")}>{feedback.headline}</p>
-          <p className="mt-1 text-[10px] leading-4 text-slate-400">{feedback.event}</p>
-          <p className={cx("mt-2 text-[11px] font-medium leading-4", feedback.status === "MATERIAL_CHANGE" ? "text-sky-200" : feedback.status === "REFRESH_FAILED" ? "text-amber-100/80" : "text-slate-300")}>{feedback.summary}</p>
-          <div className="mt-3 rounded-xl border border-white/[.07] bg-black/10 p-3"><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">What ReconMate noticed</p><p className="mt-2 text-xs font-semibold text-white">{feedback.portfolio.eventCount} operational event{feedback.portfolio.eventCount === 1 ? "" : "s"} received / {feedback.portfolio.materialCustomers} materially affected customer decision{feedback.portfolio.materialCustomers === 1 ? "" : "s"}</p><p className="mt-1 text-[10px] text-slate-400">Cycle {feedback.portfolio.previousCycle} → {feedback.portfolio.cycle} / {feedback.portfolio.previousDate} → {feedback.portfolio.date} / {feedback.portfolio.customersAffected} customer{feedback.portfolio.customersAffected === 1 ? "" : "s"} affected</p><p className="mt-1 text-[10px] text-slate-500">Families: {feedback.portfolio.families.join(" / ")} / recommendations changed {feedback.portfolio.recommendationsChanged}, unchanged {feedback.portfolio.recommendationsUnchanged} / replay seed {feedback.portfolio.seed}</p></div>
+          <p className={cx("text-[13px] font-semibold", feedback.status === "REFRESH_FAILED" ? "text-amber-100" : "text-emerald-200")}>{feedback.headline}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-400">{feedback.event}</p>
+          <p className={cx("mt-2 text-[13px] font-medium leading-5", feedback.status === "MATERIAL_CHANGE" ? "text-sky-200" : feedback.status === "REFRESH_FAILED" ? "text-amber-100/80" : "text-slate-300")}>{feedback.summary}</p>
+          <div className="mt-3 rounded-xl border border-white/[.07] bg-black/10 p-3"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">What ReconMate noticed</p><p className="mt-2 text-sm font-semibold text-white">{feedback.portfolio.eventCount} operational event{feedback.portfolio.eventCount === 1 ? "" : "s"} received / {feedback.portfolio.materialCustomers} materially affected customer decision{feedback.portfolio.materialCustomers === 1 ? "" : "s"}</p><p className="mt-1 text-xs leading-5 text-slate-400">Cycle {feedback.portfolio.previousCycle} → {feedback.portfolio.cycle} / {feedback.portfolio.previousDate} → {feedback.portfolio.date} / {feedback.portfolio.customersAffected} customer{feedback.portfolio.customersAffected === 1 ? "" : "s"} affected</p><p className="mt-1 text-[11px] leading-4 text-slate-500">Families: {feedback.portfolio.families.join(" / ")} / recommendations changed {feedback.portfolio.recommendationsChanged}, unchanged {feedback.portfolio.recommendationsUnchanged} / replay seed {feedback.portfolio.seed}</p></div>
           {feedback.transition && (
             <div className="mt-3 space-y-3 rounded-xl border border-white/[.07] bg-black/10 p-3">
               <div>
-                <p className="text-[9px] font-bold uppercase tracking-[.11em] text-slate-500">{feedback.transition.entity_type === "CUSTOMER" ? "Customer portfolio assessment" : "Recovery case assessment"} / {feedback.transition.entity_name}</p>
-                <p className="mt-1.5 text-sm font-semibold text-white">{feedback.transition.current_recommendation_title}</p>
-                <p className="mt-1 text-[10px] leading-4 text-slate-400">{feedback.transition.current_recommendation_explanation}</p>
+                <p className="text-[10px] font-bold uppercase tracking-[.11em] text-slate-500">{feedback.transition.entity_type === "CUSTOMER" ? "Customer portfolio assessment" : "Recovery case assessment"} / {feedback.transition.entity_name}</p>
+                <p className="mt-1.5 text-[15px] font-semibold text-white">{feedback.transition.current_recommendation_title}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">{feedback.transition.current_recommendation_explanation}</p>
               </div>
-              <div className="flex flex-wrap gap-2 text-[9px] font-bold uppercase tracking-[.1em]"><span className="rounded-full bg-white/[.05] px-2 py-1 text-slate-300">{feedback.transition.previous_risk_level ?? "New"} → {feedback.transition.current_risk_level}</span><span className="rounded-full bg-white/[.05] px-2 py-1 text-slate-300">Score {feedback.transition.previous_score ?? "-"} → {feedback.transition.current_score}</span></div>
+              <div className="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-[.1em]"><span className="rounded-full bg-white/[.05] px-2 py-1 text-slate-300">{feedback.transition.previous_risk_level ?? "New"} → {feedback.transition.current_risk_level}</span><span className="rounded-full bg-white/[.05] px-2 py-1 text-slate-300">Score {feedback.transition.previous_score ?? "-"} → {feedback.transition.current_score}</span></div>
               <TransitionDetail label="What changed" value={feedback.transition.what_changed} />
               <TransitionDetail label="Why intelligence changed" value={feedback.transition.why_intelligence_changed} />
               <TransitionDetail label="Decision impact" value={feedback.transition.decision_impact} />
@@ -121,8 +123,8 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
               {feedback.transition.workflow_effect && <TransitionDetail label="If the operator proceeds" value={feedback.transition.workflow_effect} />}
             </div>
           )}
-          {feedback.changes.length > 0 && <ul className="mt-2 space-y-1 text-[10px] leading-4 text-slate-400">{feedback.changes.map((change) => <li key={change}>• {change}</li>)}</ul>}
-          {feedback.transitions.length > 1 && <div className="mt-3 space-y-2"><p className="text-[9px] font-bold uppercase tracking-[.12em] text-slate-500">Other affected accounts</p>{feedback.transitions.slice(1, 4).map((item) => <div key={`${item.entity_type}-${item.entity_id}`} className="rounded-lg border border-white/[.06] px-3 py-2"><p className="text-[11px] font-semibold text-slate-200">{item.entity_name}</p><p className="mt-1 text-[10px] text-slate-500">{item.previous_risk_level ?? "New"} {item.previous_score ?? "-"} → {item.current_risk_level} {item.current_score} / {item.related_events?.map((related) => related.type.replaceAll("_", " ")).join(" + ") ?? item.related_event_type.replaceAll("_", " ")}</p></div>)}</div>}
+          {feedback.changes.length > 0 && <ul className="mt-2 space-y-1 text-xs leading-5 text-slate-400">{feedback.changes.map((change) => <li key={change}>• {change}</li>)}</ul>}
+          {feedback.transitions.length > 1 && <div className="mt-3 space-y-2"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Other affected accounts</p>{feedback.transitions.slice(1, 4).map((item) => <div key={`${item.entity_type}-${item.entity_id}`} className="rounded-lg border border-white/[.06] px-3 py-2.5"><p className="text-[13px] font-semibold text-slate-200">{item.entity_name}</p><p className="mt-1 text-[11px] leading-4 text-slate-500">{item.previous_risk_level ?? "New"} {item.previous_score ?? "-"} → {item.current_risk_level} {item.current_score} / {item.related_events?.map((related) => related.type.replaceAll("_", " ")).join(" + ") ?? item.related_event_type.replaceAll("_", " ")}</p></div>)}</div>}
         </div>
       )}
       {!busy && resetFeedback && (
@@ -131,11 +133,11 @@ export function SimulationControl({ cycle, simulationDate, interval, busy, reset
         </div>
       )}
       {!busy && feedback?.status === "REFRESH_FAILED" && <button type="button" onClick={onReconcile} className={`${buttonStyles.secondary} mt-3 ml-2`}>Reconcile dashboard state</button>}
-      <p className="mt-3 pl-2 text-[10px] leading-4 text-slate-600">Each completed cycle refreshes portfolio facts, recovery state, recommendations, and intelligence.</p>
+      <p className="mt-3 pl-2 text-[11px] leading-4 text-slate-600">Each completed cycle refreshes portfolio facts, recovery state, recommendations, and intelligence.</p>
     </section>
   );
 }
 
 function TransitionDetail({ label, value }: { label: string; value: string }) {
-  return <div><p className="text-[9px] font-bold uppercase tracking-[.11em] text-slate-500">{label}</p><p className="mt-1 text-[10px] leading-4 text-slate-300">{value}</p></div>;
+  return <div><p className="text-[10px] font-bold uppercase tracking-[.11em] text-slate-500">{label}</p><p className="mt-1 text-xs leading-5 text-slate-300">{value}</p></div>;
 }

@@ -10,7 +10,7 @@ from app.api.routes import commands as commands_route
 from app.api.routes.workflow import _current_workspace_intelligence
 from app.commands.interpreter import RuleBasedCommandInterpreter
 from app.commands.planner import CommandPlanner
-from app.commands.schemas import CommandIntentType, CommandRequest, ConfirmCommandRequest, ExecutionMode, InspectionScope, ProposalStatus, QueryEntity, QuerySort, QueryTimeScope, StructuredQuery
+from app.commands.schemas import CommandIntentType, CommandRequest, CommandScope, ConfirmCommandRequest, ExecutionMode, InspectionScope, ProposalStatus, QueryEntity, QuerySort, QueryTimeScope, StructuredQuery
 from app.commands.service import CommandService, EphemeralPlanRegistry
 from app.commands.tools import CaseCandidate, CommandTools, QueryExecution
 from app.db.session import get_db
@@ -273,6 +273,42 @@ def test_interpreter_extracts_top_n_critical_and_handles_ambiguous_wording() -> 
 ])
 def test_interpreter_accepts_realistic_operator_paraphrases(command: str, intent: CommandIntentType) -> None:
     assert RuleBasedCommandInterpreter().interpret(CommandRequest(command=command)).intent is intent
+
+
+@pytest.mark.parametrize("command", [
+    "top risky customers",
+    "who needs attention",
+    "broken promises",
+    "customers with disputes",
+    "show overdue accounts",
+    "who should I work on today",
+    "prepare recovery work for critical cases",
+    "show customers waiting on promises",
+    "What changed this cycle?",
+])
+def test_interpreter_accepts_analyze_page_operator_aliases(command: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command))
+    assert result.intent is not CommandIntentType.UNKNOWN
+
+
+@pytest.mark.parametrize("command", [
+    "Mintleaf Office Mart",
+    "Analyze Mintleaf",
+    "Show Mintleaf Office Mart",
+    "What is happening with Mintleaf?",
+    "Why are we holding Mintleaf?",
+    "Show recovery cases for Mintleaf",
+    "What changed for this customer?",
+])
+def test_resolved_customer_lookup_uses_customer_analysis(command: str) -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command=command, context_customer_id=CUSTOMER_ID))
+    assert result.intent is CommandIntentType.CUSTOMER_ANALYSIS
+    assert result.scope is CommandScope.CUSTOMER
+
+
+def test_unresolved_company_name_is_not_silently_reinterpreted() -> None:
+    result = RuleBasedCommandInterpreter().interpret(CommandRequest(command="Unknown Example Industries"))
+    assert result.intent is CommandIntentType.UNKNOWN
 
 
 def test_interpreter_handles_competing_operational_intents_safely() -> None:

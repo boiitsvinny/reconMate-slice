@@ -1,10 +1,12 @@
 """Communication interpretation and read-only operational intelligence endpoints."""
 from __future__ import annotations
+from time import perf_counter
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
+from app.core.timing import elapsed_ms, log_timing
 from app.db.session import get_db
 from app.intelligence.operational_schemas import IntelligenceResult, PortfolioIntelligence
 from app.intelligence.operational_service import (
@@ -169,5 +171,19 @@ def get_case_intelligence(case_id: UUID, db: Session = Depends(get_db)) -> Intel
     summary="Evaluate and rank current customer intelligence",
 )
 def get_portfolio_intelligence(db: Session = Depends(get_db)) -> PortfolioIntelligence:
+    started_at = perf_counter()
+    stage_started = perf_counter()
     customers = list(db.scalars(_customer_query().order_by(Customer.account_reference)).all())
-    return evaluate_portfolio_intelligence(customers, _simulation_date(db))
+    load_customers_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
+    simulation_date = _simulation_date(db)
+    load_state_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
+    result = evaluate_portfolio_intelligence(customers, simulation_date)
+    evaluate_ms = elapsed_ms(stage_started)
+    log_timing(
+        "portfolio_intelligence_timing", total_ms=elapsed_ms(started_at),
+        load_customers_ms=load_customers_ms, load_state_ms=load_state_ms,
+        evaluate_ms=evaluate_ms, customers=len(customers),
+    )
+    return result

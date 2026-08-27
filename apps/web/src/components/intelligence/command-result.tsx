@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import type { Customer, PriorityCase } from "@/components/dashboard/data";
+import { formatMoney } from "@/components/dashboard/data";
 import type { CommandIntentType, CommandResult, PriorityLevel } from "@/lib/intelligence-api";
 import { ActionProposalCard } from "./action-proposal-card";
 import { useCommandSession } from "./command-session";
@@ -23,7 +25,17 @@ const objectives: Record<CommandIntentType, string> = {
   UNKNOWN: "Map the request to a supported operational objective",
 };
 
-export function CommandResultView({ command, result, onOpenTarget }: { command: string; result: CommandResult; onOpenTarget?: (targetType: string, targetId: string) => boolean }) {
+type CommandResultViewProps = {
+  command: string;
+  result: CommandResult;
+  customer?: Customer;
+  customerCases?: PriorityCase[];
+  onOpenTarget?: (targetType: string, targetId: string) => boolean;
+  onOpenWorkspace?: (customerId: string) => boolean;
+  onTryCommand?: (command: string) => void;
+};
+
+export function CommandResultView({ command, result, customer, customerCases = [], onOpenTarget, onOpenWorkspace, onTryCommand }: CommandResultViewProps) {
   const { confirmPlan, confirming } = useCommandSession();
   const confirmationIds = useMemo(() => result.outcomes.filter((item) => item.status === "AWAITING_CONFIRMATION").map((item) => item.proposal_id), [result.outcomes]);
   const [selected, setSelected] = useState<Set<string>>(new Set(confirmationIds));
@@ -50,16 +62,20 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
     setTargetNotice(opened ? null : "This result has no active recovery case workspace. Its current intelligence remains available below.");
   };
   if (isUnknown) {
+    const suggestions = ["Who should I focus on today?", "Show customers with broken promises", "Show customers blocked by disputes", "What changed this cycle?"];
     return (
       <Panel className="mt-6 border-amber-300/15">
         <SectionHeader eyebrow="Unsupported request" title="ReconMate cannot answer this from the current receivables model." detail={result.interpreted_intent.guidance ?? result.understanding_summary} prominent />
-        <div className="space-y-4 p-5"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Your request</p><p className="mt-1.5 text-sm leading-6 text-slate-200">“{command}”</p></div><AnalysisList title="Supported analysis dimensions" items={["Overdue exposure and invoice age", "Payments and payment activity", "Promises and broken commitments", "Disputes and action blockers", "Current risk and recovery state", "Latest operational changes"]} empty="" /></div>
+        <div className="space-y-4 p-5"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Your request</p><p className="mt-1.5 text-sm leading-6 text-slate-200">“{command}”</p></div><AnalysisList title="Supported analysis dimensions" items={["Overdue exposure and invoice age", "Payments and payment activity", "Promises and broken commitments", "Disputes and action blockers", "Current risk and recovery state", "Latest operational changes"]} empty="" />{onTryCommand && <div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-500">Try a supported investigation</p><div className="mt-2 flex flex-wrap gap-2">{suggestions.map((suggestion) => <button type="button" key={suggestion} onClick={() => onTryCommand(suggestion)} className="rounded-full border border-white/[.08] bg-white/[.025] px-3 py-1.5 text-left text-[11px] text-slate-300 hover:border-sky-300/25 hover:text-sky-100">{suggestion}</button>)}</div></div>}</div>
       </Panel>
     );
   }
 
   return (
     <div className="mt-6 space-y-6" aria-live="polite">
+      {result.interpreted_intent.intent === "CUSTOMER_ANALYSIS" && customer && result.analyzed_entities[0]?.entity_id === customer.id && (
+        <CustomerOperationalBrief customer={customer} cases={customerCases} entity={result.analyzed_entities[0]} result={result} onOpenWorkspace={onOpenWorkspace} />
+      )}
       <section className="grid gap-4 lg:grid-cols-[minmax(0,1.08fr)_minmax(340px,.92fr)]">
         <InterpretationPanel command={command} result={result} />
         <InspectionPanel result={result} />
@@ -123,6 +139,38 @@ export function CommandResultView({ command, result, onOpenTarget }: { command: 
 
     </div>
   );
+}
+
+function CustomerOperationalBrief({ customer, cases, entity, result, onOpenWorkspace }: { customer: Customer; cases: PriorityCase[]; entity: CommandResult["analyzed_entities"][number]; result: CommandResult; onOpenWorkspace?: (customerId: string) => boolean }) {
+  const caseBlocker = cases.find((item) => !item.allowed)?.reason;
+  const blocker = caseBlocker ?? (entity.metrics.active_dispute_count
+    ? "Active dispute requires review"
+    : entity.metrics.active_promise_count
+      ? "Valid payment promise is active"
+      : null);
+  const workflowStates = [...new Set(cases.map((item) => label(item.state)))];
+  const approvalRequired = cases.some((item) => item.humanApprovalRequired);
+  const recentEvidence = result.query_evidence.latest_cycle?.observations.slice(0, 2) ?? [];
+  return <Panel className="overflow-hidden border-sky-300/20">
+    <SectionHeader eyebrow="Matched customer account" title={customer.name} detail={`${customer.account_reference} · Deterministic lookup against current customer records`} prominent action={onOpenWorkspace && cases.length ? <button type="button" onClick={() => onOpenWorkspace(customer.id)} className={buttonStyles.primary}>Open full Case Workspace</button> : undefined} />
+    <div className="grid gap-px bg-white/[.06] sm:grid-cols-2 xl:grid-cols-4">
+      <SemanticSummary label="Total exposure" value={formatMoney(entity.metrics.total_outstanding_amount)} detail="Current outstanding receivables" />
+      <SemanticSummary label="Overdue exposure" value={formatMoney(entity.metrics.overdue_exposure)} detail={`${entity.metrics.overdue_invoice_count} overdue invoice(s)`} />
+      <SemanticSummary label="Open recovery cases" value={String(entity.metrics.active_recovery_case_count)} detail={workflowStates.length ? workflowStates.join(" · ") : "No active case workspace"} />
+      <SemanticSummary label="Policy risk score" value={`${entity.score}/100 · ${entity.level}`} detail="Deterministic current-state evaluation" />
+    </div>
+    <div className="grid gap-5 p-5 lg:grid-cols-2 xl:grid-cols-4">
+      <AnalysisList title="What is happening?" items={[entity.recommendation.title, `${entity.metrics.active_promise_count} active / ${entity.metrics.broken_promise_count} broken promise(s)`, `${entity.metrics.active_dispute_count} active dispute(s)`]} empty="" />
+      <AnalysisList title="Why?" items={[blocker ?? "No current stopping-rule blocker detected", ...entity.signals.slice(0, 2).map((signal) => signal.explanation)]} empty="No material signal is currently present." />
+      <AnalysisList title="What changed?" items={recentEvidence} empty="No scoped material change is recorded in the latest cycle." />
+      <AnalysisList title="What should happen next?" items={[entity.recommendation.explanation, approvalRequired ? "Human approval is required before material workflow action." : "No approval requirement is recorded on the open case.", cases.length ? `Workflow status: ${workflowStates.join(" · ")}.` : "No open Case Workspace is available for this account."]} empty="" />
+    </div>
+    <p className="border-t border-white/[.06] px-5 py-3 text-[11px] leading-5 text-slate-500">Communication interpretation may propose candidate evidence. This recovery recommendation and score are produced by deterministic policy; operators control confirmation and approval.</p>
+  </Panel>;
+}
+
+function SemanticSummary({ label: fieldLabel, value, detail }: { label: string; value: string; detail: string }) {
+  return <div className="bg-[#08111f]/80 p-4"><p className="text-[10px] font-bold uppercase tracking-[.12em] text-slate-400">{fieldLabel}</p><p className="mt-2 text-lg font-semibold text-white">{value}</p><p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p></div>;
 }
 
 function InterpretationPanel({ command, result }: { command: string; result: CommandResult }) {

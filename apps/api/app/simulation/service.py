@@ -7,12 +7,14 @@ import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from time import perf_counter
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
+from app.core.timing import elapsed_ms, log_timing
 from app.intelligence.service import persist_analysis
 from app.intelligence.provider import MockCommunicationIntelligenceProvider
 from app.intelligence.operational_schemas import IntelligenceResult
@@ -61,7 +63,8 @@ def _record(db: Session, state: SimulationState, ordinal: int, event_type: str, 
                             metadata_=metadata, occurred_at=_when(state) + timedelta(minutes=ordinal * 7))
     db.add(event)
     return {"id": str(event.id), "type": event_type, "customer_id": str(event.customer_id) if event.customer_id else None,
-            "invoice_id": str(event.invoice_id) if event.invoice_id else None, "case_id": str(event.recovery_case_id) if event.recovery_case_id else None, "metadata": metadata}
+            "invoice_id": str(event.invoice_id) if event.invoice_id else None, "case_id": str(event.recovery_case_id) if event.recovery_case_id else None,
+            "cycle": event.cycle, "occurred_at": event.occurred_at, "metadata": metadata}
 
 
 def _communication(db: Session, state: SimulationState, customer: Customer, invoice: Invoice, content: str, ordinal: int) -> Communication:
@@ -299,26 +302,38 @@ def _apply_generated_event(db: Session, state: SimulationState, rng: random.Rand
 
 
 def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> dict[str, Any]:
+    started_at = perf_counter()
+    stage_started = perf_counter()
     state = db.scalar(select(SimulationState).where(SimulationState.name == "default").with_for_update())
+    state_lock_ms = elapsed_ms(stage_started)
     if state is None:
         raise ValueError("Synthetic simulation state has not been seeded.")
+    stage_started = perf_counter()
     before_intelligence = _capture_intelligence(db)
+    capture_before_intelligence_ms = elapsed_ms(stage_started)
     previous_cycle, previous_simulation_date = state.cycle, state.simulation_date
     selected_seed = SCENARIO_CONFIG.judge_seed if judge else seed if seed is not None else secrets.randbits(63)
     rng = random.Random(selected_seed)
+    stage_started = perf_counter()
     state.cycle += 1
     state.simulation_date += timedelta(days=1)
     db.flush()
+    advance_cycle_ms = elapsed_ms(stage_started)
     when, cycle, events = _when(state), state.cycle, []
+    stage_started = perf_counter()
     invoices = db.scalars(select(Invoice).options(selectinload(Invoice.customer), selectinload(Invoice.payments), selectinload(Invoice.promises_to_pay)).order_by(Invoice.due_date, Invoice.id)).all()
+    active_promises = db.scalars(select(PromiseToPay).options(selectinload(PromiseToPay.invoice), selectinload(PromiseToPay.customer)).where(PromiseToPay.status == PromiseStatus.ACTIVE).order_by(PromiseToPay.promised_date)).all()
+    load_operational_facts_ms = elapsed_ms(stage_started)
     # Business time, not wall-clock time, determines when an operational invoice
     # crosses into overdue status. Disputed and settled documents retain their facts.
+    stage_started = perf_counter()
     for invoice in invoices:
         if invoice.outstanding_amount > 0 and invoice.due_date < state.simulation_date and invoice.status in {InvoiceStatus.OPEN, InvoiceStatus.PARTIALLY_PAID}:
             previous = invoice.status.value
             invoice.status = InvoiceStatus.OVERDUE
             _audit(db, "Invoice", invoice.id, "SIMULATION_INVOICE_BECAME_OVERDUE", {"previous_status": previous, "due_date": str(invoice.due_date)}, when)
-    active_promises = db.scalars(select(PromiseToPay).options(selectinload(PromiseToPay.invoice), selectinload(PromiseToPay.customer)).where(PromiseToPay.status == PromiseStatus.ACTIVE).order_by(PromiseToPay.promised_date)).all()
+    apply_overdue_rules_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
     used: set[tuple[str, str]] = set()
     valid = _available_event_kinds(invoices, active_promises, used)
     primary_kind, secondary_target = _roll_event_plan(rng, valid)
@@ -330,15 +345,41 @@ def run_tick(db: Session, *, seed: int | None = None, judge: bool = False) -> di
         if not valid: break
         kind = rng.choice(valid)
         events.append(_apply_generated_event(db, state, rng, selected_seed, kind, "SECONDARY", ordinal, invoices, active_promises, used, preferred_customer_id))
+    generate_events_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
     db.flush()
-    synchronization = synchronize_recovery_states(db, state.simulation_date)
-    # synchronize commits; persist any event records and cycle as the final atomic outcome.
-    db.commit()
+    persist_generated_facts_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
+    synchronization = synchronize_recovery_states(db, state.simulation_date, commit=False)
+    recovery_synchronization_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
     transitions = _build_transitions(db, before_intelligence, events, cycle)
+    build_transitions_ms = elapsed_ms(stage_started)
     customer_transitions = [item for item in transitions if item["entity_type"] == "CUSTOMER"]
     families = sorted({item["metadata"]["family"] for item in events})
     summary = {"customers_affected": len({item["customer_id"] for item in events if item.get("customer_id")}), "material_customers": sum(bool(item["material"]) for item in customer_transitions), "recommendations_changed": sum("RECOMMENDATION_CHANGED" in item["classifications"] for item in customer_transitions), "recommendations_unchanged": sum("RECOMMENDATION_CHANGED" not in item["classifications"] for item in customer_transitions), "blockers_added": sum("NEW_BLOCKER" in item["classifications"] for item in customer_transitions), "blockers_removed": sum("BLOCKER_RESOLVED" in item["classifications"] for item in customer_transitions)}
+    stage_started = perf_counter()
     _persist_transition_audits(db, state, cycle, len(events), transitions, summary)
+    persist_transition_audits_ms = elapsed_ms(stage_started)
+    log_timing(
+        "simulation_tick_timing",
+        cycle=cycle,
+        total_ms=elapsed_ms(started_at),
+        state_lock_ms=state_lock_ms,
+        capture_before_intelligence_ms=capture_before_intelligence_ms,
+        advance_cycle_ms=advance_cycle_ms,
+        load_operational_facts_ms=load_operational_facts_ms,
+        apply_overdue_rules_ms=apply_overdue_rules_ms,
+        generate_events_ms=generate_events_ms,
+        persist_generated_facts_ms=persist_generated_facts_ms,
+        recovery_synchronization_ms=recovery_synchronization_ms,
+        build_transitions_ms=build_transitions_ms,
+        persist_transition_audits_ms=persist_transition_audits_ms,
+        invoices_loaded=len(invoices),
+        active_promises_loaded=len(active_promises),
+        events_generated=len(events),
+        transitions_built=len(transitions),
+    )
     return {"previous_cycle": previous_cycle, "previous_simulation_date": previous_simulation_date, "cycle": cycle, "simulation_date": state.simulation_date, "event_count": len(events), "events": events, "intelligence_transitions": transitions, "recovery_synchronization": synchronization, "generation": {"seed": selected_seed, "mode": "JUDGE" if judge else "NORMAL", "primary_event_id": primary["id"], "secondary_event_count": len(events) - 1, "families": families}, "change_summary": summary}
 
 

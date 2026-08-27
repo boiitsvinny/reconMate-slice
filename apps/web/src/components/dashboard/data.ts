@@ -7,8 +7,8 @@ export type Customer = { id: string; name: string; account_reference: string; ou
 export type CaseApi = { case_id: string; customer_id: string; customer_name: string; evaluation: { derived_state: string; invoice: { outstanding_amount: string; days_overdue: number } | null; promises: { state: string }[]; active_dispute: boolean; eligibility: { allowed: boolean; blocking_reasons: string[] }; next_factual_condition: string } };
 export type Recommendation = { case_id: string; recommended_action: string; priority: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL"; human_approval_required: boolean; factual_reasons: string[]; blockers: string[]; relevant_exposure: string; relevant_days_overdue: number; operator_explanation: string };
 export type SimState = { cycle: number; simulation_date: string; tick_interval_seconds: number };
-export type SimulationEvent = { id: string; cycle: number; type: string; customer_id: string | null; invoice_id: string | null; case_id: string | null; metadata: Record<string, string>; occurred_at: string };
-export type SimulationTickEvent = { id: string; type: string; customer_id: string | null; invoice_id: string | null; case_id: string | null; metadata: Record<string, string | number> };
+export type SimulationEvent = { id: string; cycle: number; type: string; customer_id: string | null; invoice_id: string | null; case_id: string | null; metadata: Record<string, string | number>; occurred_at: string };
+export type SimulationTickEvent = SimulationEvent;
 export type IntelligenceTransition = {
   entity_type: "CUSTOMER" | "RECOVERY_CASE";
   entity_id: string;

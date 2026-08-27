@@ -1,12 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { QueryKey, useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppHeader } from "@/components/layout/app-header";
 import { useCommandSession } from "@/components/intelligence/command-session";
 import { useInsightMode } from "@/components/intelligence/insight-mode";
 import { apiFetch } from "@/lib/api";
-import { formatMoney as money, PriorityCase, SimState, SimulationTickResult } from "./data";
+import { formatMoney as money, LatestIntelligenceCycle, PriorityCase, SimState, SimulationEvent, SimulationTickResult } from "./data";
 import { CaseWorkspace } from "./case-workspace";
 import { CustomerPreview, useCasePreview } from "./customer-preview";
 import { HomeRecoveryQueue } from "./home-recovery-queue";
@@ -14,7 +14,7 @@ import { OperationalIntelligenceHero } from "./operational-intelligence-hero";
 import { PortfolioMetricCard } from "./portfolio-metric-card";
 import { PortfolioSignals } from "./portfolio-signals";
 import { queryKeys, useCustomers, useInvalidateOperationalData, useLatestIntelligenceCycle, usePortfolio, usePortfolioIntelligence, useRecovery, useRecoveryQueue, useSimulationEvents, useSimulationState } from "./queries";
-import { CycleFeedback, ResetFeedback, SimulationControl } from "./simulation-control";
+import { CycleFeedback, ResetFeedback, SimulationControl, SimulationPhase } from "./simulation-control";
 import { AIPriorities } from "./todays-operational-focus";
 
 export function Dashboard() {
@@ -23,10 +23,12 @@ export function Dashboard() {
   const [lastTick, setLastTick] = useState<SimulationTickResult | null>(null);
   const [cycleFeedback, setCycleFeedback] = useState<CycleFeedback | undefined>();
   const [resetFeedback, setResetFeedback] = useState<ResetFeedback | undefined>();
-  const [tickPhase, setTickPhase] = useState<"STARTING" | "APPLYING_EVENTS" | "REEVALUATING" | "SYNCHRONIZING" | "TAKING_LONGER">();
+  const [tickPhase, setTickPhase] = useState<SimulationPhase>("READY");
   const [selected, setSelected] = useState<PriorityCase | null>(null);
   const { preview, openPreview, closePreview } = useCasePreview();
   const operationInFlight = useRef(false);
+  const tickStartedAt = useRef(0);
+  const tickResponseAt = useRef(0);
   const queryClient = useQueryClient();
   const commandSession = useCommandSession();
   const portfolio = usePortfolio();
@@ -45,36 +47,99 @@ export function Dashboard() {
   const backgroundError = dataReady && Boolean(errorMessage);
   const connectionsHealthy = dataReady && connectedQueries.every((query) => !query.isError);
   const invalidateOperationalData = useInvalidateOperationalData();
+  const refetchCycleQuery = useCallback(async (name: string, queryKey: QueryKey) => {
+    const startedAt = performance.now();
+    try {
+      await queryClient.refetchQueries({ queryKey, exact: true, type: "active" }, { throwOnError: true });
+      logFrontendTiming("cycle_refetch", { name, status: "success", elapsed_ms: Math.round(performance.now() - startedAt) });
+    } catch (error) {
+      logFrontendTiming("cycle_refetch", { name, status: "failed", elapsed_ms: Math.round(performance.now() - startedAt), error_type: error instanceof Error ? error.name : "UnknownError" });
+      throw error;
+    }
+  }, [queryClient]);
 
   const tick = useMutation({
-    onMutate: () => { setResetFeedback(undefined); setTickPhase("STARTING"); },
+    onMutate: () => {
+      tickStartedAt.current = performance.now();
+      tickResponseAt.current = 0;
+      setResetFeedback(undefined);
+      setTickPhase("REQUESTING");
+    },
     mutationFn: async () => {
-      const response = await apiFetch("/simulation/tick", { method: "POST" }, 90_000);
-      if (!response.ok) {
-        const payload = await response.json().catch(() => null) as { detail?: string } | null;
-        throw new Error(payload?.detail ?? "Simulation tick failed.");
+      const startedAt = performance.now();
+      let timingLogged = false;
+      try {
+        const response = await apiFetch("/simulation/tick", { method: "POST" }, 90_000);
+        const responseReceivedAt = performance.now();
+        if (!response.ok) {
+          const payload = await response.json().catch(() => null) as { detail?: string } | null;
+          timingLogged = true;
+          logFrontendTiming("cycle_request", { status: "failed", http_status: response.status, elapsed_ms: Math.round(responseReceivedAt - startedAt) });
+          throw new Error(payload?.detail ?? "Simulation tick failed.");
+        }
+        const result = await response.json() as SimulationTickResult;
+        tickResponseAt.current = performance.now();
+        timingLogged = true;
+        logFrontendTiming("cycle_request", {
+          status: "success",
+          http_status: response.status,
+          cycle: result.cycle,
+          response_wait_ms: Math.round(responseReceivedAt - startedAt),
+          parse_ms: Math.round(tickResponseAt.current - responseReceivedAt),
+          elapsed_ms: Math.round(tickResponseAt.current - startedAt),
+        });
+        return result;
+      } catch (error) {
+        if (!timingLogged) {
+          logFrontendTiming("cycle_request", {
+            status: "network_failure",
+            elapsed_ms: Math.round(performance.now() - startedAt),
+            error_type: error instanceof Error ? error.name : "UnknownError",
+          });
+        }
+        throw error;
       }
-      const result = await response.json() as SimulationTickResult;
-      return result;
     },
     onSuccess: async (result) => {
-      setTickPhase("SYNCHRONIZING");
-      await invalidateOperationalData();
-      const refreshFailed = [
-        queryKeys.portfolio,
-        queryKeys.portfolioIntelligence,
-        queryKeys.recovery,
-        queryKeys.customers,
-        queryKeys.cases,
-        queryKeys.recommendations,
-        queryKeys.simulationState,
-        queryKeys.simulationEvents,
-        queryKeys.latestIntelligenceCycle,
-      ].some((queryKey) => queryClient.getQueryState(queryKey)?.error);
+      setTickPhase("RECONCILING");
+      queryClient.setQueryData<SimState>(queryKeys.simulationState, (current) => current ? {
+        ...current, cycle: result.cycle, simulation_date: result.simulation_date,
+      } : current);
+      queryClient.setQueryData<SimulationEvent[]>(queryKeys.simulationEvents, (current = []) => {
+        const receivedIds = new Set(result.events.map((event) => event.id));
+        return [...result.events].sort((left, right) => right.occurred_at.localeCompare(left.occurred_at))
+          .concat(current.filter((event) => !receivedIds.has(event.id))).slice(0, 50);
+      });
+      queryClient.setQueryData<LatestIntelligenceCycle>(queryKeys.latestIntelligenceCycle, latestCycleFromTick(result));
+
+      const criticalRefreshes = await Promise.allSettled([
+        refetchCycleQuery("portfolio_summary", queryKeys.portfolio),
+        refetchCycleQuery("recovery_summary", queryKeys.recovery),
+        refetchCycleQuery("portfolio_intelligence", queryKeys.portfolioIntelligence),
+      ]);
+      const refreshFailed = criticalRefreshes.some((item) => item.status === "rejected");
       setLastTick(result);
       setCycleFeedback(buildCycleFeedback(result, refreshFailed));
+      const readyAt = performance.now();
+      logFrontendTiming("cycle_ready", {
+        status: refreshFailed ? "partial" : "success",
+        cycle: result.cycle,
+        post_response_refresh_ms: Math.round(readyAt - tickResponseAt.current),
+        total_ms: Math.round(readyAt - tickStartedAt.current),
+        blocking_refetches: 3,
+        background_refetches: 2,
+      });
+
+      void Promise.allSettled([
+        refetchCycleQuery("recovery_cases", queryKeys.cases),
+        refetchCycleQuery("recovery_recommendations", queryKeys.recommendations),
+      ]).then((results) => logFrontendTiming("cycle_background_refresh", {
+        cycle: result.cycle,
+        status: results.some((item) => item.status === "rejected") ? "partial" : "success",
+        failed_requests: results.filter((item) => item.status === "rejected").length,
+      }));
     },
-    onSettled: () => setTickPhase(undefined),
+    onSettled: (_result, error) => setTickPhase(error ? "FAILED" : "READY"),
   });
   const resetDemo = useMutation({
     mutationFn: async () => {
@@ -123,16 +188,12 @@ export function Dashboard() {
   const runTick = useCallback(async () => {
     if (operationInFlight.current) return;
     operationInFlight.current = true;
-    const applyingTimer = window.setTimeout(() => setTickPhase("APPLYING_EVENTS"), 800);
-    const evaluationTimer = window.setTimeout(() => setTickPhase("REEVALUATING"), 3_000);
     const longTimer = window.setTimeout(() => setTickPhase("TAKING_LONGER"), 12_000);
     try {
       await mutateTick();
     } catch {
       // Mutation state supplies the existing error presentation.
     } finally {
-      window.clearTimeout(applyingTimer);
-      window.clearTimeout(evaluationTimer);
       window.clearTimeout(longTimer);
       operationInFlight.current = false;
     }
@@ -293,6 +354,24 @@ function buildCycleFeedback(result: SimulationTickResult, refreshFailed: boolean
 
 function cyclePortfolio(result: SimulationTickResult): CycleFeedback["portfolio"] {
   return { previousCycle: result.previous_cycle, cycle: result.cycle, previousDate: result.previous_simulation_date, date: result.simulation_date, eventCount: result.event_count, customersAffected: result.change_summary.customers_affected, materialCustomers: result.change_summary.material_customers, recommendationsChanged: result.change_summary.recommendations_changed, recommendationsUnchanged: result.change_summary.recommendations_unchanged, families: result.generation.families, seed: result.generation.seed };
+}
+
+function latestCycleFromTick(result: SimulationTickResult): LatestIntelligenceCycle {
+  return {
+    cycle: result.cycle,
+    event_count: result.event_count,
+    customers_affected: result.change_summary.customers_affected,
+    material_customers: result.change_summary.material_customers,
+    recommendations_changed: result.change_summary.recommendations_changed,
+    recommendations_unchanged: result.change_summary.recommendations_unchanged,
+    blockers_added: result.change_summary.blockers_added,
+    blockers_removed: result.change_summary.blockers_removed,
+    transitions: result.intelligence_transitions,
+  };
+}
+
+function logFrontendTiming(stage: string, fields: Record<string, string | number>) {
+  console.info(JSON.stringify({ event: "reconmate_frontend_timing", stage, ...fields }));
 }
 
 function DashboardLoading() {

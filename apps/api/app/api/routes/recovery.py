@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from time import perf_counter
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.timing import elapsed_ms, log_timing
 from app.db.session import get_db
 from app.models.domain import Communication, Customer, Invoice, PromiseToPay, RecoveryCase, SimulationState
 from app.recommendations.schemas import RecoveryRecommendation
@@ -108,6 +110,15 @@ def customer_recovery_status(customer_id: UUID, db: Session = Depends(get_db)) -
 
 @router.get("/portfolio/summary", summary="Return deterministic recovery metrics")
 def portfolio_recovery_summary(db: Session = Depends(get_db)) -> dict[str, Any]:
+    started_at = perf_counter()
+    stage_started = perf_counter()
     simulation_date = _simulation_date(db)
+    load_state_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
     summary = recovery_summary(db, simulation_date)
+    calculate_summary_ms = elapsed_ms(stage_started)
+    log_timing(
+        "recovery_summary_timing", total_ms=elapsed_ms(started_at),
+        load_state_ms=load_state_ms, calculate_summary_ms=calculate_summary_ms,
+    )
     return {"simulation_date": simulation_date, **summary}

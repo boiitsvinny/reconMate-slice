@@ -40,7 +40,7 @@ _DOMAIN_CONCEPTS = (
 _BROAD_FOCUS_PHRASES = (
     "focus on", "need my attention", "needs my attention", "need attention", "needs attention",
     "requiring operator attention", "require operator attention", "should collections work on",
-    "worst case",
+    "should i work on", "work on today", "worst case",
 )
 
 
@@ -73,8 +73,10 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         explanation = self._has(text, ("why", "explain", "reason", "what makes"))
         if explanation and request.context_case_id is not None:
             return self._intent(CommandIntentType.EXPLAIN_RECOMMENDATION, .97, CommandScope.CASE, filters, query, "The request asks for an explanation of the selected case's current recommendation.")
-        if (explanation or "analy" in text) and request.context_customer_id is not None:
-            return self._intent(CommandIntentType.CUSTOMER_ANALYSIS, .96, CommandScope.CUSTOMER, filters, query, "The request asks for analysis of the selected customer context.")
+        if request.context_customer_id is not None and self._customer_context_request(text, explanation):
+            query = query.model_copy(update={"entity": QueryEntity.CUSTOMERS})
+            filters = self._legacy_filters(query, text)
+            return self._intent(CommandIntentType.CUSTOMER_ANALYSIS, .96, CommandScope.CUSTOMER, filters, query, "A deterministic customer lookup resolved this request to the selected customer context.")
         if "analy" in text and request.context_case_id is not None:
             return self._intent(CommandIntentType.CASE_ANALYSIS, .96, CommandScope.CASE, filters, query, "The request asks for analysis of the selected recovery case.")
         if (explanation or "analy" in text) and self._has(text, ("this customer", "customer", "account")) and request.context_customer_id is None and not self._has(text, _QUERY_OPERATIONS):
@@ -134,7 +136,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         promise_excluded = bool(re.search(r"\b(?:without|excluding|exclude|no) active (?:payment )?promises?\b", text))
         no_recent_payment = bool(re.search(r"\b(?:no|without) recent payments?\b", text))
         active_dispute = False if dispute_excluded else True if re.search(r"\b(?:active )?disput(?:e|ed|es)\b", text) else None
-        active_promise = False if promise_excluded else True if re.search(r"\bactive (?:payment )?promises?\b|\bvalid promises?\b", text) else None
+        active_promise = False if promise_excluded else True if re.search(r"\bactive (?:payment )?promises?\b|\bvalid promises?\b|\b(?:waiting|awaiting) (?:on |for )?(?:payment )?promises?\b", text) else None
         recent_payment = False if no_recent_payment else True if re.search(r"\brecent (?:partial )?payments?\b|\blatest payment activity\b", text) else None
         decision_changed = True if re.search(r"\b(?:decision|recommendation)s? changed\b|\bchanged (?:decision|recommendation)s?\b", text) else None
         decision_held = True if re.search(r"\b(?:decision|recommendation)s? (?:held|unchanged|remained)\b|\bheld after (?:a )?fact change\b", text) else None
@@ -176,7 +178,7 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
             sort_by=sort_by,
             descending=descending,
             limit=limit,
-            time_scope=QueryTimeScope.LATEST_CYCLE if decision_changed or decision_held or self._has(text, ("after latest cycle", "latest cycle", "last cycle", "after fact change")) else QueryTimeScope.CURRENT,
+            time_scope=QueryTimeScope.LATEST_CYCLE if decision_changed or decision_held or self._has(text, ("after latest cycle", "latest cycle", "last cycle", "this cycle", "after fact change")) else QueryTimeScope.CURRENT,
             count_only=self._has(text, ("count", "how many")),
             explanation_requested=self._has(text, ("why", "explain", "reason")),
         )
@@ -227,12 +229,25 @@ class RuleBasedCommandInterpreter(BaseCommandInterpreter):
         return (
             RuleBasedCommandInterpreter._has(text, _DOMAIN_CONCEPTS)
             or RuleBasedCommandInterpreter._has(text, _BROAD_FOCUS_PHRASES)
+            or query.time_scope is QueryTimeScope.LATEST_CYCLE
             or any(value is not None for value in (
                 query.overdue, query.broken_promise, query.active_promise, query.active_dispute,
                 query.partial_payment, query.recent_payment, query.actionable, query.blocked, query.monitoring,
                 query.decision_changed, query.decision_held,
                 query.min_days_overdue, query.max_days_overdue, query.min_score, query.max_score,
             ))
+        )
+
+    @staticmethod
+    def _customer_context_request(text: str, explanation: bool) -> bool:
+        """Accept read-only customer investigation wording only after a customer ID was resolved."""
+        if RuleBasedCommandInterpreter._has(text, ("prepare", "create", "draft", "contact again", "chase", "follow up", "reminder")):
+            return False
+        return (
+            explanation
+            or "analy" in text
+            or RuleBasedCommandInterpreter._has(text, ("what is happening", "what happened", "what changed", "holding", "show", "this customer"))
+            or not RuleBasedCommandInterpreter._has_domain_evidence(text, StructuredQuery())
         )
 
     @staticmethod

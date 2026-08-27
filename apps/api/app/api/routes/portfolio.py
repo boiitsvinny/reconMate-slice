@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
+from time import perf_counter
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -11,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.timing import elapsed_ms, log_timing
 from app.db.session import get_db
 from app.models.domain import AuditEvent, Communication, Customer, Invoice, Payment, PromiseToPay, RecoveryCase, SimulationState
 from app.seed.portfolio import portfolio_summary
@@ -176,11 +178,15 @@ def list_invoices(customer_id: UUID | None = Query(default=None), db: Session = 
 
 @router.get("/portfolio/summary", response_model=PortfolioSummary, summary="Return factual portfolio metrics")
 def get_portfolio_summary(db: Session = Depends(get_db)) -> PortfolioSummary:
+    started_at = perf_counter()
+    stage_started = perf_counter()
     simulation_date = db.scalar(select(SimulationState.simulation_date).where(SimulationState.name == "default"))
+    load_state_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
     metrics = portfolio_summary(db, simulation_date)
-    total_original = db.scalar(select(func.coalesce(func.sum(Invoice.original_amount), 0)).where(Invoice.issue_date <= simulation_date)) if simulation_date else Decimal("0")
-    total_original = total_original or Decimal("0")
-    return PortfolioSummary(
+    calculate_summary_ms = elapsed_ms(stage_started)
+    total_original = Decimal(metrics["original_amount"])
+    result = PortfolioSummary(
         simulation_date=simulation_date, total_customers=int(metrics["customers"]), total_invoices=int(metrics["invoices"]),
         open_invoices=int(metrics["open_invoices"]), overdue_invoices=int(metrics["overdue_invoices"]),
         total_outstanding_amount=Decimal(metrics["outstanding_amount"]), total_overdue_amount=Decimal(metrics["overdue_amount"]),
@@ -188,3 +194,8 @@ def get_portfolio_summary(db: Session = Depends(get_db)) -> PortfolioSummary:
         total_promises=int(metrics["promises"]), broken_promises=int(metrics["broken_promises"]),
         active_disputes=int(metrics["active_disputes"]), recovery_cases=int(metrics["recovery_cases"]),
     )
+    log_timing(
+        "portfolio_summary_timing", total_ms=elapsed_ms(started_at), load_state_ms=load_state_ms,
+        calculate_summary_ms=calculate_summary_ms,
+    )
+    return result

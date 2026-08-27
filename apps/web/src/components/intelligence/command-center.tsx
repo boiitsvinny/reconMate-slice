@@ -1,23 +1,32 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import type { Customer, PriorityCase } from "@/components/dashboard/data";
 import { CommandResultView } from "./command-result";
 import { PROCESSING_STAGES, useCommandSession } from "./command-session";
+import { resolveCustomerLookup, type CustomerLookup } from "./customer-lookup";
 import { buttonStyles, cx, Panel, SectionEyebrow, SectionHeader, StatusPill } from "@/components/dashboard/ui";
 
 const examples = [
+  "Analyze Mintleaf Office Mart",
   "Who should I focus on today?",
-  "Show me customers with broken promises",
-  "Show top 5 high-risk customers",
-  "Prepare recovery actions for critical cases",
-  "Draft payment reminders for overdue customers",
-  "Prepare follow ups for customers with broken promises",
-  "Analyze portfolio health",
+  "Show customers with broken promises",
+  "Show customers blocked by disputes",
+  "What changed this cycle?",
 ];
 
-export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: string, targetId: string) => boolean }) {
+type CommandCenterProps = {
+  customers?: Customer[];
+  queue?: PriorityCase[];
+  onOpenTarget?: (targetType: string, targetId: string) => boolean;
+  onOpenWorkspace?: (customerId: string) => boolean;
+};
+
+export function CommandCenter({ customers = [], queue = [], onOpenTarget, onOpenWorkspace }: CommandCenterProps) {
   const { activeCommand, result, processing, processingStage, error, runCommand, clearError } = useCommandSession();
   const [command, setCommand] = useState(activeCommand);
+  const [lookup, setLookup] = useState<CustomerLookup>({ kind: "none" });
+  const [matchedCustomerId, setMatchedCustomerId] = useState<string | null>(null);
   const responseRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { if (activeCommand) setCommand(activeCommand); }, [activeCommand]);
@@ -27,14 +36,36 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
     return () => window.cancelAnimationFrame(frame);
   }, [error, result]);
 
+  const execute = (value: string) => {
+    clearError();
+    const resolution = resolveCustomerLookup(value, customers, Boolean(matchedCustomerId));
+    if (resolution.kind === "ambiguous" || resolution.kind === "not-found") {
+      setLookup(resolution);
+      return;
+    }
+    const customerId = resolution.kind === "match" ? resolution.customer.id : resolution.kind === "context" ? matchedCustomerId : null;
+    setLookup({ kind: "none" });
+    if (resolution.kind === "match") setMatchedCustomerId(resolution.customer.id);
+    void runCommand({ command: value, context_customer_id: customerId });
+  };
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    void runCommand({ command });
+    execute(command);
   };
   const runExample = (example: string) => {
     setCommand(example);
-    void runCommand({ command: example });
+    execute(example);
   };
+  const chooseCustomer = (customer: Customer) => {
+    if (lookup.kind !== "ambiguous") return;
+    const preservedQuery = lookup.query;
+    setMatchedCustomerId(customer.id);
+    setLookup({ kind: "none" });
+    setCommand(preservedQuery);
+    void runCommand({ command: preservedQuery, context_customer_id: customer.id });
+  };
+  const matchedCustomer = customers.find((customer) => customer.id === matchedCustomerId);
+  const matchedCases = matchedCustomerId ? queue.filter((item) => item.customerId === matchedCustomerId) : [];
 
   return (
     <section className="mt-7" aria-label="ReconMate operational command center">
@@ -45,6 +76,7 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
             <SectionEyebrow>Intelligence command center</SectionEyebrow>
             <h2 className="mt-3 text-xl font-semibold tracking-[-.03em] text-white sm:text-2xl">What do you want ReconMate to work on?</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">Ask about operational priorities, overdue exposure, broken promises, recovery work, or payment reminders.</p>
+            <p className="mt-2 text-[11px] leading-5 text-slate-500">Customer lookup and recovery decisions are deterministic. Model-backed AI is limited to interpreting unstructured customer communications; operators control material actions.</p>
             <form onSubmit={submit} className="mt-5 flex flex-col gap-3 sm:flex-row">
               <div className="intelligence-input-shell min-w-0 flex-1">
                 <label htmlFor="reconmate-command" className="sr-only">Operational command</label>
@@ -77,6 +109,20 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
       </Panel>
 
       <div ref={responseRef} className="scroll-mt-24">
+      {lookup.kind === "ambiguous" && (
+        <Panel className="mt-5 overflow-hidden border-amber-300/15">
+          <SectionHeader eyebrow="Choose an account" title="More than one customer may match" detail={`ReconMate preserved “${lookup.query}” and did not guess.`} prominent />
+          <div className="grid gap-2 p-4 sm:grid-cols-2">
+            {lookup.customers.map((customer) => <button key={customer.id} type="button" onClick={() => chooseCustomer(customer)} className="rounded-xl border border-white/[.08] bg-white/[.025] p-4 text-left transition hover:border-sky-300/30 hover:bg-sky-300/[.05]"><span className="block text-sm font-semibold text-white">{customer.name}</span><span className="mt-1 block text-[11px] text-slate-500">{customer.account_reference}</span></button>)}
+          </div>
+        </Panel>
+      )}
+      {lookup.kind === "not-found" && (
+        <Panel className="mt-5 overflow-hidden border-amber-300/15">
+          <SectionHeader eyebrow="No customer match" title="No customer was found for this query" detail={`Your request was preserved: “${lookup.query}”`} prominent />
+          <div className="p-5 text-xs leading-5 text-slate-400">Try a full or partial account name, or ask about overdue exposure, broken promises, disputes, current priorities, or latest-cycle changes. “This customer” requires a customer to be selected first.</div>
+        </Panel>
+      )}
       {error && (
         <div className="mt-5 flex flex-col justify-between gap-3 rounded-2xl border border-rose-300/20 bg-rose-300/[.06] p-4 sm:flex-row sm:items-center" role="alert">
           <div><p className="text-sm font-semibold text-rose-100">Command request failed</p><p className="mt-1 text-xs leading-5 text-rose-100/70">{error}</p></div>
@@ -84,7 +130,7 @@ export function CommandCenter({ onOpenTarget }: { onOpenTarget?: (targetType: st
         </div>
       )}
 
-      {!processing && result && <CommandResultView command={activeCommand} result={result} onOpenTarget={onOpenTarget} />}
+      {!processing && lookup.kind === "none" && result && <CommandResultView command={activeCommand} result={result} onOpenTarget={onOpenTarget} onOpenWorkspace={onOpenWorkspace} customer={matchedCustomer} customerCases={matchedCases} onTryCommand={runExample} />}
       </div>
     </section>
   );

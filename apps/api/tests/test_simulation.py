@@ -1,11 +1,14 @@
 """Focused invariants for the deterministic simulation foundation."""
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
+import json
+import logging
 import random
 from types import SimpleNamespace
 from uuid import uuid4
 
 from app.models.domain import Customer, Invoice, InvoiceStatus, PromiseStatus, PromiseToPay, RecoveryCase, RecoveryPriority, RecoveryState
+from app.core.timing import log_timing
 from app.recovery.engine import evaluate_case, evaluate_invoice
 from app.seed.portfolio import reset_database
 from app.simulation import service as simulation_service
@@ -16,6 +19,16 @@ from app.simulation.service import _available_event_kinds, _event_id, _fractiona
 def test_simulation_event_identity_is_repeatable() -> None:
     assert _event_id(9, 0) == _event_id(9, 0)
     assert _event_id(9, 0) != _event_id(10, 0)
+
+
+def test_structured_timing_log_contains_only_supplied_operational_fields(caplog) -> None:
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        log_timing("simulation_tick_timing", cycle=4, total_ms=321, events_generated=2)
+    payload = json.loads(caplog.records[-1].message)
+    assert payload == {
+        "event": "simulation_tick_timing", "cycle": 4,
+        "total_ms": 321, "events_generated": 2,
+    }
 
 
 def test_seeded_event_roll_is_reproducible_and_bounded() -> None:
@@ -111,6 +124,42 @@ def test_material_transition_evidence_is_persisted_append_only() -> None:
     assert db.records[1].payload["previous_score"] == 74
     assert db.records[1].payload["current_recommendation"] == "PRIORITIZE"
     assert db.commits == 1
+
+
+def test_tick_defers_recovery_commit_until_transition_evidence_is_persisted(monkeypatch) -> None:
+    calls: list[str] = []
+    state = SimpleNamespace(id=uuid4(), name="default", cycle=3, simulation_date=date(2026, 8, 4))
+
+    class Rows(list):
+        def all(self):
+            return self
+
+    class FakeSession:
+        def scalar(self, _statement):
+            return state
+
+        def scalars(self, _statement):
+            return Rows()
+
+        def flush(self):
+            calls.append("flush")
+
+    monkeypatch.setattr(simulation_service, "_capture_intelligence", lambda _db: {})
+    monkeypatch.setattr(simulation_service, "_available_event_kinds", lambda *_args: ["PARTIAL_PAYMENT"])
+    monkeypatch.setattr(simulation_service, "_roll_event_plan", lambda *_args: ("PARTIAL_PAYMENT", 0))
+    monkeypatch.setattr(simulation_service, "_apply_generated_event", lambda *_args: {
+        "id": str(uuid4()), "type": "PARTIAL_PAYMENT", "customer_id": None,
+        "invoice_id": None, "case_id": None, "metadata": {"family": "PAYMENT"},
+        "cycle": state.cycle, "occurred_at": datetime(2026, 8, 5, tzinfo=UTC),
+    })
+    monkeypatch.setattr(simulation_service, "synchronize_recovery_states", lambda _db, _date, *, commit: calls.append(f"sync_commit:{commit}") or {"cases_evaluated": 0, "cases_changed": 0})
+    monkeypatch.setattr(simulation_service, "_build_transitions", lambda *_args: [])
+    monkeypatch.setattr(simulation_service, "_persist_transition_audits", lambda *_args: calls.append("transition_commit"))
+
+    result = simulation_service.run_tick(FakeSession(), seed=99)  # type: ignore[arg-type]
+    assert result["cycle"] == 4
+    assert "sync_commit:False" in calls
+    assert calls[-1] == "transition_commit"
 
 
 def test_latest_intelligence_cycle_returns_persisted_decision_evidence() -> None:

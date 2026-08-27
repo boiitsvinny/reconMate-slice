@@ -6,7 +6,7 @@ from app.models.domain import (
     InvoiceStatus, Payment, PromiseStatus, PromiseToPay, RecoveryPriority, RecoveryState,
     RecoveryCase,
 )
-from app.recovery.engine import _audit_once, evaluate_case, evaluate_invoice, evaluate_promise
+from app.recovery.engine import _audit_once, _existing_audit_keys, evaluate_case, evaluate_invoice, evaluate_promise
 
 SIM_DATE = date(2026, 8, 1)
 
@@ -118,3 +118,51 @@ def test_audit_event_is_created_once() -> None:
     _audit_once(session, "Invoice", __import__("uuid").uuid4(), "INVOICE_OVERDUE_DETECTED", {"days_overdue": 1}, datetime(2026, 8, 1, tzinfo=UTC))
     assert len(session.events) == 1
     assert session.events[0].event_type == "INVOICE_OVERDUE_DETECTED"
+
+
+def test_existing_audit_identities_are_loaded_in_one_bulk_query() -> None:
+    invoice_id = __import__("uuid").uuid4()
+    promise_id = __import__("uuid").uuid4()
+    requested = {
+        ("Invoice", invoice_id, "INVOICE_OVERDUE_DETECTED"),
+        ("PromiseToPay", promise_id, "PROMISE_BROKEN_DETECTED"),
+    }
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.execute_calls = 0
+
+        def execute(self, _query):
+            self.execute_calls += 1
+            class Rows(list):
+                def all(self):
+                    return self
+
+            return Rows([("Invoice", invoice_id, "INVOICE_OVERDUE_DETECTED")])
+
+    session = FakeSession()
+    existing = _existing_audit_keys(session, requested)  # type: ignore[arg-type]
+    assert existing == {("Invoice", invoice_id, "INVOICE_OVERDUE_DETECTED")}
+    assert session.execute_calls == 1
+
+
+def test_preloaded_audit_identity_avoids_duplicate_lookup_and_insert() -> None:
+    entity_id = __import__("uuid").uuid4()
+    key = ("Invoice", entity_id, "INVOICE_OVERDUE_DETECTED")
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.events = []
+
+        def scalar(self, _query):
+            raise AssertionError("preloaded audit checks must not issue a per-record SELECT")
+
+        def add(self, event):
+            self.events.append(event)
+
+    session = FakeSession()
+    _audit_once(
+        session, key[0], key[1], key[2], {"days_overdue": 1},
+        datetime(2026, 8, 1, tzinfo=UTC), existing={key},  # type: ignore[arg-type]
+    )
+    assert session.events == []

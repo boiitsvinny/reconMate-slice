@@ -30,6 +30,12 @@ export function AnalyticsPage() {
     openPreview(match);
     return true;
   };
+  const openCustomerWorkspace = (customerId: string) => {
+    const match = queue.find((item) => item.customerId === customerId);
+    if (!match) return false;
+    setSelected(match);
+    return true;
+  };
 
   return (
     <main className="workspace-analyze min-h-screen overflow-x-hidden">
@@ -40,7 +46,7 @@ export function AnalyticsPage() {
           <h1 className="mt-3 text-3xl font-semibold tracking-[-.04em] text-white sm:text-4xl">Analyze ReconMate Decisions</h1>
           <p className="mt-3 text-sm leading-6 text-slate-300/80">Ask a grounded operational question, inspect what matched, compare returned accounts, and verify the facts behind each score and recommendation.</p>
         </header>
-        <CommandCenter onOpenTarget={openCommandTarget} />
+        <CommandCenter customers={customers.data ?? []} queue={queue} onOpenTarget={openCommandTarget} onOpenWorkspace={openCustomerWorkspace} />
         {!ready && errorMessage && <div className="mt-7 flex flex-col justify-between gap-4 rounded-2xl border border-rose-300/20 bg-rose-300/[.07] p-5 sm:flex-row sm:items-center"><p className="text-sm text-rose-100">{errorMessage}</p><button type="button" onClick={() => void retry()} className="rounded-lg border border-rose-200/25 px-3 py-2 text-xs font-bold text-rose-50">Try again</button></div>}
         {!ready && !errorMessage && <div className="mt-7 h-[560px] animate-pulse rounded-2xl border border-white/[.07] bg-white/[.035]" />}
         {ready && errorMessage && <div className="mt-5 flex flex-col justify-between gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.06] px-4 py-3 sm:flex-row sm:items-center"><p className="text-xs text-amber-100">Live refresh is delayed. Showing the last successful recommendations.</p><button type="button" onClick={() => void retry()} className="text-xs font-semibold text-amber-50 underline decoration-amber-200/30 underline-offset-4">Retry refresh</button></div>}

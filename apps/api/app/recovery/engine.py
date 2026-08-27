@@ -6,10 +6,12 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from time import perf_counter
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, tuple_
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.timing import elapsed_ms, log_timing
 from app.models.domain import (
     AuditEvent, Invoice, InvoiceStatus, PromiseStatus, PromiseToPay,
     RecoveryActionStatus, RecoveryActionType, RecoveryCase, RecoveryState,
@@ -164,46 +166,95 @@ def case_evaluation_dict(evaluation: CaseEvaluation) -> dict:
     return asdict(evaluation)
 
 
-def _audit_once(session: Session, entity_type: str, entity_id: uuid.UUID, event_type: str, payload: dict, occurred_at: datetime) -> None:
-    exists = session.scalar(select(AuditEvent.id).where(
-        AuditEvent.entity_type == entity_type, AuditEvent.entity_id == entity_id, AuditEvent.event_type == event_type,
-    ))
-    if exists is None:
-        session.add(AuditEvent(entity_type=entity_type, entity_id=entity_id, event_type=event_type,
-                               actor_type="system", payload=payload, occurred_at=occurred_at))
+AuditKey = tuple[str, uuid.UUID, str]
+
+
+def _existing_audit_keys(session: Session, keys: set[AuditKey]) -> set[AuditKey]:
+    """Load all matching append-only audit identities in one database round trip."""
+    if not keys:
+        return set()
+    rows = session.execute(select(
+        AuditEvent.entity_type, AuditEvent.entity_id, AuditEvent.event_type,
+    ).where(tuple_(
+        AuditEvent.entity_type, AuditEvent.entity_id, AuditEvent.event_type,
+    ).in_(keys))).all()
+    return {(entity_type, entity_id, event_type) for entity_type, entity_id, event_type in rows}
+
+
+def _audit_once(
+    session: Session,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    event_type: str,
+    payload: dict,
+    occurred_at: datetime,
+    *,
+    existing: set[AuditKey] | None = None,
+) -> None:
+    key = (entity_type, entity_id, event_type)
+    if existing is None:
+        already_recorded = session.scalar(select(AuditEvent.id).where(
+            AuditEvent.entity_type == entity_type, AuditEvent.entity_id == entity_id, AuditEvent.event_type == event_type,
+        )) is not None
+    else:
+        already_recorded = key in existing
+    if already_recorded:
+        return
+    session.add(AuditEvent(entity_type=entity_type, entity_id=entity_id, event_type=event_type,
+                           actor_type="system", payload=payload, occurred_at=occurred_at))
+    if existing is not None:
+        existing.add(key)
 
 
 def synchronize_recovery_states(session: Session, simulation_date: date, *, commit: bool = True) -> dict[str, int]:
     """Apply only factual case-state changes and append auditable transition events."""
+    started_at = perf_counter()
+    stage_started = perf_counter()
     cases = session.scalars(select(RecoveryCase).options(
         selectinload(RecoveryCase.customer), selectinload(RecoveryCase.invoice).selectinload(Invoice.payments),
         selectinload(RecoveryCase.invoice).selectinload(Invoice.promises_to_pay).selectinload(PromiseToPay.source_communication),
         selectinload(RecoveryCase.actions),
     )).all()
+    load_cases_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
     invoices = session.scalars(select(Invoice)).all()
+    load_invoices_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
     promises = session.scalars(select(PromiseToPay).options(
         selectinload(PromiseToPay.invoice).selectinload(Invoice.payments), selectinload(PromiseToPay.source_communication),
     )).all()
+    load_promises_ms = elapsed_ms(stage_started)
     changed = 0
     occurred_at = datetime(simulation_date.year, simulation_date.month, simulation_date.day, tzinfo=UTC)
-    for invoice in invoices:
-        facts = evaluate_invoice(invoice, simulation_date)
+    stage_started = perf_counter()
+    invoice_evaluations = [(invoice, evaluate_invoice(invoice, simulation_date)) for invoice in invoices]
+    promise_evaluations = [(promise, evaluate_promise(promise, simulation_date)) for promise in promises]
+    case_evaluations = [(case, evaluate_case(case, simulation_date)) for case in cases]
+    audit_keys: set[AuditKey] = {
+        *(('Invoice', invoice.id, 'INVOICE_OVERDUE_DETECTED') for invoice, facts in invoice_evaluations if facts.state == "OVERDUE"),
+        *(('PromiseToPay', promise.id, 'PROMISE_BROKEN_DETECTED') for promise, facts in promise_evaluations if facts.state == "BROKEN"),
+        *(('RecoveryCase', case.id, 'RECOVERY_ACTION_BLOCKED_DISPUTE') for case, evaluation in case_evaluations if evaluation.active_dispute),
+    }
+    evaluate_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
+    existing_audits = _existing_audit_keys(session, audit_keys)
+    load_existing_audits_ms = elapsed_ms(stage_started)
+    stage_started = perf_counter()
+    for invoice, facts in invoice_evaluations:
         if facts.state == "OVERDUE":
             _audit_once(session, "Invoice", invoice.id, "INVOICE_OVERDUE_DETECTED", {
                 "days_overdue": facts.days_overdue, "outstanding_amount": str(facts.outstanding_amount),
-            }, occurred_at)
-    for promise in promises:
-        facts = evaluate_promise(promise, simulation_date)
+            }, occurred_at, existing=existing_audits)
+    for promise, facts in promise_evaluations:
         if facts.state == "BROKEN":
             _audit_once(session, "PromiseToPay", promise.id, "PROMISE_BROKEN_DETECTED", {
                 "promised_date": str(facts.promised_date), "promised_amount": str(facts.promised_amount),
-            }, occurred_at)
-    for case in cases:
-        evaluation = evaluate_case(case, simulation_date)
+            }, occurred_at, existing=existing_audits)
+    for case, evaluation in case_evaluations:
         if evaluation.active_dispute:
             _audit_once(session, "RecoveryCase", case.id, "RECOVERY_ACTION_BLOCKED_DISPUTE", {
                 "invoice_id": str(case.invoice_id), "reason": "ACTIVE_DISPUTE",
-            }, occurred_at)
+            }, occurred_at, existing=existing_audits)
         if evaluation.current_state != evaluation.derived_state:
             previous_state = case.current_state.value
             case.current_state = RecoveryState(evaluation.derived_state)
@@ -216,6 +267,22 @@ def synchronize_recovery_states(session: Session, simulation_date: date, *, comm
             }, occurred_at=occurred_at))
     if commit:
         session.commit()
+    persist_ms = elapsed_ms(stage_started)
+    log_timing(
+        "recovery_synchronization_timing",
+        total_ms=elapsed_ms(started_at),
+        load_cases_ms=load_cases_ms,
+        load_invoices_ms=load_invoices_ms,
+        load_promises_ms=load_promises_ms,
+        evaluate_ms=evaluate_ms,
+        load_existing_audits_ms=load_existing_audits_ms,
+        persist_ms=persist_ms,
+        audit_candidates=len(audit_keys),
+        existing_audits=len(existing_audits),
+        cases_evaluated=len(cases),
+        cases_changed=changed,
+        committed=commit,
+    )
     return {"cases_evaluated": len(cases), "cases_changed": changed}
 
 
