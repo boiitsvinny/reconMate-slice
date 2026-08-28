@@ -8,7 +8,7 @@
 
 ---
 
-## Problem
+## The Problem
 
 B2B revenue recovery is not simply:
 
@@ -26,13 +26,14 @@ ReconMate is built around that decision.
 
 ## What ReconMate Does
 
-ReconMate continuously evaluates a B2B receivables portfolio and helps operators decide:
+ReconMate continuously evaluates a B2B receivables portfolio and helps operators determine:
 
-- which accounts require recovery action;
+- which accounts need recovery action;
 - which accounts should be monitored;
 - which accounts must not be contacted;
 - when escalation is justified;
-- what evidence supports each decision.
+- what changed since the previous decision;
+- and what evidence supports every recommendation.
 
 Examples:
 
@@ -59,7 +60,7 @@ High risk alone does not mean permission to act.
 
 ## Command Center
 
-Operators can query the portfolio using natural language.
+Operators can query the live portfolio using natural language.
 
 Examples:
 
@@ -90,7 +91,7 @@ ReconMate converts these requests into structured deterministic queries using:
 - limits;
 - operation type.
 
-Supported results include:
+Depending on the request, results can be returned as:
 
 - customer rankings;
 - counts;
@@ -99,15 +100,15 @@ Supported results include:
 - payment records;
 - comparisons;
 - latest-cycle changes;
-- recovery-action plans.
+- controlled recovery plans.
 
-Unsupported requests fail safely instead of falling back to unrelated results.
+Unsupported or out-of-domain requests fail safely instead of silently falling back to unrelated results.
 
 ---
 
 ## AI Architecture
 
-ReconMate separates **AI interpretation** from **financial authority**.
+ReconMate intentionally separates **AI interpretation** from **financial authority**.
 
 ```text
 Customer communication
@@ -136,12 +137,12 @@ It cannot independently decide that:
 - a payment was received;
 - an invoice is paid;
 - a dispute is resolved;
-- recovery outreach is allowed;
-- financial state should change.
+- recovery outreach is permitted;
+- or financial state should change.
 
 Those decisions remain deterministic and auditable.
 
-For reproducible evaluation, the hosted sandbox can use deterministic communication interpretation. Model-backed interpretation sits behind a fail-closed provider boundary.
+For reproducible Buildathon evaluation, the hosted sandbox can use deterministic communication interpretation. Model-backed interpretation exists behind a fail-closed provider boundary, and the active interpretation runtime is exposed in the product.
 
 ---
 
@@ -152,7 +153,7 @@ ReconMate includes safeguards for:
 - active disputes;
 - active payment promises;
 - paid or closed cases;
-- operator approvals;
+- operator approval requirements;
 - stale recommendations;
 - duplicate actions;
 - duplicate provider events;
@@ -165,9 +166,9 @@ A recommendation that was valid earlier cannot simply be executed after the unde
 
 ## Payment Reminder Eligibility
 
-ReconMate does not treat every overdue customer as a valid reminder target.
+ReconMate does not treat every overdue account as a valid reminder target.
 
-Reminder candidates are separated into states such as:
+Reminder candidates are separated into operational states such as:
 
 ```text
 ELIGIBLE NOW
@@ -187,7 +188,7 @@ Blocked or deferred accounts are not treated as sendable reminder candidates.
 
 ## Payment / Recovery Lifecycle
 
-Where applicable, ReconMate exposes the existing lifecycle:
+Where applicable, ReconMate exposes the existing recovery lifecycle:
 
 ```text
 Recovery decision
@@ -215,11 +216,13 @@ Payment request ≠ payment received
 Observed payment ≠ proof ReconMate caused the payment
 ```
 
+Provider events are validated before financial state changes, and duplicate events are protected against repeated mutation.
+
 ---
 
 ## Batch Recovery Proof
 
-ReconMate provides a portfolio-level reconciliation:
+ReconMate includes a portfolio-level recovery reconciliation:
 
 ```text
 Starting overdue exposure
@@ -229,16 +232,17 @@ Observed post-due recovery
 Remaining overdue exposure
 ```
 
-The report includes:
+The report exposes:
 
-- observed recovery;
-- remaining exposure;
-- recovered and partially recovered accounts;
+- observed post-due recovery;
+- remaining overdue exposure;
+- fully and partially recovered accounts;
+- deliberate holds;
 - disputes;
-- promise holds;
+- promise-monitoring cases;
 - unresolved exceptions;
-- payment evidence;
-- workflow outcomes.
+- workflow outcomes;
+- payment-level evidence.
 
 ### Measurement Boundary
 
@@ -252,7 +256,36 @@ from:
 
 The hosted portfolio is synthetic and reproducible for Buildathon evaluation.
 
-ReconMate does not claim synthetic payments were caused by the system.
+ReconMate does not claim that synthetic payments were caused by the system.
+
+---
+
+## Persisted Operating Simulation
+
+ReconMate includes a deterministic virtual operating environment containing persisted:
+
+- customers;
+- invoices;
+- payments;
+- promises-to-pay;
+- disputes;
+- communications;
+- recovery cases;
+- workflow actions;
+- audit events.
+
+The current portfolio size and operating state are shown directly in the live application rather than being hardcoded here.
+
+Advancing the operating cycle can introduce changes such as:
+
+- payments;
+- broken promises;
+- customer delay responses;
+- dispute changes;
+- exposure changes;
+- recommendation changes.
+
+Affected accounts are then reassessed against the latest persisted facts.
 
 ---
 
@@ -260,23 +293,23 @@ ReconMate does not claim synthetic payments were caused by the system.
 
 ### Home
 
-Portfolio exposure, actionable recovery work, deliberate holds, recent decision changes, and prioritized cases.
+Portfolio exposure, actionable recovery work, deliberate holds, recent decision changes, simulation controls, and prioritized cases.
 
 ### Analyze
 
-Natural-language portfolio querying, filtering, comparison, exact entity lookup, and decision explanation.
+Natural-language portfolio querying, filtering, ranking, counts, invoice/payment lookup, comparison, and decision explanation.
 
 ### Reports
 
-Batch Recovery Proof, reconciliation, holds, exceptions, and payment evidence.
+Batch Recovery Proof, financial reconciliation, holds, exceptions, workflow outcomes, and payment evidence.
 
 ### History
 
-Persisted invoice and financial-operational records.
+Persisted invoice and financial-operational records with search, filtering, sorting, and case drill-down.
 
 ### Operator Case Workspace
 
-Current financial state, recovery decision, blocker, actionability, communications, workflow, provider lifecycle, and audit history.
+Current financial state, recovery decision, actionability, blockers, communication evidence, workflow controls, payment/provider lifecycle, and persisted audit history.
 
 ---
 
@@ -304,7 +337,7 @@ Current financial state, recovery decision, blocker, actionability, communicatio
 ### Intelligence
 
 - Deterministic recovery policy
-- Structured natural-language portfolio queries
+- Structured natural-language portfolio querying
 - Bounded communication interpretation
 - Gemini provider support
 - Fail-closed validation
@@ -353,19 +386,14 @@ Open:
 http://localhost:3000
 ```
 
----
-
-## Backend Tests
+### Backend Tests
 
 ```powershell
 Set-Location apps/api
-
 pytest
 ```
 
----
-
-## Frontend Validation
+### Frontend Validation
 
 ```powershell
 Set-Location apps/web
@@ -379,7 +407,7 @@ npm run build
 
 ## Design Principles
 
-ReconMate follows five rules:
+ReconMate follows five core rules:
 
 1. **Financial truth stays deterministic.**
 2. **High risk does not override stopping rules.**
@@ -419,4 +447,8 @@ It is to make revenue recovery:
 
 ## License
 
-See [LICENSE](./LICENSE).
+Copyright © 2026 boiitsvinny. All rights reserved.
+
+This repository is publicly available for evaluation, demonstration, and portfolio purposes only.
+
+See [LICENSE](./LICENSE) for full terms.
