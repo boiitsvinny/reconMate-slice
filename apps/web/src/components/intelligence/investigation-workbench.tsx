@@ -15,7 +15,7 @@ export function InvestigationWorkbench({ result, onOpenTarget }: { result: Comma
     {result.analyzed_entities.length > 1 && <ComparisonPanel result={result} />}
     <Panel className="overflow-hidden">
       <SectionHeader eyebrow="Investigate further" title="How each decision was derived" detail="Scoped facts, deterministic score contributions, blockers, and current recommendations." prominent />
-      <div className="divide-y divide-white/[.06]" role="region" aria-label="Decision investigations">{result.analyzed_entities.map((entity, index) => <EntityInspector key={entity.entity_type + "-" + entity.entity_id} entity={entity} rank={result.query_evidence.ranking.find((item) => item.entity_id === entity.entity_id)} open={result.analyzed_entities.length === 1 || index === 0} onOpenTarget={onOpenTarget} />)}</div>
+      <div className="operational-scrollbar max-h-[38rem] divide-y divide-white/[.06] overflow-x-hidden overflow-y-auto overscroll-contain" role="region" aria-label="Decision investigations" tabIndex={0}>{result.analyzed_entities.map((entity, index) => <EntityInspector key={entity.entity_type + "-" + entity.entity_id} entity={entity} rank={result.query_evidence.ranking.find((item) => item.entity_id === entity.entity_id)} open={result.analyzed_entities.length === 1 || index === 0} onOpenTarget={onOpenTarget} />)}</div>
     </Panel>
   </div>;
 }
@@ -42,10 +42,7 @@ function EntityInspector({ entity, rank, open, onOpenTarget }: { entity: Intelli
       <FlowArrow />
       <LineageStage eyebrow="Decision" title={entity.recommendation.title} items={[entity.recommendation.explanation, actionability.detail]} />
     </div>
-    <div className="mt-4 grid gap-4 rounded-xl border border-amber-300/12 bg-amber-300/[.025] p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-      <div><p className="text-[11px] font-bold uppercase tracking-[.12em] text-amber-200/80">What would change this decision?</p><p className="mt-2 text-xs leading-5 text-slate-400">These supported fact changes trigger a fresh deterministic evaluation; they do not guarantee a specific future score.</p><ul className="mt-2 grid gap-1.5 text-[13px] leading-5 text-slate-200 sm:grid-cols-2">{decisionBoundaries(entity).map((item) => <li key={item} className="flex gap-2"><span className="text-amber-300">•</span><span>{item}</span></li>)}</ul></div>
-      <div className="flex flex-col gap-2 sm:flex-row"><Link href="/history" className={buttonStyles.secondary}>View underlying records</Link>{onOpenTarget && <button type="button" onClick={() => onOpenTarget(entity.entity_type, entity.entity_id)} className={buttonStyles.primary}>Review in workspace</button>}</div>
-    </div>
+    <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end"><Link href="/history" className={buttonStyles.secondary}>View underlying records</Link>{onOpenTarget && <button type="button" onClick={() => onOpenTarget(entity.entity_type, entity.entity_id)} className={buttonStyles.primary}>Review in workspace</button>}</div>
     {rank?.stored_workflow_priority && <p className="mt-3 text-[10px] text-slate-500">Stored workflow priority: <strong className="text-slate-300">{label(rank.stored_workflow_priority)}</strong> · the priority already recorded in the operator workflow, shown separately from current intelligence.</p>}
   </details>;
 }
@@ -119,13 +116,6 @@ function actionabilityFor(entity: IntelligenceResult) {
   if (entity.metrics.active_promise_count) return { label: "Waiting", blocker: "Valid payment promise is active", detail: "ReconMate is monitoring the promise deadline before another recovery action." };
   if (entity.recommendation.action === "MONITOR") return { label: "Monitoring", blocker: null, detail: "No current condition requires operator intervention." };
   return { label: "Actionable", blocker: null, detail: "Current facts support operator review through the controlled workflow." };
-}
-
-function decisionBoundaries(entity: IntelligenceResult) {
-  if (entity.recommendation.action === "REVIEW_DISPUTE") return ["The active dispute is resolved or no longer blocks the outstanding invoice.", "A payment changes the outstanding exposure being disputed."];
-  if (entity.recommendation.action === "WAIT_FOR_PROMISE") return ["The active promise expires without matching payment evidence.", "The promise is fulfilled, cancelled, or replaced by a new recorded commitment."];
-  if (entity.recommendation.action === "MONITOR") return ["Receivables become overdue or payment activity stalls.", "A promise breaks, a dispute opens, or recovery work becomes stalled."];
-  return ["A valid payment promise is recorded and takes precedence over recovery action.", "An active dispute is recorded and requires review.", "Payment materially reduces or clears the overdue exposure and its score factors."];
 }
 
 function sourceFacts(entity: IntelligenceResult) {
