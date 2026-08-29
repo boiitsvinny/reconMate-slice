@@ -191,12 +191,24 @@ function AnswerCell({ label: answerLabel, value, primary = false }: { label: str
 
 function DirectRecordsPanel({ result }: { result: CommandResult }) {
   const payments = result.interpreted_intent.query.entity === "PAYMENTS";
+  const [sort, setSort] = useState<{ field: "invoice" | "age"; direction: "asc" | "desc" } | null>(null);
+  const records = [...result.direct_records].sort((left, right) => {
+    if (payments || !sort) return 0;
+    const comparison = sort.field === "invoice"
+      ? (left.invoice_number ?? left.display_name).localeCompare(right.invoice_number ?? right.display_name, undefined, { numeric: true })
+      : (left.days_overdue ?? 0) - (right.days_overdue ?? 0);
+    return sort.direction === "asc" ? comparison : -comparison;
+  });
+  const toggleSort = (field: "invoice" | "age") => setSort((current) => current?.field === field
+    ? { field, direction: current.direction === "asc" ? "desc" : "asc" }
+    : { field, direction: field === "age" ? "desc" : "asc" });
+  const sortIndicator = (field: "invoice" | "age") => sort?.field === field ? (sort.direction === "asc" ? " ↑" : " ↓") : "";
   return <Panel className="overflow-hidden">
     <SectionHeader eyebrow="Persisted factual records" title={payments ? "Payment records" : "Invoice records"} detail={`${result.query_evidence.records_returned} of ${result.query_evidence.records_matched} matching records shown`} prominent />
-    <div className="operational-scrollbar max-h-[34rem] overflow-auto" role="region" aria-label={payments ? "Matching payments" : "Matching invoices"} tabIndex={0}>
-      <table className="w-full min-w-[760px] border-collapse text-left text-xs">
-        <thead className="sticky top-0 z-10 bg-[#08111f]"><tr className="border-b border-white/[.07] text-[10px] uppercase tracking-[.12em] text-slate-500"><th className="px-5 py-3">{payments ? "Payment" : "Invoice"}</th><th className="px-5 py-3">Customer</th><th className="px-5 py-3">Invoice</th><th className="px-5 py-3">{payments ? "Amount" : "Outstanding"}</th><th className="px-5 py-3">{payments ? "Payment date" : "Due / age"}</th><th className="px-5 py-3">Status</th></tr></thead>
-        <tbody className="divide-y divide-white/[.055]">{result.direct_records.map((record) => <tr key={record.entity_id} className="interactive-row"><td className="px-5 py-4 font-semibold text-sky-100">{record.display_name}</td><td className="px-5 py-4 text-slate-200">{record.customer_name}</td><td className="px-5 py-4 text-slate-300">{record.invoice_number}</td><td className="px-5 py-4 font-semibold tabular-nums text-white">{formatMoney(record.amount ?? record.outstanding_amount ?? "0")}</td><td className="px-5 py-4 text-slate-300">{payments ? record.payment_date : `${record.due_date ?? "—"} · ${record.days_overdue ?? 0}d overdue`}</td><td className="px-5 py-4"><StatusPill tone={record.status === "PAID" ? "emerald" : record.status === "DISPUTED" ? "amber" : "slate"}>{record.status ?? "Persisted"}</StatusPill></td></tr>)}</tbody>
+    <div className="operational-scrollbar max-h-72 overflow-x-hidden overflow-y-auto overscroll-contain" role="region" aria-label={payments ? "Matching payments" : "Matching invoices"} tabIndex={0}>
+      <table className="w-full table-fixed border-collapse text-left text-xs">
+        <thead className="sticky top-0 z-10 bg-[#08111f]"><tr className="border-b border-white/[.07] text-[10px] uppercase tracking-[.12em] text-slate-500"><th aria-sort={!payments && sort?.field === "invoice" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className="w-[13%] px-3 py-3 sm:px-5">{payments ? "Payment" : <button type="button" onClick={() => toggleSort("invoice")} className="font-semibold hover:text-sky-200 focus-visible:outline-none focus-visible:text-sky-200">Invoice{sortIndicator("invoice")}</button>}</th><th className="w-[24%] px-3 py-3 sm:px-5">Customer</th><th className="w-[15%] px-3 py-3 sm:px-5">{payments ? "Invoice" : "Original amount"}</th><th className="w-[15%] px-3 py-3 sm:px-5">{payments ? "Amount" : "Outstanding"}</th><th aria-sort={!payments && sort?.field === "age" ? (sort.direction === "asc" ? "ascending" : "descending") : "none"} className="w-[20%] px-3 py-3 sm:px-5">{payments ? "Payment date" : <button type="button" onClick={() => toggleSort("age")} className="font-semibold hover:text-sky-200 focus-visible:outline-none focus-visible:text-sky-200">Due / age{sortIndicator("age")}</button>}</th><th className="w-[13%] px-3 py-3 sm:px-5">Status</th></tr></thead>
+        <tbody className="divide-y divide-white/[.055]">{records.map((record) => <tr key={record.entity_id} className="interactive-row"><td className="break-words px-3 py-4 font-semibold text-sky-100 sm:px-5">{record.display_name}</td><td className="break-words px-3 py-4 text-slate-200 sm:px-5">{record.customer_name}</td><td className="break-words px-3 py-4 tabular-nums text-slate-300 sm:px-5">{payments ? record.invoice_number : formatMoney(record.original_amount ?? "0")}</td><td className="break-words px-3 py-4 font-semibold tabular-nums text-white sm:px-5">{formatMoney(record.amount ?? record.outstanding_amount ?? "0")}</td><td className="break-words px-3 py-4 text-slate-300 sm:px-5">{payments ? record.payment_date : `${record.due_date ?? "—"} · ${record.days_overdue ?? 0}d overdue`}</td><td className="px-3 py-4 sm:px-5"><StatusPill tone={record.status === "PAID" ? "emerald" : record.status === "DISPUTED" ? "amber" : "slate"}>{record.status ?? "Persisted"}</StatusPill></td></tr>)}</tbody>
       </table>
     </div>
   </Panel>;
