@@ -136,8 +136,8 @@ export function InvoiceRegister({ invoices, customers, riskByCustomer, riskAvail
         ))}
         {!rows.length && <p className="px-5 py-10 text-center text-sm text-slate-500">No invoices match the current search and status filters.</p>}
       </div>
-      <div className="operational-scrollbar hidden max-h-[38rem] overflow-auto overscroll-contain md:block" role="region" aria-label="Invoice search results" tabIndex={0}>
-        <div className="min-w-[960px]">
+      <div className="operational-scrollbar hidden max-h-[38rem] overflow-x-hidden overflow-y-auto overscroll-contain md:block" role="region" aria-label="Invoice search results" tabIndex={0}>
+        <div className="w-full min-w-0">
           <div className="sticky top-0 z-10 grid grid-cols-[1.15fr_1fr_.7fr_.75fr_.72fr_.72fr] gap-4 border-b border-white/[.08] bg-[#091321] px-5 py-3 text-[11px] font-bold uppercase tracking-[.11em] text-slate-400">
             <SortHeader label="Invoice / account" active={sort === "invoice"} direction={sort === "invoice" && sortDirection === "desc" ? "Z–A" : "A–Z"} onClick={() => selectSort("invoice")} />
             <SortHeader label="Customer" active={sort === "customer"} direction={sort === "customer" && sortDirection === "desc" ? "Z–A" : "A–Z"} onClick={() => selectSort("customer")} />

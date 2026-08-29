@@ -31,7 +31,7 @@ from app.recommendations.schemas import RecommendedAction
 
 
 PLAN_TTL_MINUTES = 30
-DEFAULT_RESULT_LIMIT = 5
+DEFAULT_RESULT_LIMIT = 15
 
 
 @dataclass(frozen=True)

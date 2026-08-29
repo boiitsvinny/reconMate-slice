@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { PriorityCase } from "./data";
 import { buttonStyles, StatusPill } from "./ui";
@@ -29,6 +29,7 @@ export function useCasePreview() {
 
 export function CustomerPreview({ preview, onClose, onViewMore }: { preview: CasePreviewState | null; onClose: () => void; onViewMore: (item: PriorityCase) => void }) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; width: number } | null>(null);
 
   useEffect(() => {
     if (!preview) return;
@@ -44,19 +45,35 @@ export function CustomerPreview({ preview, onClose, onViewMore }: { preview: Cas
     };
   }, [onClose, preview]);
 
+  useLayoutEffect(() => {
+    if (!preview || !cardRef.current) {
+      setPosition(null);
+      return;
+    }
+    const placeBesidePointer = () => {
+      const edge = 12;
+      const gap = 14;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const width = Math.min(320, viewportWidth - edge * 2);
+      const height = Math.min(cardRef.current?.scrollHeight ?? 0, viewportHeight - edge * 2);
+      const preferredLeft = preview.x + gap;
+      const preferredTop = preview.y + gap;
+      const left = Math.max(edge, Math.min(preferredLeft + width <= viewportWidth - edge ? preferredLeft : preview.x - width - gap, viewportWidth - width - edge));
+      const top = Math.max(edge, Math.min(preferredTop + height <= viewportHeight - edge ? preferredTop : preview.y - height - gap, viewportHeight - height - edge));
+      setPosition({ left, top, width });
+    };
+    placeBesidePointer();
+    window.addEventListener("resize", placeBesidePointer);
+    return () => window.removeEventListener("resize", placeBesidePointer);
+  }, [preview]);
+
   if (!preview) return null;
   const { item } = preview;
   const recoveryComplete = item.recommendedAction === "NO_ACTION_REQUIRED" || item.exposure <= 0 || item.state === "RESOLVED";
-  const viewportWidth = typeof window === "undefined" ? 1280 : window.innerWidth;
-  const viewportHeight = typeof window === "undefined" ? 800 : window.innerHeight;
-  const width = Math.min(320, viewportWidth - 24);
-  const left = viewportWidth < 640
-    ? 12
-    : Math.max(12, Math.min(preview.x + 16 + width <= viewportWidth ? preview.x + 16 : preview.x - width - 16, viewportWidth - width - 12));
-  const top = Math.max(12, Math.min(preview.y - 28, viewportHeight - 330));
 
   return createPortal(
-    <div ref={cardRef} style={{ left, top, width }} className="fixed z-[60] max-h-[calc(100vh-24px)] overflow-y-auto rounded-2xl border border-sky-300/20 bg-[#111a2d]/95 p-4 shadow-2xl shadow-black/70 backdrop-blur-2xl" role="dialog" aria-label={`${item.customerName} case preview`}>
+    <div ref={cardRef} style={{ left: position?.left ?? 12, top: position?.top ?? 12, width: position?.width ?? "min(320px, calc(100vw - 24px))", visibility: position ? "visible" : "hidden" }} className="fixed z-[60] max-h-[calc(100vh-24px)] overflow-x-hidden overflow-y-auto rounded-2xl border border-sky-300/20 bg-[#111a2d]/95 p-4 shadow-2xl shadow-black/70 backdrop-blur-2xl" role="dialog" aria-label={`${item.customerName} case preview`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-white">{item.customerName}</p>
