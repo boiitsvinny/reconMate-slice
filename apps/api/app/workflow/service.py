@@ -56,6 +56,13 @@ def _ensure_facts_allow_execution(case: RecoveryCase, recommendation: RecoveryRe
         _fail("Closed, resolved, or paid cases cannot execute recovery work.")
     if "ACTIVE_DISPUTE" in recommendation.blockers and action in OUTREACH_RECOMMENDATIONS:
         _fail("An active dispute blocks simulated outreach.")
+    readiness = recommendation.action_readiness
+    if action in OUTREACH_RECOMMENDATIONS and readiness is not None and not readiness.communication_permitted:
+        if "COMMUNICATION_OPTED_OUT" in readiness.reasons:
+            _fail("Customer communication consent is opted out; outreach is blocked.")
+        if "COMMUNICATION_CONSENT_UNKNOWN" in readiness.reasons:
+            _fail("Customer communication consent is unknown; human review is required before outreach.")
+        _fail("No eligible communication channel is available; outreach is blocked.")
 
 
 def create_action(
@@ -77,7 +84,20 @@ def create_action(
     recommendation = recommend_case(case, simulation_date)
     if expected_action is not None and recommendation.recommended_action is not expected_action:
         _fail(f"Recommendation is stale: current action is {recommendation.recommended_action.value}.")
-    _ensure_facts_allow_execution(case, recommendation)
+    try:
+        _ensure_facts_allow_execution(case, recommendation)
+    except HTTPException as exc:
+        db.add(AuditEvent(
+            entity_type="RecoveryCase", entity_id=case.id,
+            event_type="RECOVERY_ACTION_READINESS_BLOCKED", actor_type="system",
+            payload={
+                "reason": str(exc.detail),
+                "recommended_action": recommendation.recommended_action.value,
+                "action_readiness": recommendation.action_readiness.model_dump(mode="json") if recommendation.action_readiness else None,
+            }, occurred_at=_now(),
+        ))
+        db.commit()
+        raise
     action_type = ACTION_TYPE_BY_RECOMMENDATION.get(recommendation.recommended_action)
     if action_type is None:
         _fail("The current recommendation is advisory only and should not create workflow work.")
@@ -170,11 +190,20 @@ def execute_action(db: Session, action: RecoveryAction, case: RecoveryCase, simu
         _ensure_facts_allow_execution(case, recommendation)
         if "ACTIVE_DISPUTE" in recommendation.blockers and action.recommendation_action in {item.value for item in OUTREACH_RECOMMENDATIONS}:
             _fail("An active dispute blocks simulated outreach, including a previously created action.")
+        if action.recommendation_action != recommendation.recommended_action.value:
+            _fail(
+                f"Recommendation is stale: stored action is {action.recommendation_action or 'UNKNOWN'}; "
+                f"current action is {recommendation.recommended_action.value}."
+            )
     except HTTPException as exc:
         _execution_blocked(db, action, str(exc.detail), {"current_recommendation": recommendation.model_dump(mode="json")})
     # Simulated only: no payment, invoice, promise, state, or external communication is changed.
     action.status, action.executed_at, action.executed_by = RecoveryActionStatus.EXECUTED, _now(), operator_id
     action.operator_note = note or action.operator_note
-    _audit(db, action, "RECOVERY_ACTION_EXECUTED", {"simulated": True, "recommended_action": action.recommendation_action}, "operator", operator_id)
+    _audit(db, action, "RECOVERY_ACTION_EXECUTED", {
+        "simulated": True,
+        "recommended_action": action.recommendation_action,
+        "action_readiness": recommendation.action_readiness.model_dump(mode="json") if recommendation.action_readiness else None,
+    }, "operator", operator_id)
     db.commit(); db.refresh(action)
     return action

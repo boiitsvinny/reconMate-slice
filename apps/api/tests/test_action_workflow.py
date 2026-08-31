@@ -106,3 +106,13 @@ def test_duplicate_execution_is_prevented() -> None:
 def test_stale_expected_recommendation_is_rejected() -> None:
     with pytest.raises(HTTPException, match="stale"):
         create_action(FakeSession(), _case(), SIM_DATE, RecommendedAction.MONITOR_ACTIVE_PROMISE)
+
+
+def test_previously_created_action_is_blocked_when_current_recommendation_changes() -> None:
+    case = _case()
+    db = FakeSession()
+    action = create_action(db, case, SIM_DATE, RecommendedAction.SEND_PAYMENT_REMINDER)
+    _active_promise(case)
+    with pytest.raises(HTTPException, match="Recommendation is stale"):
+        execute_action(db, action, case, SIM_DATE, "operator", None)
+    assert action.status is RecoveryActionStatus.RECOMMENDED

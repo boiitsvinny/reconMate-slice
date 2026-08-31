@@ -46,6 +46,8 @@ def _records():
             "invoice_id": str(invoice.id), "outstanding_before": "500", "outstanding_after": "200",
             "score_before": 80, "score_after": 55,
             "recommendation_before": "ESCALATE", "recommendation_after": "FOLLOW_UP",
+            "financial_mutation": "PAYMENT_PERSISTED", "verification_state": "DEMO_EVENT_VALIDATED",
+            "idempotency_key": "PROVIDER_DEMO:demo_evt_1",
         },
     )
     return case, action, request, provider_event
@@ -63,6 +65,7 @@ def test_timeline_is_scoped_and_provider_references_match_entities() -> None:
 
     stored = next(item for item in timeline if item["event_type"] == "RECOVERY_ACTION_EXECUTED")
     provider = next(item for item in timeline if item["event_type"] == "PROVIDER_PAYMENT_EVENT_APPLIED")
+    financial = next(item for item in timeline if item["event_type"] == "PROVIDER_FINANCIAL_STATE_CHANGE")
     reassessment = next(item for item in timeline if item["event_type"] == "PROVIDER_INTELLIGENCE_REASSESSMENT")
     assert stored["historical"] is True
     assert stored["case_id"] == str(case.id) and stored["invoice_id"] == str(case.invoice.id)
@@ -73,6 +76,9 @@ def test_timeline_is_scoped_and_provider_references_match_entities() -> None:
     assert provider["payment_reference"] == "demo_pay_1"
     assert provider["before"]["outstanding"] == "500" and provider["after"]["outstanding"] == "200"
     assert provider["provenance"] == "Provider Demo Mode"
+    assert financial["category"] == "FINANCIAL_STATE_CHANGE"
+    assert financial["before"]["outstanding"] == "500" and financial["after"]["outstanding"] == "200"
+    assert timeline.index(provider) < timeline.index(financial) < timeline.index(reassessment)
     assert reassessment["category"] == "INTELLIGENCE_REASSESSMENT"
     assert reassessment["historical"] is True
     assert reassessment["before"]["recommendation"] == "ESCALATE"

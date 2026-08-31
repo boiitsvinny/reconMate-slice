@@ -49,6 +49,8 @@ def _category(event_type: str) -> str:
         return "AI_INTERPRETATION"
     if "INTELLIGENCE_REASSESSMENT" in event_type or event_type.startswith("SIMULATION_INTELLIGENCE"):
         return "INTELLIGENCE_REASSESSMENT"
+    if event_type == "PROVIDER_FINANCIAL_STATE_CHANGE":
+        return "FINANCIAL_STATE_CHANGE"
     if event_type.startswith("RECOVERY_ACTION") or event_type == "EXTERNAL_PAYMENT_REQUEST_CREATED":
         return "OPERATOR_ACTION"
     if event_type.startswith("PROVIDER_"):
@@ -68,7 +70,9 @@ def _title(event_type: str) -> str:
     if event_type == "EXTERNAL_PAYMENT_REQUEST_CREATED":
         return "Payment request created"
     if event_type == "PROVIDER_PAYMENT_EVENT_APPLIED":
-        return "Provider payment event applied"
+        return "Validated provider event persisted"
+    if event_type == "PROVIDER_FINANCIAL_STATE_CHANGE":
+        return "Payment persisted and balance updated"
     if event_type == "PROVIDER_DUPLICATE_EVENT_IGNORED":
         return "Duplicate provider event ignored"
     if event_type.startswith("RECOVERY_ACTION_"):
@@ -113,6 +117,13 @@ def _entry(
             f"Original event: {payload.get('original_event', 'unavailable')} · "
             "Financial mutation: none · Outstanding unchanged"
         )
+    if event_type == "PROVIDER_PAYMENT_EVENT_APPLIED":
+        detail = (
+            f"Verification: {payload.get('verification_state', 'recorded')} · "
+            f"idempotency key: {payload.get('idempotency_key', 'unavailable')}"
+        )
+    if event_type == "PROVIDER_FINANCIAL_STATE_CHANGE":
+        detail = "Validated event applied once: payment persisted and invoice outstanding updated"
     return {
         "id": str(event_id), "occurred_at": occurred_at, "category": _category(event_type),
         "event_type": event_type, "title": _title(event_type),
@@ -212,6 +223,14 @@ def build_case_evidence_timeline(
             customer_id=customer_id, case_id=case.id, invoice_id=invoice_id,
             actor_type="provider_demo" if request and request.provider_mode == "DEMO" else "provider",
         ))
+        if evidence.get("financial_mutation") == "PAYMENT_PERSISTED":
+            entries.append(_entry(
+                event_id=f"{event.id}:financial", occurred_at=event.received_at,
+                event_type="PROVIDER_FINANCIAL_STATE_CHANGE",
+                payload={**evidence, "source": evidence.get("source") or ("Provider Demo Mode" if request and request.provider_mode == "DEMO" else "Provider evidence")},
+                customer_id=customer_id, case_id=case.id, invoice_id=invoice_id,
+                actor_type="system",
+            ))
         if any(evidence.get(key) is not None for key in ("score_before", "score_after", "recommendation_before", "recommendation_after")):
             entries.append(_entry(
                 event_id=f"{event.id}:reassessment", occurred_at=event.received_at,

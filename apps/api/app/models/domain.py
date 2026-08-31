@@ -60,6 +60,12 @@ class CommunicationChannel(str, enum.Enum):
     OTHER = "OTHER"
 
 
+class CommunicationConsentStatus(str, enum.Enum):
+    UNKNOWN = "UNKNOWN"
+    OPTED_IN = "OPTED_IN"
+    OPTED_OUT = "OPTED_OUT"
+
+
 class AIProcessingStatus(str, enum.Enum):
     NOT_REQUESTED = "NOT_REQUESTED"
     PENDING = "PENDING"
@@ -125,6 +131,11 @@ class Customer(Base):
     account_reference: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     segment: Mapped[str | None] = mapped_column(String(100))
     is_strategic_account: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    communication_consent_status: Mapped[CommunicationConsentStatus] = mapped_column(
+        Enum(CommunicationConsentStatus, name="communication_consent_status"), nullable=False,
+        default=CommunicationConsentStatus.UNKNOWN, server_default=CommunicationConsentStatus.UNKNOWN.value,
+    )
+    preferred_outreach_channel: Mapped[str | None] = mapped_column(String(30))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     invoices: Mapped[list[Invoice]] = relationship(back_populates="customer")

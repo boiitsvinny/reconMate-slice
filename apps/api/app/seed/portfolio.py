@@ -13,7 +13,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.models.domain import (
-    ApprovalStatus, AuditEvent, Communication, CommunicationChannel,
+    ApprovalStatus, AuditEvent, Communication, CommunicationChannel, CommunicationConsentStatus,
     CommunicationDirection, Customer, ExternalPaymentRequest, Invoice, InvoiceStatus, Payment, ProviderEvent,
     PromiseStatus, PromiseToPay, RecoveryAction, RecoveryActionStatus,
     RecoveryActionType, RecoveryCase, RecoveryPriority, RecoveryState,
@@ -365,7 +365,13 @@ def seed_database(session: Session, *, reset: bool = False) -> dict[str, int | D
     invoices_by_customer: dict[uuid.UUID, list[Invoice]] = {}
     for customer_index, blueprint in enumerate(BLUEPRINTS, start=1):
         rng = random.Random(SEED + customer_index * 104729)
-        customer = Customer(id=_id(f"customer/{customer_index}"), name=blueprint.name, account_reference=f"RM-{customer_index:04d}", segment=blueprint.industry, is_strategic_account=blueprint.strategic)
+        customer = Customer(
+            id=_id(f"customer/{customer_index}"), name=blueprint.name,
+            account_reference=f"RM-{customer_index:04d}", segment=blueprint.industry,
+            is_strategic_account=blueprint.strategic,
+            communication_consent_status=CommunicationConsentStatus.OPTED_IN,
+            preferred_outreach_channel=CommunicationChannel.EMAIL.value,
+        )
         session.add(customer)
         invoices = _seed_invoices(session, customer, blueprint, customer_index, rng)
         invoices_by_customer[customer.id] = invoices

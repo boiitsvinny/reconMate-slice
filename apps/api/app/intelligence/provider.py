@@ -222,7 +222,9 @@ class MockCommunicationIntelligenceProvider(CommunicationIntelligenceProvider):
                 expected_date=expected, confidence=0.62 if ambiguous else 0.91, conditional=conditional,
                 condition=conditions[0] if conditions else None, source_wording=text, ambiguous=ambiguous)]
         if dispute:
-            intent = Intent.DISPUTE if not commitment_found else Intent.PAYMENT_COMMITMENT
+            # Preserve both candidates, but the summary intent must keep the
+            # safety-critical dispute visible when a message is contradictory.
+            intent = Intent.DISPUTE
         elif claim:
             intent = Intent.PAYMENT_COMPLETED_CLAIM
         elif commitment_found:

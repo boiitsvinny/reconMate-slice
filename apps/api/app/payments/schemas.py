@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.recommendations.schemas import RecommendedAction
+
 
 class CreatePaymentRequestInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -13,6 +15,8 @@ class CreatePaymentRequestInput(BaseModel):
     requested_amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     purpose: str = Field(default="Operator-approved invoice payment request", min_length=1, max_length=255)
     operator_confirmed: Literal[True]
+    expected_recommended_action: RecommendedAction
+    expected_outstanding_amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
 
 
 class DemoPaymentEventInput(BaseModel):

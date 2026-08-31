@@ -218,6 +218,7 @@ export function CaseWorkspace({ item, onClose, liveVersion, affected, transition
               </div>
               {workspace.recommendation.blockers.length > 0 && <p className="mt-3 text-xs text-amber-200">Blockers: {workspace.recommendation.blockers.map(label).join(" / ")}</p>}
               <p className="mt-3 text-xs text-slate-400">Human approval {workspace.recommendation.human_approval_required ? "required" : "not required"}. Interpretation signals are supporting evidence only.</p>
+              {workspace.recommendation.action_readiness && <ActionReadiness readiness={workspace.recommendation.action_readiness} />}
               {workspace.recommendation.recommended_action === "SEND_PAYMENT_REMINDER" && !reminderDraft && <button type="button" onClick={prepareReminder} className={`${buttonStyles.primary} mt-4`}>Prepare reminder draft</button>}
               {reminderDraft && <ReminderArtifact artifact={reminderDraft} />}
             </section>
@@ -306,6 +307,30 @@ function RecoveryLoopSummary({ workspace, latest, latestPayment }: { workspace: 
       <div className="mt-4 grid gap-2 rounded-xl border border-white/[.07] bg-black/10 p-3 text-[11px] leading-5 sm:grid-cols-3"><p><strong className="text-fuchsia-200">Interpretation:</strong> extracts candidate evidence from communication.</p><p><strong className="text-sky-200">Deterministic policy:</strong> calculates risk, blockers, and recovery action.</p><p><strong className="text-amber-100">Operator:</strong> confirms evidence and approves material workflow actions.</p></div>
     </div>
   </details>;
+}
+
+function ActionReadiness({ readiness }: { readiness: NonNullable<Workspace["recommendation"]["action_readiness"]> }) {
+  const steps = [
+    ["Financially actionable", readiness.financially_actionable],
+    ["No active blocker", readiness.no_active_blocker],
+    ["Communication permitted", !readiness.communication_required || readiness.communication_permitted],
+    ["Channel available", !readiness.communication_required || readiness.channel_available],
+    ["Decision current", readiness.current_decision_valid],
+  ] as const;
+  return (
+    <div className="mt-4 rounded-xl border border-white/[.08] bg-black/15 p-3" aria-label="Action readiness checks">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[10px] font-bold uppercase tracking-[.13em] text-sky-200">Action readiness</p>
+        <p className="text-[10px] text-slate-500">Consent {label(readiness.consent_status)}{readiness.channel ? ` / ${label(readiness.channel)}` : " / no channel"}</p>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {steps.map(([name, passed]) => <div key={name} className={`rounded-lg border px-2.5 py-2 text-[10px] font-semibold ${passed ? "border-emerald-300/15 bg-emerald-300/[.04] text-emerald-200" : "border-amber-300/20 bg-amber-300/[.05] text-amber-100"}`}>{passed ? "PASS" : "BLOCKED"} · {name}</div>)}
+        <div className="rounded-lg border border-white/[.07] px-2.5 py-2 text-[10px] font-semibold text-slate-300">APPROVAL · {label(readiness.operator_approval)}</div>
+        <div className="rounded-lg border border-white/[.07] px-2.5 py-2 text-[10px] font-semibold text-slate-300">EXECUTION · {label(readiness.external_execution)}</div>
+      </div>
+      {readiness.reasons.length > 0 && <p className="mt-2 text-[10px] leading-4 text-amber-100/80">Why blocked: {readiness.reasons.map(label).join(" / ")}</p>}
+    </div>
+  );
 }
 
 function ExecutedActionResult({ action, latestPayment, historical }: { action: Workspace["actions"][number]; latestPayment?: NonNullable<Workspace["payments"]>[number]; historical: boolean }) {
@@ -423,6 +448,7 @@ function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evi
     INTELLIGENCE_REASSESSMENT: "border-violet-300/35 text-violet-200",
     OPERATOR_ACTION: "border-amber-300/35 text-amber-100",
     PROVIDER_EVENT: "border-emerald-300/35 text-emerald-200",
+    FINANCIAL_STATE_CHANGE: "border-cyan-300/35 text-cyan-200",
   };
   const value = (record: Record<string, string | number | null> | null) => record
     ? Object.entries(record).map(([key, item]) => `${label(key)} ${item ?? "-"}`).join(" · ")
@@ -431,7 +457,7 @@ function CaseEvidenceTimeline({ entries }: { entries: NonNullable<Workspace["evi
   return <section id="case-evidence-timeline" className="scroll-mt-6 rounded-2xl border border-white/[.09] bg-white/[.025] p-5">
     <p className="text-[10px] font-bold uppercase tracking-[.15em] text-sky-300">Persisted evidence</p>
     <h3 className="mt-1.5 text-lg font-semibold text-white">Case event and decision timeline</h3>
-    <p className="mt-1 text-xs leading-5 text-slate-400">Fact → decision → controlled action → provider outcome → reassessment. Historical decisions are labeled and never replace the current recommendation above.</p>
+    <p className="mt-1 text-xs leading-5 text-slate-400">Fact → decision → controlled action → provider event → financial state change → reassessment. Historical decisions are labeled and never replace the current recommendation above.</p>
     {entries.length ? <ol className="mt-5 space-y-3">{entries.map((entry) => {
       const before = value(entry.before); const after = value(entry.after);
       const refs = [entry.request_reference && `Request ${entry.request_reference}`, entry.event_reference && `Event ${entry.event_reference}`, entry.payment_reference && `Payment ${entry.payment_reference}`].filter(Boolean);

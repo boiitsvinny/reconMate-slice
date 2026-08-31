@@ -38,6 +38,14 @@ def create_external_payment_request(db: Session, case: RecoveryCase, operating_d
         _fail("A payment request requires a positive invoice outstanding amount.")
     recommendation = recommend_case(case, operating_date)
     evaluation = evaluate_case(case, operating_date)
+    if recommendation.recommended_action is not payload.expected_recommended_action:
+        _fail(
+            f"Payment request review is stale: current action is {recommendation.recommended_action.value}."
+        )
+    if case.invoice.outstanding_amount != payload.expected_outstanding_amount:
+        _fail(
+            "Payment request review is stale: the invoice outstanding amount changed after operator review."
+        )
     if recommendation.recommended_action not in SUPPORTED_PAYMENT_REQUEST_ACTIONS:
         _fail(f"{recommendation.recommended_action.value} does not support an external payment request.")
     if recommendation.blockers or not evaluation.eligibility.allowed:
@@ -53,7 +61,8 @@ def create_external_payment_request(db: Session, case: RecoveryCase, operating_d
     record = ExternalPaymentRequest(
         recovery_case_id=case.id, customer_id=case.customer.id, invoice_id=case.invoice.id,
         provider=provider.name, provider_mode=provider.mode, requested_amount=payload.requested_amount,
-        status="PENDING_PROVIDER", purpose=payload.purpose, operator_id=payload.operator_id,
+        paid_amount=Decimal("0"), status="PENDING_PROVIDER", purpose=payload.purpose,
+        operator_id=payload.operator_id,
     )
     db.add(record)
     db.flush()
@@ -70,6 +79,8 @@ def create_external_payment_request(db: Session, case: RecoveryCase, operating_d
                      "provider": provider.name, "provider_mode": provider.mode, "provider_reference": created.reference,
                      "customer_id": str(case.customer.id), "case_id": str(case.id), "invoice_id": str(case.invoice.id),
                      "requested_amount": str(payload.requested_amount),
+                     "expected_recommendation": payload.expected_recommended_action.value,
+                     "operator_confirmation": "VERIFIED",
                      "financial_mutation": "NONE", "outstanding_before": str(case.invoice.outstanding_amount),
                      "outstanding_after": str(case.invoice.outstanding_amount)},
             occurred_at=datetime.now(UTC),
@@ -123,6 +134,8 @@ def ingest_demo_payment_event(db: Session, request: ExternalPaymentRequest, case
     before_intelligence = evaluate_case_intelligence(case, operating_date)
     before_recommendation = recommend_case(case, operating_date)
     before_outstanding = invoice.outstanding_amount
+    provider_status_before = request.status
+    received_at = datetime.now(UTC)
     payment = Payment(invoice=invoice, amount=payload.amount, payment_date=payload.payment_date, reference=payload.payment_reference)
     db.add(payment)
     invoice.outstanding_amount -= payload.amount
@@ -140,6 +153,13 @@ def ingest_demo_payment_event(db: Session, request: ExternalPaymentRequest, case
         "invoice_id": str(request.invoice_id), "payment_request_id": str(request.id),
         "payment_id": str(payment.id), "provider_event_id": payload.event_id,
         "provider_reference": request.provider_reference, "provider_payment_reference": payload.payment_reference,
+        "provider_status_before": provider_status_before, "provider_status_after": request.status,
+        "verification_state": "DEMO_EVENT_VALIDATED",
+        "signature_verification": "NOT_APPLICABLE_PROVIDER_DEMO",
+        "idempotency_key": f"{request.provider}:{payload.event_id}",
+        "immutable_event_record": True,
+        "received_at": received_at.isoformat(),
+        "validation_checks": ["SCHEMA", "REQUEST_REFERENCE", "ENTITY_SCOPE", "PAYMENT_DATE", "AMOUNT", "EVENT_TYPE"],
         "event_type": payload.event_type, "financial_mutation": "PAYMENT_PERSISTED",
         "outstanding_before": str(before_outstanding), "outstanding_after": str(invoice.outstanding_amount),
         "score_before": before_intelligence.score, "score_after": after_intelligence.score,
@@ -151,6 +171,7 @@ def ingest_demo_payment_event(db: Session, request: ExternalPaymentRequest, case
         payment_request_id=request.id, payment_id=payment.id, provider=request.provider,
         provider_event_id=payload.event_id, provider_payment_reference=payload.payment_reference,
         event_type=payload.event_type, payload=payload.model_dump(mode="json"), evidence=evidence,
+        received_at=received_at,
     )
     db.add(event)
     db.add(AuditEvent(
@@ -199,6 +220,10 @@ def _record_duplicate_event(
             "invoice_id": str(request.invoice_id), "payment_request_id": str(request.id),
             "provider_reference": request.provider_reference,
             "provider_event_id": payload.event_id, "provider_payment_reference": payload.payment_reference,
+            "verification_state": "DUPLICATE_IDENTITY_MATCHED",
+            "signature_verification": "NOT_APPLICABLE_PROVIDER_DEMO",
+            "idempotency_key": f"{request.provider}:{payload.event_id}",
+            "immutable_event_record": True,
             **replay,
         },
         occurred_at=datetime.now(UTC),

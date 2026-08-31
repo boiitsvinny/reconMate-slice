@@ -12,6 +12,7 @@ from datetime import date
 from app.intelligence.schemas import CommunicationAnalysisResult, Intent
 from app.models.domain import CommunicationAnalysis, RecoveryCase
 from app.recommendations.schemas import (
+    ActionReadiness,
     CommunicationSignal,
     RecommendationPriority,
     RecommendedAction,
@@ -22,6 +23,7 @@ from app.recovery.engine import CaseEvaluation, evaluate_case
 SEVERE_EXPOSURE = 250_000
 SEVERE_OVERDUE_DAYS = 90
 RECENT_SIGNAL_DAYS = 14
+OUTREACH_ACTIONS = {RecommendedAction.SEND_PAYMENT_REMINDER, RecommendedAction.REQUEST_PAYMENT_DATE}
 
 
 def _signals(case: RecoveryCase, simulation_date: date) -> list[CommunicationSignal]:
@@ -145,13 +147,59 @@ def recommend_case(case: RecoveryCase, simulation_date: date) -> RecoveryRecomme
         factual_reasons.append("No overdue factual condition currently requires recovery action.")
         explanation = "No action is required from the current factual recovery evaluation."
 
+    communication = evaluation.communication_eligibility
+    communication_required = action in OUTREACH_ACTIONS
+    if communication_required and not communication.permitted:
+        blockers.extend(communication.blocking_reasons)
+        if "COMMUNICATION_OPTED_OUT" in communication.blocking_reasons:
+            operator_next_step = "Do not contact this customer; recorded communication consent is opted out."
+        else:
+            approval_required = True
+            operator_next_step = "Resolve communication consent and channel eligibility through human review before outreach."
+        workflow_effect = "No outreach workflow or external request can execute until communication eligibility is permitted."
+    else:
+        operator_next_step = _operator_next_step(action)
+        workflow_effect = _workflow_effect(action)
+    blockers = list(dict.fromkeys(blockers))
+    financially_actionable = action is not RecommendedAction.NO_ACTION_REQUIRED and evaluation.derived_state not in {"CLOSED", "RESOLVED"}
+    no_active_blocker = not evaluation.eligibility.blocking_reasons and (
+        not communication_required or communication.permitted
+    )
+    if not financially_actionable:
+        external_execution = "UNAVAILABLE"
+    elif communication_required and not communication.permitted:
+        external_execution = "BLOCKED"
+    elif communication_required:
+        external_execution = "OPERATOR_CONTROLLED"
+    else:
+        external_execution = "INTERNAL_WORKFLOW_ONLY"
+    readiness_reasons = list(dict.fromkeys([
+        *evaluation.eligibility.blocking_reasons,
+        *(communication.blocking_reasons if communication_required else []),
+    ]))
+    if not readiness_reasons:
+        readiness_reasons.append("CURRENT_FACTS_AND_COMMUNICATION_ELIGIBILITY_VERIFIED")
+    readiness = ActionReadiness(
+        financially_actionable=financially_actionable,
+        no_active_blocker=no_active_blocker,
+        communication_required=communication_required,
+        communication_permitted=communication.permitted,
+        consent_status=communication.consent_status,
+        channel=communication.channel,
+        channel_available=communication.channel_available,
+        current_decision_valid=True,
+        operator_approval="REQUIRED" if approval_required else "NOT_REQUIRED",
+        external_execution=external_execution,
+        reasons=readiness_reasons,
+    )
     return RecoveryRecommendation(
         case_id=str(case.id), customer_id=str(case.customer_id), customer_name=case.customer.name,
         recommended_action=action, priority=priority, human_approval_required=approval_required,
         factual_reasons=factual_reasons, communication_signals=signals, blockers=blockers,
         relevant_exposure=exposure, relevant_days_overdue=days_overdue,
         recovery_state=evaluation.derived_state, operator_explanation=explanation,
-        operator_next_step=_operator_next_step(action), workflow_effect=_workflow_effect(action),
+        operator_next_step=operator_next_step, workflow_effect=workflow_effect,
+        action_readiness=readiness,
     )
 
 

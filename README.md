@@ -144,6 +144,8 @@ Those decisions remain deterministic and auditable.
 
 For reproducible Buildathon evaluation, the hosted sandbox can use deterministic communication interpretation. Model-backed interpretation exists behind a fail-closed provider boundary, and the active interpretation runtime is exposed in the product.
 
+The reproducible 30-fixture communication-boundary suite is available at `GET /intelligence/evaluation/communications`. It computes intent, amount, promise-date, dispute, low-confidence routing, unsupported-input rejection, and forbidden-state-mutation evidence from the fixture outputs. Add `?live_model=true` only when intentionally evaluating the configured model provider; missing credentials return an explicit not-executed result.
+
 ---
 
 ## Recovery Safety
@@ -158,9 +160,12 @@ ReconMate includes safeguards for:
 - duplicate actions;
 - duplicate provider events;
 - recovery cooldowns;
+- communication consent and channel eligibility;
 - current-fact revalidation.
 
 A recommendation that was valid earlier cannot simply be executed after the underlying facts change.
+
+Outreach readiness is evaluated in sequence: financially actionable, no active financial blocker, communication permitted, channel available, current decision valid, operator approval, then external execution. Seeded demo customers are explicitly opted in for email so this additional safety condition preserves the established demo behavior; new or unknown consent fails closed to human review.
 
 ---
 
@@ -218,6 +223,20 @@ Observed payment ≠ proof ReconMate caused the payment
 
 Provider events are validated before financial state changes, and duplicate events are protected against repeated mutation.
 
+### Deterministic provider-demo proof
+
+After a clean seed/reset, account `RM-0026` (Ironclad Mining Equipment) contains one deterministic case eligible for the provider-demo loop:
+
+1. Open its Case Workspace and review the current deterministic recommendation.
+2. Create or review the internal workflow action if desired; this remains separate from financial state.
+3. Review and explicitly confirm the external payment request.
+4. Verify that request creation records a provider request ID/status while invoice outstanding remains unchanged.
+5. Record the Provider Demo Mode payment event.
+6. Verify the immutable provider-event ID, validation state, idempotency key, persisted payment, outstanding before/after, resolved case state, and reassessed recommendation in the same workspace timeline.
+7. Open History and Reports to verify the updated invoice balance and payment-level recovery evidence.
+
+Provider Demo Mode has no cryptographic signature, so its evidence is labeled `NOT_APPLICABLE_PROVIDER_DEMO`; it still validates schema, request reference, entity scope, payment date, amount, event type, and duplicate identity before mutation. Razorpay Test Mode payment-link creation is available when backend-only test credentials are configured, but this repository does not claim a completed Razorpay webhook loop without a configured webhook secret.
+
 ---
 
 ## Batch Recovery Proof
@@ -257,6 +276,17 @@ from:
 The hosted portfolio is synthetic and reproducible for Buildathon evaluation.
 
 ReconMate does not claim that synthetic payments were caused by the system.
+
+### Recovery Experiment boundary
+
+Reports also include a deterministic paired shadow experiment. Every eligible open overdue case is copied into two isolated, read-only snapshots with exactly matching starting exposure and facts:
+
+- a standard baseline using a fixed 14-day reminder cadence;
+- a ReconMate arm that recomputes the authoritative recommendation daily, defers disputes and active promises, and applies simulated operator approval where required.
+
+Both arms use the same seeded natural-payment, promise, dispute-resolution, and payment-amount draws. Only a completed eligible reminder or payment-date action can add the documented, bounded seven-day simulated response increment. Internal escalation preparation has no payment effect. Account-level action and payment events remain inspectable in Reports.
+
+The result is labelled **simulated experimental lift**, not production causality. “Intervention-associated” means that a simulated payment occurred inside the defined action window; it does not prove the action caused that payment. A real-world causal claim would require a prospective randomized or otherwise identified production evaluation.
 
 ---
 

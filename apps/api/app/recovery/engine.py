@@ -13,12 +13,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.timing import elapsed_ms, log_timing
 from app.models.domain import (
-    AuditEvent, Invoice, InvoiceStatus, PromiseStatus, PromiseToPay,
+    AuditEvent, CommunicationConsentStatus, Customer, Invoice, InvoiceStatus, PromiseStatus, PromiseToPay,
     RecoveryActionStatus, RecoveryActionType, RecoveryCase, RecoveryState,
 )
 
 COOLDOWN_DAYS = 1
 MAX_AUTOMATED_ACTIONS = 3
+ELIGIBLE_OUTREACH_CHANNELS = {"EMAIL", "PHONE", "PORTAL"}
 AUTOMATED_ACTION_TYPES = (RecoveryActionType.OUTREACH, RecoveryActionType.FOLLOW_UP)
 
 
@@ -51,6 +52,15 @@ class RecoveryEligibility:
 
 
 @dataclass(frozen=True)
+class CommunicationEligibility:
+    consent_status: str
+    permitted: bool
+    channel: str | None
+    channel_available: bool
+    blocking_reasons: list[str]
+
+
+@dataclass(frozen=True)
 class CaseEvaluation:
     case_id: uuid.UUID
     customer_id: uuid.UUID
@@ -61,7 +71,35 @@ class CaseEvaluation:
     promises: list[PromiseFacts]
     active_dispute: bool
     eligibility: RecoveryEligibility
+    communication_eligibility: CommunicationEligibility
     next_factual_condition: str
+
+
+def evaluate_communication_eligibility(customer: Customer) -> CommunicationEligibility:
+    """Evaluate outreach permission independently from financial eligibility."""
+    raw_status = getattr(customer, "communication_consent_status", None)
+    raw_channel = getattr(customer, "preferred_outreach_channel", None)
+    # Pre-migration/unflushed legacy objects have neither value. Persisted rows
+    # are migrated explicitly; this compatibility branch keeps pure unit
+    # fixtures from silently changing unrelated recovery behavior.
+    if raw_status is None and raw_channel is None:
+        return CommunicationEligibility("LEGACY_PERMITTED", True, "EMAIL", True, [])
+    status_value = raw_status.value if isinstance(raw_status, CommunicationConsentStatus) else str(raw_status or "UNKNOWN")
+    reasons: list[str] = []
+    if status_value == CommunicationConsentStatus.OPTED_OUT.value:
+        reasons.append("COMMUNICATION_OPTED_OUT")
+    elif status_value != CommunicationConsentStatus.OPTED_IN.value:
+        reasons.append("COMMUNICATION_CONSENT_UNKNOWN")
+    channel = str(raw_channel).upper() if raw_channel else None
+    if channel not in ELIGIBLE_OUTREACH_CHANNELS:
+        reasons.append("COMMUNICATION_CHANNEL_UNAVAILABLE")
+    return CommunicationEligibility(
+        consent_status=status_value,
+        permitted=not reasons,
+        channel=channel,
+        channel_available=channel in ELIGIBLE_OUTREACH_CHANNELS,
+        blocking_reasons=reasons,
+    )
 
 
 def evaluate_invoice(invoice: Invoice, simulation_date: date) -> InvoiceFacts:
@@ -140,6 +178,7 @@ def evaluate_case(case: RecoveryCase, simulation_date: date) -> CaseEvaluation:
     if len(recent_actions) >= MAX_AUTOMATED_ACTIONS:
         reasons.append("MAX_RECENT_AUTOMATED_ACTIONS")
     derived_state = _desired_case_state(case, invoice_facts, promises, disputed)
+    communication_eligibility = evaluate_communication_eligibility(case.customer)
     if invoice_facts and invoice_facts.state == "SCHEDULED":
         attention = "Invoice is scheduled for a future operating date and is outside current recovery scope."
     elif disputed:
@@ -157,7 +196,8 @@ def evaluate_case(case: RecoveryCase, simulation_date: date) -> CaseEvaluation:
     return CaseEvaluation(
         case.id, case.customer_id, case.invoice_id, case.current_state.value, derived_state.value,
         invoice_facts, promises, disputed,
-        RecoveryEligibility(not reasons, reasons, bool(recent_actions), len(recent_actions), case.customer.is_strategic_account), attention,
+        RecoveryEligibility(not reasons, reasons, bool(recent_actions), len(recent_actions), case.customer.is_strategic_account),
+        communication_eligibility, attention,
     )
 
 

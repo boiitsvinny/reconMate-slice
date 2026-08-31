@@ -27,7 +27,7 @@ export function RecoveryEvidenceReport(props: ReportProps) {
   const casesById = new Map(props.queue.map((item) => [item.id, item]));
   for (const item of props.queue) if (!casesByCustomer.has(item.customerId) || item.recommendationPriority === "CRITICAL") casesByCustomer.set(item.customerId, item);
   const intelligenceByCustomer = new Map(props.intelligence.customers.map((item) => [item.entity_id, item]));
-  return <div className="space-y-6"><BatchRecoveryProofPanel {...props} casesById={casesById} /><MaterialChanges {...props} casesByCustomer={casesByCustomer} casesById={casesById} /><DecisionReport {...props} casesByCustomer={casesByCustomer} /><DeliberateRestraint {...props} casesByCustomer={casesByCustomer} /><OperatorActivity {...props} casesById={casesById} /><OutstandingExceptions {...props} intelligenceByCustomer={intelligenceByCustomer} casesById={casesById} /></div>;
+  return <div className="space-y-6"><BatchRecoveryProofPanel {...props} casesById={casesById} /><RecoveryExperimentPanel {...props} casesById={casesById} /><MaterialChanges {...props} casesByCustomer={casesByCustomer} casesById={casesById} /><DecisionReport {...props} casesByCustomer={casesByCustomer} /><DeliberateRestraint {...props} casesByCustomer={casesByCustomer} /><OperatorActivity {...props} casesById={casesById} /><OutstandingExceptions {...props} intelligenceByCustomer={intelligenceByCustomer} casesById={casesById} /></div>;
 }
 
 function BatchRecoveryProofPanel({ batchRecovery: proof, casesById, onSelectCase }: ReportProps & { casesById: Map<string, PriorityCase> }) {
@@ -91,6 +91,56 @@ function BatchRecoveryProofPanel({ batchRecovery: proof, casesById, onSelectCase
       </section>
     </div>
   </Panel>;
+}
+
+function RecoveryExperimentPanel({ batchRecovery: proof, casesById, onSelectCase }: ReportProps & { casesById: Map<string, PriorityCase> }) {
+  const experiment = proof.recovery_experiment;
+  const lift = Number(experiment.difference.recovered_amount);
+  const liftTone = lift > 0 ? "emerald" : lift < 0 ? "rose" : "sky";
+  return <Panel className="overflow-hidden border-violet-300/20">
+    <SectionHeader eyebrow="Recovery experiment · simulated" title="Matched outcomes, without a causal overclaim" detail={`Paired ${experiment.horizon_days}-day shadow evaluation · seed ${experiment.seed} · ${experiment.cohort_construction.pair_count} exact starting-condition pairs`} prominent />
+    <div className="grid gap-px border-y border-white/[.06] bg-white/[.06] sm:grid-cols-2 xl:grid-cols-4">
+      <Boundary label="Observed portfolio recovery" detail={experiment.claim_boundaries.observed_portfolio_recovery} tone="sky" />
+      <Boundary label="Intervention-associated outcomes" detail={experiment.claim_boundaries.intervention_associated_outcomes} tone="violet" />
+      <Boundary label="Simulated experimental lift" detail={experiment.claim_boundaries.simulated_experimental_lift} tone="amber" />
+      <Boundary label="Real-world causal claim" detail={experiment.claim_boundaries.real_world_causal_claim} tone="rose" />
+    </div>
+    <div className="border-b border-white/[.06] bg-black/10 px-5 py-3 text-[11px] leading-5 text-slate-400 sm:px-6">
+      <strong className={experiment.cohort_construction.exact_starting_exposure_match ? "text-emerald-200" : "text-rose-200"}>{experiment.cohort_construction.exact_starting_exposure_match ? "Exact starting exposure match verified." : "Starting exposure mismatch detected."}</strong> Each case is evaluated in two isolated shadows using common random event draws; persisted portfolio facts are untouched.
+    </div>
+    <div className="grid gap-px bg-white/[.06] xl:grid-cols-[1fr_1fr_.72fr]">
+      <ExperimentArm title="Standard baseline" arm={experiment.baseline} />
+      <ExperimentArm title="ReconMate policy" arm={experiment.reconmate} treatment />
+      <section className="bg-[#08111f] p-5 sm:p-6"><p className="text-[10px] font-bold uppercase tracking-[.13em] text-amber-100">Paired simulated difference</p><p className={`mt-3 text-3xl font-semibold tabular-nums ${liftTone === "emerald" ? "text-emerald-200" : liftTone === "rose" ? "text-rose-200" : "text-sky-200"}`}>{lift > 0 ? "+" : ""}{formatMoney(experiment.difference.recovered_amount)}</p><p className="mt-2 text-sm text-slate-300">{Number(experiment.difference.recovery_rate_percentage_points) > 0 ? "+" : ""}{experiment.difference.recovery_rate_percentage_points} percentage points</p><p className="mt-4 text-[11px] leading-5 text-slate-500">Model output only. A zero or negative result is valid; the harness does not force ReconMate to outperform.</p></section>
+    </div>
+    <div className="grid gap-px border-t border-white/[.06] bg-white/[.06] sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
+      <ReportMetric label="Baseline attempts" value={String(experiment.baseline.actions_attempted)} detail={`${experiment.baseline.actions_completed} completed`} tone="sky" />
+      <ReportMetric label="ReconMate attempts" value={String(experiment.reconmate.actions_attempted)} detail={`${experiment.reconmate.actions_completed} completed`} tone="sky" />
+      <ReportMetric label="Intentional deferrals" value={String(experiment.reconmate.accounts_intentionally_deferred)} detail="Distinct ReconMate cases" tone="emerald" />
+      <ReportMetric label="Dispute violations" value={`${experiment.baseline.dispute_contact_violations} / ${experiment.reconmate.dispute_contact_violations}`} detail="Baseline / ReconMate" tone={experiment.reconmate.dispute_contact_violations ? "rose" : "emerald"} />
+      <ReportMetric label="Promise violations" value={`${experiment.baseline.active_promise_contact_violations} / ${experiment.reconmate.active_promise_contact_violations}`} detail="Baseline / ReconMate" tone={experiment.reconmate.active_promise_contact_violations ? "rose" : "emerald"} />
+      <ReportMetric label="Unrecovered exceptions" value={`${experiment.baseline.unrecovered_exceptions} / ${experiment.reconmate.unrecovered_exceptions}`} detail="Baseline / ReconMate" tone="amber" />
+      <ReportMetric label="Median days" value={`${experiment.baseline.median_days_to_full_recovery ?? "—"} / ${experiment.reconmate.median_days_to_full_recovery ?? "—"}`} detail="Baseline / ReconMate" tone="sky" />
+      <ReportMetric label="Associated amount" value={formatMoney(experiment.reconmate.intervention_associated_amount)} detail="Simulated; not causal" tone="amber" />
+    </div>
+    <div className="grid gap-px border-t border-white/[.06] bg-white/[.06] xl:grid-cols-2">
+      <details className="group bg-[#08111f] p-5 sm:p-6"><summary className="cursor-pointer list-none text-sm font-semibold text-white">Methodology and bounded assumptions <span className="ml-2 text-xs font-normal text-slate-500">expand</span></summary><div className="mt-4 space-y-3 text-xs leading-5 text-slate-400"><p><strong className="text-slate-200">Design:</strong> {experiment.methodology.design}</p><p><strong className="text-slate-200">Baseline:</strong> {experiment.methodology.baseline_policy}</p><p><strong className="text-slate-200">ReconMate:</strong> {experiment.methodology.reconmate_policy}</p><p><strong className="text-slate-200">Outcomes:</strong> {experiment.methodology.outcome_model}</p><ul className="space-y-2 border-t border-white/[.06] pt-3">{experiment.assumptions.map((assumption) => <li key={assumption}>• {assumption}</li>)}</ul></div></details>
+      <details className="group bg-[#08111f] p-5 sm:p-6"><summary className="cursor-pointer list-none text-sm font-semibold text-white">Account and payment contribution evidence <span className="ml-2 text-xs font-normal text-slate-500">{experiment.evidence.length} matched pairs · expand</span></summary><div className="operational-scrollbar mt-4 max-h-[32rem] space-y-2 overflow-y-auto pr-2">{experiment.evidence.map((row) => {
+        const recoveryCase = casesById.get(row.pair_id);
+        const associated = row.reconmate.payments.filter((payment) => payment.association === "INTERVENTION_ASSOCIATED");
+        return <article key={row.pair_id} className="rounded-xl border border-white/[.07] bg-white/[.02] p-3"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-white">{row.customer_name} · {row.invoice_number}</p><p className="mt-1 text-[10px] text-slate-500">Start {formatMoney(row.starting_overdue_exposure)} · {row.days_overdue_at_start} days overdue · {label(row.initial_recommendation)}</p></div>{recoveryCase && <button type="button" onClick={() => onSelectCase(recoveryCase)} className="text-[11px] font-semibold text-sky-300">Open case →</button>}</div><div className="mt-3 grid gap-2 sm:grid-cols-2"><p className="rounded-lg border border-white/[.05] px-2.5 py-2 text-[11px] text-slate-300">Baseline recovered <strong className="text-white">{formatMoney(row.baseline.recovered_amount)}</strong><br /><span className="text-slate-500">{row.baseline.payments.length} simulated payment event(s)</span></p><p className="rounded-lg border border-violet-300/10 px-2.5 py-2 text-[11px] text-slate-300">ReconMate recovered <strong className="text-white">{formatMoney(row.reconmate.recovered_amount)}</strong><br /><span className="text-slate-500">{row.reconmate.payments.length} event(s) · {row.reconmate.intentionally_deferred ? "deferred when blocked" : "not deferred"}</span></p></div>{row.exception_categories.length > 0 && <p className="mt-2 text-[10px] text-amber-100">Starting exceptions: {row.exception_categories.map(label).join(" · ")}</p>}{associated.map((payment) => <p key={payment.event_id} className="mt-2 text-[10px] leading-5 text-violet-200">Associated event {payment.event_id}: {formatMoney(payment.amount)} on day {payment.day}, linked to {payment.action_reference}. This is simulated association, not proven causation.</p>)}</article>;
+      })}{!experiment.evidence.length && <p className="py-5 text-xs text-slate-500">No eligible open overdue cases exist for the paired experiment.</p>}</div></details>
+    </div>
+  </Panel>;
+}
+
+function ExperimentArm({ title, arm, treatment = false }: { title: string; arm: BatchRecoveryProof["recovery_experiment"]["baseline"]; treatment?: boolean }) {
+  return <section className="bg-[#08111f] p-5 sm:p-6"><div className="flex items-center justify-between gap-3"><p className={`text-[10px] font-bold uppercase tracking-[.13em] ${treatment ? "text-violet-200" : "text-sky-200"}`}>{title}</p><StatusPill tone={arm.equation_holds ? "emerald" : "rose"}>{arm.equation_holds ? "Balanced" : "Check"}</StatusPill></div><p className="mt-4 text-3xl font-semibold tabular-nums text-white">{formatMoney(arm.recovered_amount)}</p><p className="mt-1 text-sm font-semibold text-emerald-200">{arm.recovery_rate}% recovery</p><div className="mt-4 grid grid-cols-2 gap-3 text-[11px]"><div><p className="text-slate-500">Starting exposure</p><p className="mt-1 font-semibold text-slate-200">{formatMoney(arm.starting_overdue_exposure)}</p></div><div><p className="text-slate-500">Remaining</p><p className="mt-1 font-semibold text-slate-200">{formatMoney(arm.remaining_overdue)}</p></div><div><p className="text-slate-500">Fully recovered</p><p className="mt-1 font-semibold text-slate-200">{arm.fully_recovered_accounts} accounts</p></div><div><p className="text-slate-500">Average days</p><p className="mt-1 font-semibold text-slate-200">{arm.average_days_to_full_recovery ?? "Not meaningful"}</p></div></div></section>;
+}
+
+function Boundary({ label: boundaryLabel, detail, tone }: { label: string; detail: string; tone: "sky" | "violet" | "amber" | "rose" }) {
+  const colors = { sky: "text-sky-200", violet: "text-violet-200", amber: "text-amber-100", rose: "text-rose-200" };
+  return <article className="bg-[#08111f] p-4"><p className={`text-[10px] font-bold uppercase tracking-[.12em] ${colors[tone]}`}>{boundaryLabel}</p><p className="mt-2 text-[11px] leading-5 text-slate-400">{detail}</p></article>;
 }
 
 function ProofAmount({ label: amountLabel, value, detail, tone = "sky", money = true, meta }: { label: string; value: string; detail: string; tone?: "sky" | "emerald" | "rose"; money?: boolean; meta?: { unit: string; scope: string; window: string } }) {

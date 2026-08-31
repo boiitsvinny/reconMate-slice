@@ -168,3 +168,11 @@ def test_fixed_communication_extraction_evaluation() -> None:
     assert result["deferred"] == 12 and result["incorrect"] == 0
     assert result["provider_failures"] == 0 and result["schema_validation_failures"] == 0
     assert result["direct_financial_mutations"] == 0
+    assert result["intent_classification"] == {"correct": 30, "total": 30, "accuracy": 1.0}
+    assert result["amount_extraction"]["accuracy"] == 1.0
+    assert result["promise_date_extraction"]["accuracy"] == 1.0
+    assert result["dispute_recognition"]["accuracy"] == 1.0
+    assert result["low_confidence_human_review"]["accuracy"] == 1.0
+    assert result["unsupported_input_rejection"]["accuracy"] == 1.0
+    assert len(result["evidence"]) == 30
+    assert all(item["authoritative_state_mutation"] is False for item in result["evidence"])

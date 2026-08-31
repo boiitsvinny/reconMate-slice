@@ -2,11 +2,12 @@
 from __future__ import annotations
 from time import perf_counter
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 from app.core.timing import elapsed_ms, log_timing
+from app.core.config import get_settings
 from app.db.session import get_db
 from app.intelligence.operational_schemas import IntelligenceResult, PortfolioIntelligence
 from app.intelligence.operational_service import (
@@ -15,6 +16,7 @@ from app.intelligence.operational_service import (
     evaluate_portfolio_intelligence,
 )
 from app.intelligence.provider import ProviderError
+from app.intelligence.evaluation import run_communication_extraction_evaluation, run_live_communication_extraction_evaluation
 from app.intelligence.candidates import candidate_facts
 from app.intelligence.fact_review import review_candidate_fact
 from app.intelligence.schemas import AnalysisResponse, CandidateDecisionRequest, CandidateDecisionResponse, CommunicationAnalysisResult, PreviewRequest
@@ -31,6 +33,19 @@ from app.models.domain import (
 )
 
 router = APIRouter(tags=["intelligence"])
+
+
+@router.get("/intelligence/evaluation/communications", summary="Run the reproducible communication-boundary evaluation")
+def communication_evaluation(live_model: bool = Query(False, description="Explicitly run the configured model-backed provider instead of the deterministic test provider.")) -> dict:
+    if not live_model:
+        return run_communication_extraction_evaluation()
+    settings = get_settings()
+    return run_live_communication_extraction_evaluation(
+        api_key=settings.gemini_api_key.get_secret_value() if settings.gemini_api_key else None,
+        model=settings.ai_model,
+        timeout_seconds=settings.ai_timeout_seconds,
+        confidence_threshold=settings.ai_confidence_threshold,
+    )
 
 
 def _simulation_date(db: Session):

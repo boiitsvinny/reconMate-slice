@@ -21,6 +21,7 @@ from app.models.domain import (
 )
 from app.recommendations.service import recommend_case
 from app.recovery.engine import evaluate_case
+from app.reporting.recovery_experiment import build_recovery_experiment
 
 
 EXCLUDED_INVOICE_STATUSES = {InvoiceStatus.CANCELLED, InvoiceStatus.WRITTEN_OFF}
@@ -272,6 +273,8 @@ def build_batch_recovery_proof(
         current["payment_count"] += 1
         current["amount"] += Decimal(row["amount"])
 
+    experiment = build_recovery_experiment(simulation_date=simulation_date, cases=scoped_cases)
+
     return {
         "scope": {
             "as_of_date": simulation_date,
@@ -357,4 +360,5 @@ def build_batch_recovery_proof(
             {"source": source, "payment_count": values["payment_count"], "amount": _money(values["amount"])}
             for source, values in sorted(provenance_counts.items())
         ],
+        "recovery_experiment": experiment,
     }

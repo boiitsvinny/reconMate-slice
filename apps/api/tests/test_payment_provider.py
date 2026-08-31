@@ -7,10 +7,12 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.api.routes.payments import apply_demo_payment_event
-from app.models.domain import AuditEvent, Customer, ExternalPaymentRequest, Invoice, InvoiceStatus, Payment, ProviderEvent, RecoveryCase, RecoveryPriority, RecoveryState
+from app.models.domain import AuditEvent, Customer, ExternalPaymentRequest, Invoice, InvoiceStatus, Payment, PromiseStatus, PromiseToPay, ProviderEvent, RecoveryActionStatus, RecoveryCase, RecoveryPriority, RecoveryState
 from app.payments.provider import CreatedPaymentRequest, PaymentProviderError
 from app.payments.schemas import CreatePaymentRequestInput, DemoPaymentEventInput
 from app.payments.service import create_external_payment_request, ingest_demo_payment_event
+from app.recommendations.schemas import RecommendedAction
+from app.workflow.service import approve_action, create_action, execute_action
 
 OPERATING_DATE = date(2026, 8, 26)
 
@@ -44,14 +46,21 @@ class FailedProvider(DemoProvider):
     def create_payment_request(self, **_kwargs): raise PaymentProviderError("Provider unavailable.")
 
 
+class TimedOutProvider(DemoProvider):
+    def create_payment_request(self, **_kwargs): raise PaymentProviderError("Provider request timed out.")
+
+
 def case(*, disputed=False, outstanding="500", state: RecoveryState | None = None):
     customer = Customer(id=uuid4(), name="Provider Test", account_reference=f"PAY-{uuid4()}")
     invoice = Invoice(id=uuid4(), customer=customer, invoice_number="PAY-1", issue_date=OPERATING_DATE - timedelta(days=45), due_date=OPERATING_DATE - timedelta(days=15), original_amount=Decimal("500"), outstanding_amount=Decimal(outstanding), status=InvoiceStatus.DISPUTED if disputed else InvoiceStatus.OVERDUE)
     return RecoveryCase(id=uuid4(), customer=customer, invoice=invoice, current_state=state or (RecoveryState.AWAITING_CUSTOMER if disputed else RecoveryState.IN_PROGRESS), priority=RecoveryPriority.NORMAL)
 
 
-def create_payload(amount="500"):
-    return CreatePaymentRequestInput(operator_id="judge-operator", requested_amount=Decimal(amount), operator_confirmed=True)
+def create_payload(amount="500", action=RecommendedAction.SEND_PAYMENT_REMINDER):
+    return CreatePaymentRequestInput(
+        operator_id="judge-operator", requested_amount=Decimal(amount), operator_confirmed=True,
+        expected_recommended_action=action, expected_outstanding_amount=Decimal(amount),
+    )
 
 
 def external_request(item, amount="500"):
@@ -69,7 +78,7 @@ def test_external_action_requires_explicit_operator_confirmation() -> None:
 
 
 def test_blocked_recommendation_cannot_create_payment_request() -> None:
-    with pytest.raises(HTTPException, match="does not support"):
+    with pytest.raises(HTTPException, match="review is stale"):
         create_external_payment_request(FakeSession(), case(disputed=True, state=RecoveryState.IN_PROGRESS), OPERATING_DATE, create_payload(), DemoProvider())
 
 
@@ -109,6 +118,29 @@ def test_provider_failure_is_persisted_safely() -> None:
     request = next(item for item in db.added if isinstance(item, ExternalPaymentRequest))
     assert request.status == "FAILED" and request.failure_reason == "Provider unavailable."
     assert db.commits == 1
+
+
+def test_provider_timeout_is_persisted_without_financial_mutation() -> None:
+    db = FakeSession()
+    item = case()
+    before = item.invoice.outstanding_amount
+    with pytest.raises(HTTPException, match="timed out"):
+        create_external_payment_request(db, item, OPERATING_DATE, create_payload(), TimedOutProvider())
+    request = next(value for value in db.added if isinstance(value, ExternalPaymentRequest))
+    assert request.status == "FAILED"
+    assert item.invoice.outstanding_amount == before and not item.invoice.payments
+
+
+def test_stale_operator_review_is_rejected_when_facts_change() -> None:
+    item = case()
+    reviewed = create_payload()
+    item.invoice.promises_to_pay = [PromiseToPay(
+        id=uuid4(), customer=item.customer, invoice=item.invoice, promised_amount=Decimal("300"),
+        promised_date=OPERATING_DATE + timedelta(days=3), status=PromiseStatus.ACTIVE,
+    )]
+    with pytest.raises(HTTPException, match="review is stale"):
+        create_external_payment_request(FakeSession(), item, OPERATING_DATE, reviewed, DemoProvider())
+    assert item.invoice.outstanding_amount == Decimal("500") and not item.invoice.payments
 
 
 def test_malformed_demo_event_fails_schema_validation() -> None:
@@ -158,7 +190,8 @@ def test_successful_event_uses_payment_model_updates_financial_state_and_evidenc
     request = external_request(item)
     db = FakeSession()
     monkeypatch.setattr("app.payments.service.synchronize_recovery_states", lambda _db, _date, commit=False: {"cases_evaluated": 1, "cases_changed": 1})
-    result = ingest_demo_payment_event(db, request, item, OPERATING_DATE, event())
+    applied_event = event().model_copy(update={"provider_reference": request.provider_reference})
+    result = ingest_demo_payment_event(db, request, item, OPERATING_DATE, applied_event)
     payment = next(value for value in db.added if isinstance(value, Payment))
     provider_event = next(value for value in db.added if isinstance(value, ProviderEvent))
     assert payment.amount == Decimal("500") and item.invoice.outstanding_amount == 0
@@ -177,7 +210,35 @@ def test_successful_event_uses_payment_model_updates_financial_state_and_evidenc
     assert result.evidence["provider_reference"] == request.provider_reference
     assert result.evidence["provider_payment_reference"] == "demo_pay-1"
     assert result.evidence["financial_mutation"] == "PAYMENT_PERSISTED"
+    assert result.evidence["verification_state"] == "DEMO_EVENT_VALIDATED"
+    assert result.evidence["signature_verification"] == "NOT_APPLICABLE_PROVIDER_DEMO"
+    assert result.evidence["idempotency_key"] == "PROVIDER_DEMO:evt-1"
+    assert result.evidence["immutable_event_record"] is True
+    assert result.evidence["received_at"] == provider_event.received_at.isoformat()
     assert provider_event.provider == "PROVIDER_DEMO" and result.duplicate is False
+
+
+def test_complete_provider_demo_loop_preserves_request_then_applies_verified_event(monkeypatch) -> None:
+    item = case()
+    db = FakeSession()
+    monkeypatch.setattr("app.payments.service.synchronize_recovery_states", lambda _db, _date, commit=False: {"cases_evaluated": 1, "cases_changed": 1})
+    starting = item.invoice.outstanding_amount
+
+    request = create_external_payment_request(db, item, OPERATING_DATE, create_payload(), DemoProvider())
+    assert request.status == "ACTIVE"
+    assert item.invoice.outstanding_amount == starting and not item.invoice.payments
+
+    applied_event = event().model_copy(update={"provider_reference": request.provider_reference})
+    result = ingest_demo_payment_event(db, request, item, OPERATING_DATE, applied_event)
+    assert result.duplicate is False
+    assert request.status == "PAID" and request.paid_amount == starting
+    assert item.invoice.status is InvoiceStatus.PAID and item.invoice.outstanding_amount == 0
+    assert len(item.invoice.payments) == 1
+    assert result.evidence["recommendation_before"] == "SEND_PAYMENT_REMINDER"
+    assert result.evidence["recommendation_after"] == "NO_ACTION_REQUIRED"
+    assert {audit.event_type for audit in db.added if isinstance(audit, AuditEvent)} >= {
+        "EXTERNAL_PAYMENT_REQUEST_CREATED", "PROVIDER_PAYMENT_EVENT_APPLIED",
+    }
 
 
 def test_duplicate_event_and_payment_reference_are_idempotent() -> None:
@@ -202,3 +263,23 @@ def test_partial_event_preserves_remaining_request_balance(monkeypatch) -> None:
     ingest_demo_payment_event(FakeSession(), request, item, OPERATING_DATE, event("200", event_type="payment_request.partially_paid"))
     assert item.invoice.outstanding_amount == Decimal("300")
     assert request.paid_amount == Decimal("200") and request.status == "PARTIALLY_PAID"
+
+
+def test_payment_arriving_before_pending_escalation_blocks_later_execution(monkeypatch) -> None:
+    item = case()
+    item.invoice.promises_to_pay = [PromiseToPay(
+        id=uuid4(), customer=item.customer, invoice=item.invoice, promised_amount=Decimal("500"),
+        promised_date=OPERATING_DATE - timedelta(days=2), status=PromiseStatus.BROKEN,
+    )]
+    db = FakeSession()
+    action = create_action(db, item, OPERATING_DATE, RecommendedAction.PREPARE_ESCALATION)
+    assert action.status is RecoveryActionStatus.PENDING_APPROVAL
+    approve_action(db, action, "operator", "Reviewed before payment arrival", None)
+    request = external_request(item)
+    monkeypatch.setattr("app.payments.service.synchronize_recovery_states", lambda _db, _date, commit=False: {"cases_evaluated": 1, "cases_changed": 1})
+
+    ingest_demo_payment_event(db, request, item, OPERATING_DATE, event())
+    with pytest.raises(HTTPException, match="no executable action"):
+        execute_action(db, action, item, OPERATING_DATE, "operator", None)
+    assert action.status is RecoveryActionStatus.APPROVED
+    assert item.invoice.outstanding_amount == 0

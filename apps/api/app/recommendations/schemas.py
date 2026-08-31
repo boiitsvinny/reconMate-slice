@@ -40,6 +40,22 @@ class CommunicationSignal(BaseModel):
     requires_human_review: bool = False
 
 
+class ActionReadiness(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    financially_actionable: bool
+    no_active_blocker: bool
+    communication_required: bool
+    communication_permitted: bool
+    consent_status: str
+    channel: str | None
+    channel_available: bool
+    current_decision_valid: bool
+    operator_approval: str
+    external_execution: str
+    reasons: list[str]
+
+
 class RecoveryRecommendation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -58,3 +74,4 @@ class RecoveryRecommendation(BaseModel):
     operator_explanation: str
     operator_next_step: str
     workflow_effect: str
+    action_readiness: ActionReadiness | None = None
